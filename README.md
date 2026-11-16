@@ -14,9 +14,16 @@ factory run   [same flags]   # the same loop in the foreground; start = run, det
 factory status               # running or not, what each worker is doing, counts
 factory stop                 # stops the loop and its agents; unfinished items go back in the queue
 factory report [--all]       # the last run (or every run): outcome, agent, item, PR/issue link or log
+factory serve [--port 7040] [--host 127.0.0.1]   # the same, as a web page
 ```
 
 Also `--timeout MIN` (default 60) per item, and `--claude-model` / `--pi-model`, passed through as `--model`. There is no config file.
+
+## Web page
+
+`factory serve` shows what `status` and `report` print on one page that refreshes itself: each worker, the whole queue with titles, and every result grouped by run, with its PR or issue link, its log and its prompt. It only reads the state folder; starting and stopping stay on the command line. It runs in the foreground and doesn't need a run going, so leave it up with `nohup factory serve &`.
+
+It listens on 127.0.0.1. `--host 0.0.0.0` makes it reachable from other machines, for example from your phone over Tailscale or through a port your container publishes. There's no login, and agent logs can hold anything the agent printed, so only expose it on a network you trust.
 
 ## How a night goes
 
@@ -44,7 +51,7 @@ In `$DATA/apps/factory/` when `DATA` is set, otherwise `~/.local/share/factory/`
 - `runs/<run>/<item>/`: `prompt.md` and `agent.log`
 - `worktrees/<run>/<item>/`: kept worktrees
 - `factory.pid`, `factory.log`: the running loop and its output
-- `status.json`: rewritten on every change, read by `factory status`
+- `status.json`: rewritten on every change, read by `factory status` and `factory serve`; holds the workers, counts and the queue
 
 An item that was running when the loop stopped has no ledger line, so the next run takes it again.
 

@@ -1,11 +1,14 @@
 import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { once } from "node:events";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, test } from "vite-plus/test";
 import { agent, classify, resetTime, type Agent } from "../src/agents.ts";
 import { run, type Options } from "../src/loop.ts";
 import { order, readLedger, replay, type Entry, type Item } from "../src/state.ts";
+import { serve } from "../src/web.ts";
 
 const scratch = mkdtempSync(join(tmpdir(), "factory-test-"));
 const NOW = Date.parse("2026-11-16T04:00:00Z");
@@ -97,6 +100,7 @@ describe("queue", () => {
     id,
     play: id,
     level,
+    title: "",
   });
 
   test("cheapest attention first, taking turns between repos, only the wanted levels", () => {
@@ -164,7 +168,7 @@ describe("the loop", () => {
       id,
       play: "fake",
       level: "skim",
-      title: "",
+      title: `fix ${id}`,
     }));
     const workwork = script(
       "workwork",
@@ -293,5 +297,26 @@ describe("the loop", () => {
     const base = setup(["fix/a.ts", "fix/b.ts"]);
     await run({ ...options(base, [OK]), maxItems: 1 });
     expect(readLedger(base.state)).toHaveLength(1);
+    const status = JSON.parse(readFileSync(join(base.state, "status.json"), "utf8"));
+    expect(status.queue.map((item: Item) => item.title)).toEqual(["fix fix/b.ts"]);
+  });
+
+  test("serve shows the results and their logs, and nothing outside runs/", async () => {
+    const base = setup(["fix/a.ts"]);
+    await run(options(base, [OK]));
+    const server = serve(base.state, 0, "127.0.0.1");
+    await once(server, "listening");
+    const { port } = server.address() as AddressInfo;
+    const get = (path: string) => fetch(`http://127.0.0.1:${port}${path}`);
+    try {
+      const { results } = (await (await get("/state.json")).json()) as { results: Entry[] };
+      expect(results.map((entry) => [entry.title, entry.outcome])).toEqual([
+        ["fix fix/a.ts", "done"],
+      ]);
+      expect(await (await get(`/${results[0].log}`)).text()).toContain("pull/7");
+      expect((await get("/runs/%2E%2E/ledger.jsonl")).status).toBe(404);
+    } finally {
+      server.close();
+    }
   });
 });

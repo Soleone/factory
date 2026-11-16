@@ -5,7 +5,8 @@ import { basename, join } from "node:path";
 import { parseArgs } from "node:util";
 import { agent } from "./agents.ts";
 import { run, type Worker } from "./loop.ts";
-import { readLedger, STATE, type Entry } from "./state.ts";
+import { alive, PID, readLedger, runningPid, STATE, type Entry } from "./state.ts";
+import { serve } from "./web.ts";
 
 const USAGE = `factory: works through workwork candidates with headless coding agents until the limits run out
 
@@ -14,6 +15,8 @@ const USAGE = `factory: works through workwork candidates with headless coding a
   factory status            running or not, what each worker is doing, counts
   factory stop              stops the loop and its agents; unfinished items go back in the queue
   factory report [--all]    the last run (or every run): outcome, agent, item, PR/issue link or log
+  factory serve [--port 7040] [--host 127.0.0.1]
+                            a web page with the workers, the queue and every result, with logs
 
 Options:
   --until HH:MM             start nothing new after this local time
@@ -26,7 +29,6 @@ Options:
 
 State: ${STATE}`;
 
-const PID = join(STATE, "factory.pid");
 const LOG = join(STATE, "factory.log");
 
 async function main(): Promise<void> {
@@ -42,6 +44,8 @@ async function main(): Promise<void> {
       "claude-model": { type: "string" },
       "pi-model": { type: "string" },
       all: { type: "boolean" },
+      port: { type: "string", default: "7040" },
+      host: { type: "string", default: "127.0.0.1" },
       help: { type: "boolean", short: "h" },
       version: { type: "boolean", short: "v" },
     },
@@ -53,6 +57,7 @@ async function main(): Promise<void> {
   if (command === "status") return status();
   if (command === "stop") return stop();
   if (command === "report") return console.log(report(values.all ?? false));
+  if (command === "serve") return void serve(STATE, count(values.port, "--port"), values.host);
   if (command !== "start" && command !== "run")
     throw new Error(`unknown command ${command}\n\n${USAGE}`);
 
@@ -122,7 +127,7 @@ function status(): void {
   }
   const { done, failed, limited, timeout } = state.counts;
   console.log(
-    `done ${done}, failed ${failed}, timeout ${timeout}, limited ${limited}, queued ${state.queued}`,
+    `done ${done}, failed ${failed}, timeout ${timeout}, limited ${limited}, queued ${state.queue.length}`,
   );
 }
 
@@ -160,22 +165,6 @@ function detail(entry: Entry): string {
   if (entry.error) parts.push(entry.error.split("\n")[0]);
   if (entry.worktree) parts.push(`unpushed work kept in ${entry.worktree}`);
   return parts.join("\n          ");
-}
-
-function runningPid(): number | undefined {
-  if (!existsSync(PID)) return undefined;
-  const pid = Number(readFileSync(PID, "utf8"));
-  return alive(pid) ? pid : undefined;
-}
-
-function alive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
-    throw error;
-  }
 }
 
 /** The next time the local clock shows HH:MM. */

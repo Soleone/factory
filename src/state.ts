@@ -7,8 +7,33 @@ export const STATE = process.env.DATA
   ? join(process.env.DATA, "apps", "factory")
   : join(homedir(), ".local", "share", "factory");
 
+export const PID = join(STATE, "factory.pid");
+
+export function runningPid(): number | undefined {
+  if (!existsSync(PID)) return undefined;
+  const pid = Number(readFileSync(PID, "utf8"));
+  return alive(pid) ? pid : undefined;
+}
+
+export function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
+    throw error;
+  }
+}
+
 /** A workwork candidate, as `workwork --json` prints it. */
-export type Item = { repo: string; label: string; id: string; play: string; level: string };
+export type Item = {
+  repo: string;
+  label: string;
+  id: string;
+  play: string;
+  level: string;
+  title: string;
+};
 
 /** One finished attempt at an item. `worktree` is set when it was kept because it holds unpushed work. */
 export type Entry = {
@@ -17,6 +42,8 @@ export type Entry = {
   repo: string;
   play: string;
   level: string;
+  /** Missing in lines written before 0.2. */
+  title?: string;
   agent: string;
   start: string;
   end: string;

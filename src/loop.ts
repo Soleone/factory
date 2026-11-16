@@ -61,7 +61,7 @@ export async function run(options: Options): Promise<string> {
 
   function writeStatus(): void {
     const until = options.until && new Date(options.until).toISOString();
-    const status = { pid: process.pid, run: id, until, workers, counts, queued: queue.length };
+    const status = { pid: process.pid, run: id, until, workers, counts, queue };
     writeFileSync(join(options.state, "status.json"), `${JSON.stringify(status, null, 2)}\n`);
   }
 
@@ -187,6 +187,7 @@ export async function run(options: Options): Promise<string> {
       repo: item.repo,
       play: item.play,
       level: item.level,
+      title: item.title,
       agent: agent.name,
       start,
       end: new Date().toISOString(),
