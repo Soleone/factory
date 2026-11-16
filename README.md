@@ -9,7 +9,7 @@ npm install -g @soleone/factory
 Needs node 22+, git, [workwork](https://github.com/Soleone/workwork) 0.2+ (for `--json`), and whichever of `claude` and `pi` you use, logged in.
 
 ```sh
-factory start [--until 08:00] [--windows 2] [--agents claude,pi] [--levels auto,skim,decide] [--max-items N]
+factory start [--until 08:00] [--windows 1] [--agents claude,pi] [--levels auto,skim,decide] [--max-items N]
 factory run   [same flags]   # the same loop in the foreground; start = run, detached
 factory status               # running or not, what each worker is doing, counts
 factory stop                 # stops the loop and its agents; unfinished items go back in the queue
@@ -28,7 +28,9 @@ A failed or timed-out item gets one more try, by the other agent. After two fail
 
 ## Limits and windows
 
-When an agent hits its usage limit, the item goes back to the front of the queue and that worker sleeps until the reset time in the message, plus 2 minutes (30 minutes when the message doesn't say). After its `--windows`th limit (default 2: the current 5-hour window and the next one) the worker stops. The run ends when every worker has stopped, `--until` has passed (nothing new starts after it), or `--max-items` have started.
+By default, each worker stops at its first usage-limit hit: only the current allowance is used, with no waiting for a reset. The unfinished item goes back to the front of the queue, where another available worker can take it.
+
+Set `--windows N` for an individual run to use more windows. For example, `factory start --windows 2` uses the current allowance and resumes after one reset, stopping at the second limit hit. Between limits, the worker sleeps until the reset time in the message, plus 2 minutes (30 minutes when the message doesn't say). The run ends when every worker has stopped, `--until` has passed (nothing new starts after it), or `--max-items` have started.
 
 The limit messages are the ones the tools really print: Claude Code's `You've hit your session limit · resets 3pm (Europe/Berlin)` (and weekly, Opus, Sonnet, spend limits, with or without a date) and the older `Claude AI usage limit reached|<epoch>`; pi's `You have hit your ChatGPT usage limit (plus plan). Try again in ~42 min.` and the raw `usage_limit_reached` / `resets_in_seconds`. Three failures in a row that each took under a minute count as a limit too, so a broken login or a message nobody has seen yet can't burn through the queue.
 

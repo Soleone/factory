@@ -231,6 +231,22 @@ describe("the loop", () => {
     ]);
   });
 
+  test("one window stops at the first limit without sleeping and leaves the item for a later run", async () => {
+    const base = setup(["fix/a.ts"]);
+    const wakes: number[] = [];
+    await run({
+      ...options(base, [fake("claude", "echo 'Claude AI usage limit reached|1794801600'; exit 1")]),
+      windows: 1,
+      sleep: async (ms) => void wakes.push(ms),
+    });
+    expect(readLedger(base.state).map((entry) => entry.outcome)).toEqual(["limited"]);
+    expect(wakes).toHaveLength(0);
+    const status = JSON.parse(readFileSync(join(base.state, "status.json"), "utf8"));
+    expect(status.workers[0]).toMatchObject({ state: "stopped", reason: "limit 1 of 1" });
+    await run(options(base, [OK]));
+    expect(readLedger(base.state).map((entry) => entry.outcome)).toEqual(["limited", "done"]);
+  });
+
   test("sleeps until the parsed reset, puts the item back, and stops after its windows", async () => {
     const base = setup(["fix/a.ts", "fix/b.ts"]);
     const reset = Math.floor(Date.now() / 1000) + 3600;

@@ -17,7 +17,7 @@ const USAGE = `factory: works through workwork candidates with headless coding a
 
 Options:
   --until HH:MM             start nothing new after this local time
-  --windows N               usage-limit windows per agent before it stops (default 2)
+  --windows N               usage-limit windows per agent before it stops (default 1)
   --agents claude,pi        one worker per agent (default claude,pi)
   --levels auto,skim,decide which attention levels to take (default all)
   --max-items N             stop after starting N items
@@ -34,7 +34,7 @@ async function main(): Promise<void> {
     allowPositionals: true,
     options: {
       until: { type: "string" },
-      windows: { type: "string", default: "2" },
+      windows: { type: "string", default: "1" },
       agents: { type: "string", default: "claude,pi" },
       levels: { type: "string", default: "auto,skim,decide" },
       "max-items": { type: "string" },
