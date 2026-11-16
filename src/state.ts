@@ -62,13 +62,13 @@ export function replay(ledger: Entry[]): {
 const LEVELS = ["auto", "skim", "decide"];
 
 /** Cheapest attention first, and within a level one item per repo in turn so no repo takes the night. */
-export function order(items: Item[], levels: string[]): Item[] {
+export function order<T extends Item>(items: T[], levels: string[]): T[] {
   return LEVELS.filter((level) => levels.includes(level)).flatMap((level) => {
-    const byRepo = new Map<string, Item[]>();
+    const byRepo = new Map<string, T[]>();
     for (const item of items.filter((item) => item.level === level))
       byRepo.set(item.repo, [...(byRepo.get(item.repo) ?? []), item]);
     const queues = [...byRepo.values()];
-    const turns: Item[] = [];
+    const turns: T[] = [];
     for (let round = 0; queues.some((queue) => queue.length > round); round++)
       for (const queue of queues) if (queue[round]) turns.push(queue[round]);
     return turns;

@@ -23,6 +23,8 @@ export type Options = {
   state: string;
   /** The workwork command; tests swap in a script. */
   workwork: string;
+  /** The items `factory approve` picked, in that order: the only ones this run takes, instead of asking workwork. */
+  approved?: Item[];
   /** Tests record the waits instead of sleeping through them. */
   sleep?: (ms: number) => Promise<void>;
 };
@@ -61,7 +63,16 @@ export async function run(options: Options): Promise<string> {
 
   function writeStatus(): void {
     const until = options.until && new Date(options.until).toISOString();
-    const status = { pid: process.pid, run: id, until, workers, counts, queued: queue.length };
+    const scope = options.approved ? `the ${options.approved.length} approved items` : "every repo";
+    const status = {
+      pid: process.pid,
+      run: id,
+      scope,
+      until,
+      workers,
+      counts,
+      queued: queue.length,
+    };
     writeFileSync(join(options.state, "status.json"), `${JSON.stringify(status, null, 2)}\n`);
   }
 
@@ -103,9 +114,9 @@ export async function run(options: Options): Promise<string> {
   }
 
   async function refill(): Promise<void> {
-    const candidates: Item[] = JSON.parse(
-      await output(options.workwork, ["--all", "--json"], process.cwd()),
-    );
+    const candidates: Item[] =
+      options.approved ??
+      JSON.parse(await output(options.workwork, ["--all", "--json"], process.cwd()));
     const { finished, failedBy } = replay(readLedger(options.state));
     const agents = workers
       .filter((worker) => worker.state !== "stopped")
@@ -117,7 +128,7 @@ export async function run(options: Options): Promise<string> {
         !known.has(key(item)) &&
         agents.some((agent) => !failedBy.get(key(item))?.includes(agent)),
     );
-    queue.push(...order(fresh, options.levels));
+    queue.push(...(options.approved ? fresh : order(fresh, options.levels)));
     writeStatus();
   }
 
@@ -306,7 +317,7 @@ function killGroup(child: ChildProcess): void {
     }, delay).unref();
 }
 
-async function output(command: string, args: string[], cwd: string): Promise<string> {
+export async function output(command: string, args: string[], cwd: string): Promise<string> {
   const { stdout, stderr } = await promisify(execFile)(command, args, {
     cwd,
     maxBuffer: 64 * 1024 * 1024,

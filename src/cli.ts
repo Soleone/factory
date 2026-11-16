@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { agent } from "./agents.ts";
 import { run, type Worker } from "./loop.ts";
+import { approve, KINDS, preview, readQueue, stage } from "./stage.ts";
 import { readLedger, STATE, type Entry } from "./state.ts";
 
 const USAGE = `factory: works through workwork candidates with headless coding agents until the limits run out
@@ -15,7 +16,14 @@ const USAGE = `factory: works through workwork candidates with headless coding a
   factory stop              stops the loop and its agents; unfinished items go back in the queue
   factory report [--all]    the last run (or every run): outcome, agent, item, PR/issue link or log
 
+  factory stage --repo NAME [--repo NAME...] [--kinds finding,scan] [--limit N] [--levels ...] [--no-pull]
+                            fast-forward those checkouts, then save up to N of their candidates
+  factory preview           the staged candidates, numbered, and what's approved
+  factory approve 1,3|all   exactly those staged items become the queue
+  factory start --queue     runs the approved items and nothing else (run --queue: in the foreground)
+
 Options:
+  --queue                   take the approved items instead of every repo's candidates
   --until HH:MM             start nothing new after this local time
   --windows N               usage-limit windows per agent before it stops (default 1)
   --agents claude,pi        one worker per agent (default claude,pi)
@@ -23,6 +31,13 @@ Options:
   --max-items N             stop after starting N items
   --timeout MIN             minutes before an agent is killed (default 60)
   --claude-model, --pi-model  passed to the agent as --model
+
+Stage options:
+  --repo NAME               a repo under $SRC (or a path); repeat for more
+  --kinds finding,scan      finding: a tool reported it; scan: an agent searches the repo;
+                            rotation: one file in turn (default finding,scan)
+  --limit N                 how many to stage (default 10)
+  --no-pull                 use the checkouts as they are instead of fast-forwarding them
 
 State: ${STATE}`;
 
@@ -42,6 +57,11 @@ async function main(): Promise<void> {
       "claude-model": { type: "string" },
       "pi-model": { type: "string" },
       all: { type: "boolean" },
+      queue: { type: "boolean" },
+      repo: { type: "string", multiple: true },
+      kinds: { type: "string", default: "finding,scan" },
+      limit: { type: "string", default: "10" },
+      "no-pull": { type: "boolean" },
       help: { type: "boolean", short: "h" },
       version: { type: "boolean", short: "v" },
     },
@@ -53,6 +73,32 @@ async function main(): Promise<void> {
   if (command === "status") return status();
   if (command === "stop") return stop();
   if (command === "report") return console.log(report(values.all ?? false));
+  if (command === "preview") return console.log(preview(STATE));
+  if (command === "approve") {
+    const { items } = approve(STATE, positionals.slice(1));
+    console.log(`Approved ${items.length}: ${items.map((item) => item.id).join(", ")}`);
+    return console.log(`Run them: factory start --queue`);
+  }
+  const levels = values.levels.split(",");
+  for (const level of levels)
+    if (!["auto", "skim", "decide"].includes(level)) throw new Error(`unknown level ${level}`);
+  if (command === "stage") {
+    const kinds = values.kinds.split(",");
+    for (const kind of kinds)
+      if (!(KINDS as readonly string[]).includes(kind)) throw new Error(`unknown kind ${kind}`);
+    if (!values.repo?.length)
+      throw new Error("stage which repo? factory stage --repo <name> (repeat for more)");
+    await stage({
+      repos: values.repo.map(repoPath),
+      levels,
+      kinds,
+      limit: count(values.limit, "--limit"),
+      pull: !values["no-pull"],
+      state: STATE,
+      workwork: "workwork",
+    });
+    return console.log(preview(STATE));
+  }
   if (command !== "start" && command !== "run")
     throw new Error(`unknown command ${command}\n\n${USAGE}`);
 
@@ -60,10 +106,11 @@ async function main(): Promise<void> {
     claude: values["claude-model"],
     pi: values["pi-model"],
   };
-  const levels = values.levels.split(",");
-  for (const level of levels)
-    if (!["auto", "skim", "decide"].includes(level)) throw new Error(`unknown level ${level}`);
+  // Read now, so approving something else later can't change what this run takes.
+  const approved = values.queue ? readQueue(STATE).items : undefined;
+  if (approved?.length === 0) throw new Error("the approved queue is empty: factory approve");
   const options = {
+    approved,
     agents: values.agents.split(",").map((name) => agent(name, models[name])),
     levels,
     windows: count(values.windows, "--windows"),
@@ -112,7 +159,8 @@ function status(): void {
     return console.log(pid ? `running (pid ${pid}), starting up` : "not running, never ran");
   const state = JSON.parse(readFileSync(path, "utf8"));
   const until = state.until ? `, until ${clock(state.until)}` : "";
-  console.log(`${pid ? `running (pid ${pid})` : "not running"}, run ${state.run}${until}`);
+  const scope = state.scope ? `, ${state.scope}` : "";
+  console.log(`${pid ? `running (pid ${pid})` : "not running"}, run ${state.run}${scope}${until}`);
   for (const worker of state.workers as Worker[]) {
     const what =
       worker.item ?? (worker.until ? `until ${clock(worker.until)}` : (worker.reason ?? ""));
@@ -186,6 +234,13 @@ function nextTime(text: string): number {
   time.setHours(Number(match[1]), Number(match[2]), 0, 0);
   if (time.getTime() <= Date.now()) time.setDate(time.getDate() + 1);
   return time.getTime();
+}
+
+/** A repo named relative to $SRC (or here), or by its path. */
+function repoPath(name: string): string {
+  const path = resolve(process.env.SRC ?? process.cwd(), name);
+  if (!existsSync(join(path, ".git"))) throw new Error(`no git repo at ${path}`);
+  return path;
 }
 
 function count(text: string, flag: string): number {

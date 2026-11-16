@@ -1,10 +1,11 @@
 import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { beforeAll, describe, expect, test } from "vite-plus/test";
 import { agent, classify, resetTime, type Agent } from "../src/agents.ts";
 import { run, type Options } from "../src/loop.ts";
+import { approve, preview, readQueue, stage } from "../src/stage.ts";
 import { order, readLedger, replay, type Entry, type Item } from "../src/state.ts";
 
 const scratch = mkdtempSync(join(tmpdir(), "factory-test-"));
@@ -137,61 +138,65 @@ describe("queue", () => {
   });
 });
 
+function sh(cwd: string, command: string, ...args: string[]): string {
+  return execFileSync(command, args, { cwd, encoding: "utf8" });
+}
+
+function script(name: string, body: string): string {
+  const path = join(mkdtempSync(join(scratch, "bin-")), name);
+  writeFileSync(path, `#!/bin/sh\n${body}\n`);
+  chmodSync(path, 0o755);
+  return path;
+}
+
+/** A clone with a remote, and a fake workwork offering the given ids in it (findings, unless kinds says). */
+function setup(
+  ids: string[],
+  kinds: Record<string, string> = {},
+): { repo: string; origin: string; state: string; workwork: string } {
+  const origin = mkdtempSync(join(scratch, "origin-"));
+  sh(origin, "git", "init", "-q", "--bare");
+  const repo = mkdtempSync(join(scratch, "repo-"));
+  sh(repo, "git", "clone", "-q", origin, ".");
+  sh(repo, "git", "commit", "-q", "--allow-empty", "-m", "start");
+  sh(repo, "git", "push", "-q", "origin", "main");
+  sh(repo, "git", "remote", "set-head", "origin", "main");
+  const items = ids.map((id) => ({
+    repo,
+    label: "repo",
+    id,
+    play: "fake",
+    level: "skim",
+    kind: kinds[id] ?? "finding",
+    title: `title of ${id}`,
+  }));
+  const workwork = script(
+    "workwork",
+    `if [ "$1" = prompt ]; then echo "do $2"; else echo '${JSON.stringify(items)}'; fi`,
+  );
+  return { repo, origin, state: mkdtempSync(join(scratch, "state-")), workwork };
+}
+
+function fake(name: string, body: string): Agent {
+  return {
+    name,
+    command: script(name, `cat >/dev/null\n${body}`),
+    args: [],
+    limit: agent("claude").limit,
+  };
+}
+
+const options = (base: { state: string; workwork: string }, agents: Agent[]): Options => ({
+  ...base,
+  agents,
+  levels: ["skim"],
+  windows: 2,
+  timeoutMs: 60_000,
+});
+
+const OK = fake("ok", "echo 'opened https://github.com/o/r/pull/7'");
+
 describe("the loop", () => {
-  function sh(cwd: string, command: string, ...args: string[]): string {
-    return execFileSync(command, args, { cwd, encoding: "utf8" });
-  }
-
-  function script(name: string, body: string): string {
-    const path = join(mkdtempSync(join(scratch, "bin-")), name);
-    writeFileSync(path, `#!/bin/sh\n${body}\n`);
-    chmodSync(path, 0o755);
-    return path;
-  }
-
-  /** A clone with a remote, and a fake workwork offering the given ids in it. */
-  function setup(ids: string[]): { repo: string; state: string; workwork: string } {
-    const origin = mkdtempSync(join(scratch, "origin-"));
-    sh(origin, "git", "init", "-q", "--bare");
-    const repo = mkdtempSync(join(scratch, "repo-"));
-    sh(repo, "git", "clone", "-q", origin, ".");
-    sh(repo, "git", "commit", "-q", "--allow-empty", "-m", "start");
-    sh(repo, "git", "push", "-q", "origin", "main");
-    sh(repo, "git", "remote", "set-head", "origin", "main");
-    const items = ids.map((id) => ({
-      repo,
-      label: "repo",
-      id,
-      play: "fake",
-      level: "skim",
-      title: "",
-    }));
-    const workwork = script(
-      "workwork",
-      `if [ "$1" = prompt ]; then echo "do $2"; else echo '${JSON.stringify(items)}'; fi`,
-    );
-    return { repo, state: mkdtempSync(join(scratch, "state-")), workwork };
-  }
-
-  function fake(name: string, body: string): Agent {
-    return {
-      name,
-      command: script(name, `cat >/dev/null\n${body}`),
-      args: [],
-      limit: agent("claude").limit,
-    };
-  }
-
-  const options = (base: { state: string; workwork: string }, agents: Agent[]): Options => ({
-    ...base,
-    agents,
-    levels: ["skim"],
-    windows: 2,
-    timeoutMs: 60_000,
-  });
-
-  const OK = fake("ok", "echo 'opened https://github.com/o/r/pull/7'");
-
   test("does each item once, links the PR and removes clean worktrees", async () => {
     const base = setup(["fix/a.ts", "fix/b.ts"]);
     await run(options(base, [OK]));
@@ -293,5 +298,132 @@ describe("the loop", () => {
     const base = setup(["fix/a.ts", "fix/b.ts"]);
     await run({ ...options(base, [OK]), maxItems: 1 });
     expect(readLedger(base.state)).toHaveLength(1);
+  });
+});
+
+describe("staging", () => {
+  const ALL = ["auto", "skim", "decide"];
+  const stageOptions = (base: { repo: string; state: string; workwork: string }) => ({
+    repos: [base.repo],
+    levels: ALL,
+    kinds: ["finding", "scan"],
+    limit: 10,
+    pull: true,
+    state: base.state,
+    workwork: base.workwork,
+  });
+
+  /** A commit pushed to origin from another clone, so the checkout is behind. */
+  function pushElsewhere(origin: string): string {
+    const other = mkdtempSync(join(scratch, "other-"));
+    sh(other, "git", "clone", "-q", origin, ".");
+    sh(other, "git", "commit", "-q", "--allow-empty", "-m", "newer");
+    sh(other, "git", "push", "-q", "origin", "main");
+    return sh(other, "git", "rev-parse", "HEAD").trim();
+  }
+
+  test("pulls only the picked repo, then saves its findings and scans, findings first, up to the limit", async () => {
+    const base = setup(["clarify/x.ts", "bug-sweep/.", "dep-patch/a", "todo/b"], {
+      "clarify/x.ts": "rotation",
+      "bug-sweep/.": "scan",
+    });
+    const latest = pushElsewhere(base.origin);
+    const ran = join(scratch, "workwork-ran-in");
+    // Fails unless asked about this one repo, never --all.
+    const workwork = script(
+      "workwork",
+      `[ "$1" = --json ] && [ -z "$2" ] || exit 9\npwd > ${ran}\nexec ${base.workwork} "$@"`,
+    );
+    const staged = await stage({ ...stageOptions(base), workwork, limit: 2 });
+
+    expect(sh(base.repo, "git", "rev-parse", "HEAD").trim()).toBe(latest);
+    expect(staged.repos).toEqual([{ repo: base.repo, head: latest.slice(0, 7) }]);
+    expect(readFileSync(ran, "utf8").trim()).toBe(base.repo);
+    expect(staged.items.map((item) => item.id)).toEqual(["dep-patch/a", "todo/b"]);
+    expect(staged.left).toEqual({ limit: 1, kinds: { rotation: 1 } });
+    expect(JSON.parse(readFileSync(join(base.state, "stage.json"), "utf8"))).toEqual(staged);
+
+    const text = preview(base.state);
+    expect(text).toMatch(/^ {3}1 {2}repo-\w+ {2}dep-patch\/a {2}finding +title of dep-patch\/a$/m);
+    expect(text).toContain("finding: a tool reported this exact thing");
+    expect(text).toContain("Not staged: 1 past --limit, 1 rotation (--kinds)");
+    expect(text).not.toContain("Approved");
+  });
+
+  test("won't move a checkout that isn't a clean default branch it can fast-forward", async () => {
+    const base = setup(["todo/a"]);
+    pushElsewhere(base.origin);
+    sh(base.repo, "git", "switch", "-q", "-c", "mine");
+    await expect(stage(stageOptions(base))).rejects.toThrow("is on mine, not main");
+    // As it is, without pulling, it stages fine.
+    expect((await stage({ ...stageOptions(base), pull: false })).items).toHaveLength(1);
+
+    sh(base.repo, "git", "switch", "-q", "main");
+    writeFileSync(join(base.repo, "notes.txt"), "draft\n");
+    sh(base.repo, "git", "add", "notes.txt");
+    await expect(stage(stageOptions(base))).rejects.toThrow("has uncommitted changes");
+
+    sh(base.repo, "git", "commit", "-q", "-m", "local only");
+    await expect(stage(stageOptions(base))).rejects.toThrow("can't fast-forward main");
+    expect(sh(base.repo, "git", "log", "--format=%s", "-1").trim()).toBe("local only");
+  });
+
+  test("approve takes exactly the numbered items, and a queue run does only those", async () => {
+    const base = setup(["todo/a", "todo/b", "todo/c"]);
+    await stage(stageOptions(base));
+    expect(() => approve(base.state, ["4"])).toThrow("no staged item 4");
+    expect(() => approve(base.state, [])).toThrow("approve which?");
+    expect(approve(base.state, ["1,3"]).items.map((item) => item.id)).toEqual(["todo/a", "todo/c"]);
+
+    // workwork still offers all three; only the approved two run.
+    await run({ ...options(base, [OK]), approved: readQueue(base.state).items });
+    expect(readLedger(base.state).map((entry) => [entry.id, entry.outcome])).toEqual([
+      ["todo/a", "done"],
+      ["todo/c", "done"],
+    ]);
+    const text = preview(base.state);
+    expect(text).toMatch(/^\* {2}1 .*todo\/a .* → done https:\/\/github\.com\/o\/r\/pull\/7$/m);
+    expect(text).toMatch(/^ {3}2 .*todo\/b {2}finding +title of todo\/b$/m);
+    expect(text).toContain("Approved");
+    // Staging again leaves out what's done.
+    expect((await stage(stageOptions(base))).items.map((item) => item.id)).toEqual(["todo/b"]);
+  });
+
+  test("the CLI end to end: stage, preview, approve, then run --queue with pi and claude", () => {
+    const base = setup(["todo/a", "todo/b", "clarify/x.ts"], { "clarify/x.ts": "rotation" });
+    const bin = mkdtempSync(join(scratch, "path-"));
+    const calls = join(scratch, "agent-calls");
+    for (const name of ["pi", "claude"]) {
+      writeFileSync(
+        join(bin, name),
+        `#!/bin/sh\ncat >/dev/null\necho ${name} >> ${calls}\necho 'opened https://github.com/o/r/pull/9'\n`,
+      );
+      chmodSync(join(bin, name), 0o755);
+    }
+    execFileSync("cp", [base.workwork, join(bin, "workwork")]);
+    const data = mkdtempSync(join(scratch, "data-"));
+    // Only the fakes, node and the system tools: the real agents can't be reached.
+    const env = {
+      ...process.env,
+      PATH: [bin, dirname(process.execPath), "/usr/bin", "/bin"].join(":"),
+      DATA: data,
+      SRC: dirname(base.repo),
+    };
+    const cli = (...args: string[]) =>
+      execFileSync(process.execPath, [join(import.meta.dirname, "../src/cli.ts"), ...args], {
+        env,
+        encoding: "utf8",
+      });
+
+    const staged = cli("stage", "--repo", basename(base.repo));
+    expect(staged).toContain("todo/a");
+    expect(staged).not.toContain("clarify/x.ts");
+    expect(cli("preview")).toBe(staged);
+    expect(cli("approve", "2")).toContain("Approved 1: todo/b");
+    cli("run", "--queue", "--agents", "pi,claude", "--windows", "3");
+    const ledger = readLedger(join(data, "apps", "factory"));
+    expect(ledger.map((entry) => [entry.id, entry.outcome])).toEqual([["todo/b", "done"]]);
+    expect(readFileSync(calls, "utf8").trim().split("\n")).toHaveLength(1);
+    expect(cli("status")).toContain("the 1 approved items");
   });
 });
