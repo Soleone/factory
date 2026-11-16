@@ -1,0 +1,56 @@
+{
+  "name": "@soleone/factory",
+  "version": "0.0.0",
+  "description": "Works through workwork candidates with headless coding agents overnight, until the usage limits run out.",
+  "keywords": [
+    "agents",
+    "claude-code",
+    "cli",
+    "coding-agent",
+    "overnight",
+    "pi"
+  ],
+  "homepage": "https://github.com/Soleone/factory#readme",
+  "bugs": "https://github.com/Soleone/factory/issues",
+  "license": "MIT",
+  "author": "Soleone",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Soleone/factory.git"
+  },
+  "bin": {
+    "factory": "dist/cli.mjs"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "vp pack",
+    "test": "vp test run",
+    "check": "vp check",
+    "release": "release-it",
+    "prepublishOnly": "vp run build"
+  },
+  "devDependencies": {
+    "@release-it/conventional-changelog": "^12.0.2",
+    "@types/node": "^26.6.5",
+    "knip": "^6.45.1",
+    "release-it": "^21.1.2",
+    "typescript": "^7.0.2",
+    "vite-plus": "catalog:"
+  },
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "12.21.0",
+      "onFail": "download"
+    }
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
