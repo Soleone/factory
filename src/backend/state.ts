@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { AGENT_NAMES } from "./agents.ts";
-import type { Candidates, Item, Settings } from "./types.ts";
+import type { Candidates, Item, Settings, Status } from "./types.ts";
 
 export const STATE = process.env.DATA
   ? join(process.env.DATA, "apps", "factory")
@@ -28,6 +28,13 @@ export function alive(pid: number): boolean {
   }
 }
 
+function readJson<T>(path: string): T | undefined {
+  return existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : undefined;
+}
+
+export const statusPath = (state: string) => join(state, "status.json");
+export const readStatus = (state: string) => readJson<Status>(statusPath(state));
+
 export const LEVELS = ["auto", "skim", "decide"];
 
 const DEFAULTS: Settings = {
@@ -40,8 +47,8 @@ const DEFAULTS: Settings = {
 const settingsPath = (state: string) => join(state, "settings.json");
 
 export function readSettings(state: string): Settings {
-  if (!existsSync(settingsPath(state))) return DEFAULTS;
-  return checkSettings(JSON.parse(readFileSync(settingsPath(state), "utf8")));
+  const settings = readJson<Partial<Settings>>(settingsPath(state));
+  return settings ? checkSettings(settings) : DEFAULTS;
 }
 
 export function writeSettings(state: string, settings: Settings): void {
@@ -72,10 +79,7 @@ export const itemKey = (item: Pick<Item, "repo" | "id">) => `${item.repo} ${item
 const candidatesPath = (state: string) => join(state, "candidates.json");
 const refreshLock = (state: string) => join(state, "candidates.lock");
 
-export function readCandidates(state: string): Candidates | undefined {
-  if (!existsSync(candidatesPath(state))) return undefined;
-  return JSON.parse(readFileSync(candidatesPath(state), "utf8"));
-}
+export const readCandidates = (state: string) => readJson<Candidates>(candidatesPath(state));
 
 export function refreshingCandidates(state: string): boolean {
   if (!existsSync(refreshLock(state))) return false;

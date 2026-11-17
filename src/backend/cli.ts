@@ -1,13 +1,21 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { basename, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { agent } from "./agents.ts";
 import { addJobs, readJobs, removeJob, retryJob } from "./jobs.ts";
 import { run, type RunOptions } from "./loop.ts";
 import { logPath, turnOff, turnOn } from "./power.ts";
-import { output, pidPath, readSettings, runningPid, STATE, writeSettings } from "./state.ts";
-import type { Item, Job, Status, Tuning } from "./types.ts";
+import {
+  output,
+  pidPath,
+  readSettings,
+  readStatus,
+  runningPid,
+  STATE,
+  writeSettings,
+} from "./state.ts";
+import type { Item, Job, Tuning } from "./types.ts";
 import { serve } from "./web.ts";
 // Bundled into dist, so it works from source and from the package alike.
 import packageJson from "../../package.json" with { type: "json" };
@@ -158,11 +166,10 @@ function auto(onOrOff: string | undefined): void {
 
 function status(): void {
   const pid = runningPid(STATE);
-  const path = join(STATE, "status.json");
   const settings = readSettings(STATE);
   console.log(`${pid ? `on (pid ${pid})` : "off"}, auto mode ${settings.auto.on ? "on" : "off"}`);
-  if (pid && existsSync(path)) {
-    const status: Status = JSON.parse(readFileSync(path, "utf8"));
+  const status = pid ? readStatus(STATE) : undefined;
+  if (status) {
     const until = status.until ? `, until ${clock(status.until)}` : "";
     console.log(`run ${status.run}, limit ${status.limit ?? "none"}${until}`);
     for (const worker of status.workers) {
