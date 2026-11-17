@@ -64,8 +64,18 @@ This replaces an assistant that ran the night from inside chat turns. It stopped
 ```sh
 pnpm install
 vp check && vp test run && pnpm exec knip
-pnpm release   # tag, changelog, npm publish
 ```
+
+### Release
+
+From `main` with a clean working tree, authenticated Git push access, and pnpm logged in to npm (`pn whoami`):
+
+```sh
+pn release             # choose patch, minor or major, then confirm each step
+pn release --dry-run   # preview without changing files, publishing or pushing
+```
+
+With Vite+, `pn` is shorthand for `pnpm`. The release command asks for the version, updates `CHANGELOG.md` from conventional commits, commits and tags `vX.Y.Z`, and pushes. Factory publishes `@soleone/factory` to npm locally rather than building native apps in Actions. Checks and tests run before releasing; `prepublishOnly` builds the CLI before publishing. Dry runs skip these hooks, so run the development checks above separately.
 
 ## License
 
