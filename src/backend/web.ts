@@ -9,12 +9,13 @@ import {
   itemKey,
   readCandidates,
   readSettings,
+  readStatus,
   refreshCandidates,
   refreshingCandidates,
   runningPid,
   writeSettings,
 } from "./state.ts";
-import type { Settings, Snapshot, Status } from "./types.ts";
+import type { Settings, Snapshot } from "./types.ts";
 
 /** The built page; under pn dev, Vite serves it instead and proxies /api and /runs here. */
 const WEB = fileURLToPath(new URL("./web", import.meta.url));
@@ -104,13 +105,10 @@ export function serve(state: string, port: number, host: string): Server {
 }
 
 function snapshot(state: string): Snapshot {
-  const statusPath = join(state, "status.json");
   const candidates = readCandidates(state);
   return {
     on: runningPid(state) !== undefined,
-    status: existsSync(statusPath)
-      ? (JSON.parse(readFileSync(statusPath, "utf8")) as Status)
-      : null,
+    status: readStatus(state) ?? null,
     settings: readSettings(state),
     // Paths under runs/ are where this server serves them.
     jobs: readJobs(state).map((job) => ({

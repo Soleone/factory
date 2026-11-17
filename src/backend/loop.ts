@@ -11,7 +11,7 @@ import {
 import { join } from "node:path";
 import { agent as makeAgent, classify, resetTime, type Agent } from "./agents.ts";
 import { addJobs, autoPicks, endJob, nextJob, readJobs, requeueJob, startJob } from "./jobs.ts";
-import { output, readCandidates, readSettings, refreshCandidates } from "./state.ts";
+import { output, readCandidates, readSettings, refreshCandidates, statusPath } from "./state.ts";
 import type { Attempt, Job, Status, Tuning, Worker } from "./types.ts";
 
 export type RunOptions = {
@@ -60,7 +60,7 @@ export async function run(options: RunOptions): Promise<string> {
   function writeStatus(): void {
     const until = options.until ? new Date(options.until).toISOString() : undefined;
     const status: Status = { pid: process.pid, run: id, until, limit: options.limit, workers };
-    writeFileSync(join(state, "status.json"), `${JSON.stringify(status, null, 2)}\n`);
+    writeFileSync(statusPath(state), `${JSON.stringify(status, null, 2)}\n`);
   }
 
   function set(worker: Worker, change: Partial<Worker>): void {
