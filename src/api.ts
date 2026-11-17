@@ -18,6 +18,8 @@ export const api = {
     call("POST", "/api/jobs", { items, agent }),
   remove: (id: string) => call("POST", `/api/jobs/${id}/remove`),
   retry: (id: string) => call("POST", `/api/jobs/${id}/retry`),
+  merge: (id: string) => call("POST", `/api/jobs/${id}/merge`),
+  close: (id: string) => call("POST", `/api/jobs/${id}/close`),
   move: (id: string, index: number) => call("POST", `/api/jobs/${id}/move`, { index }),
   saveSettings: (settings: Snapshot["settings"]) => call("PUT", "/api/settings", settings),
   turnOn: (run: Pick<Snapshot["settings"], "agents" | "limit" | "until">) =>

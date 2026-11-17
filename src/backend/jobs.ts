@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { itemKey, LEVELS } from "./state.ts";
+import { itemKey, LEVELS, output } from "./state.ts";
 import type { Attempt, Item, Job, Settings, Tuning } from "./types.ts";
 
 /**
@@ -99,9 +99,19 @@ function find(state: string, id: string, ...states: Job["state"][]): Job {
   return job;
 }
 
-export function removeJob(state: string, id: string): void {
-  find(state, id, "queued");
+/** Takes a job out of the queue or the results, and deletes the branches its attempts kept. */
+export async function removeJob(state: string, id: string): Promise<void> {
+  const job = find(state, id, "queued", "done", "failed");
   append(state, { at: new Date().toISOString(), type: "remove", id });
+  const kept = job.attempts.flatMap((attempt) => attempt.branch ?? []);
+  if (kept.length === 0) return;
+  const branches = await output(
+    "git",
+    ["for-each-ref", "--format=%(refname:short)", "refs/heads/factory/"],
+    job.item.repo,
+  );
+  const left = kept.filter((branch) => branches.split("\n").includes(branch));
+  if (left.length) await output("git", ["branch", "-D", ...left], job.item.repo);
 }
 
 export function retryJob(state: string, id: string): void {

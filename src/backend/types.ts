@@ -1,4 +1,4 @@
-/** The shapes the CLI, the factory and the page share. No imports, so the page can use them too. */
+/** The shapes the CLI, the factory and the page share, and the rules both sides apply to them. No imports, so the page can use them too. */
 
 /** Unset means the agent's own default. */
 export type Tuning = { model?: string; effort?: string };
@@ -86,4 +86,33 @@ export type Snapshot = {
   /** Attempt logs are paths the server serves, relative to the state folder. */
   jobs: Job[];
   candidates: { at: string | null; count: number; refreshing: boolean };
+  /** What GitHub last said about each job's PR, by URL; a PR not fetched yet is missing. */
+  prs: Record<string, Pr>;
 };
+
+/** A job's PR as `gh pr view` describes it, trimmed to what a quick review needs. */
+export type Pr = {
+  state: "OPEN" | "MERGED" | "CLOSED";
+  draft: boolean;
+  title: string;
+  /** The PR body's Summary section, which workwork asks for. */
+  summary: string;
+  /** The PR body's Level line: the agent may have raised the candidate's. */
+  level?: string;
+  additions: number;
+  deletions: number;
+  files: string[];
+  checks: "passing" | "failing" | "pending" | "none";
+  conflicts: boolean;
+};
+
+/** The PR of the job's latest attempt that linked one. */
+export const prUrl = (job: Job) =>
+  job.attempts.findLast((attempt) => attempt.url?.includes("/pull/"))?.url;
+
+/** Merging from the page skips GitHub's own page, so it only goes ahead when nothing argues against it. */
+export const canMerge = (pr: Pr) =>
+  pr.state === "OPEN" &&
+  !pr.draft &&
+  !pr.conflicts &&
+  (pr.checks === "passing" || pr.checks === "none");

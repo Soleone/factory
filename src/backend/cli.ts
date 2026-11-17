@@ -20,7 +20,7 @@ const USAGE = `factory: works a queue of workwork candidates with headless codin
   factory status               on or off, what each agent is doing, the queue
   factory add <id>... [--repo DIR] [--agent NAME] [--model M] [--effort E]
                                queue workwork candidates from DIR (default: here), ahead of auto jobs
-  factory remove <job>         take a queued job out
+  factory remove <job>         take a job out of the queue or the results, with its kept branches
   factory retry <job>          queue a failed job again, with the same agent
   factory auto on|off          let auto mode keep the queue topped up from workwork, or not
   factory report [--all]       the last run (or every run): outcome, agent, job, PR/issue link or log
@@ -62,7 +62,10 @@ async function main(): Promise<void> {
   mkdirSync(STATE, { recursive: true });
   if (command === "status") return status();
   if (command === "report") return console.log(report(values.all ?? false));
-  if (command === "remove") return args.forEach((id) => removeJob(STATE, id));
+  if (command === "remove") {
+    for (const id of args) await removeJob(STATE, id);
+    return;
+  }
   if (command === "retry") return args.forEach((id) => retryJob(STATE, id));
   if (command === "auto") return auto(args[0]);
   if (command === "add") return add(args, values);

@@ -17,7 +17,7 @@ import {
 } from "../src/backend/jobs.ts";
 import { run, type RunOptions } from "../src/backend/loop.ts";
 import { readSettings, writeSettings } from "../src/backend/state.ts";
-import type { Item, Job, Status } from "../src/backend/types.ts";
+import type { Item, Job, Snapshot, Status } from "../src/backend/types.ts";
 import { serve } from "../src/backend/web.ts";
 
 const scratch = mkdtempSync(join(tmpdir(), "factory-test-"));
@@ -144,18 +144,18 @@ describe("queue", () => {
     expect(ids({ plays: ["simplify"], repos: ["a", "b"] })).toEqual(["b1"]);
   });
 
-  test("picks come before auto jobs, in the order the user gives them", () => {
+  test("picks come before auto jobs, in the order the user gives them", async () => {
     const state = mkdtempSync(join(scratch, "state-"));
     addJobs(state, [item("r", "auto1")], "auto");
     const [a, b, c] = addJobs(state, [item("r", "a"), item("r", "b"), item("r", "c")], "pick");
     moveJob(state, c.id, 0);
-    removeJob(state, b.id);
+    await removeJob(state, b.id);
     const ids = (jobs: Job[]) =>
       jobs.filter((job) => job.state === "queued").map((job) => job.item.id);
     expect(ids(readJobs(state))).toEqual(["c", "a", "auto1"]);
     moveJob(state, c.id, 1);
     expect(ids(readJobs(state))).toEqual(["a", "c", "auto1"]);
-    expect(() => removeJob(state, b.id)).toThrow("is removed");
+    await expect(removeJob(state, b.id)).rejects.toThrow("is removed");
     expect(() => retryJob(state, a.id)).toThrow("is queued");
   });
 });
@@ -179,11 +179,28 @@ describe("the factory", () => {
   function agents(bodies: { claude?: string; pi?: string }): void {
     const bin = mkdtempSync(join(scratch, "bin-"));
     for (const [name, body] of Object.entries(bodies)) script(bin, name, `cat >/dev/null\n${body}`);
-    process.env.PATH = `${bin}:${path}`;
+    process.env.PATH = `${bin}:${process.env.PATH}`;
+  }
+
+  /** A fake gh on PATH: `pr list` and `pr view` print list.json and view.json from its folder; every call is logged to calls. */
+  function gh(view: Record<string, unknown> = {}, list: { url: string }[] = []) {
+    const bin = mkdtempSync(join(scratch, "gh-"));
+    writeFileSync(join(bin, "list.json"), JSON.stringify(list));
+    const answer = (view: Record<string, unknown>) =>
+      writeFileSync(join(bin, "view.json"), JSON.stringify({ ...OPEN_PR, ...view }));
+    answer(view);
+    script(
+      bin,
+      "gh",
+      `echo "$*" >> ${bin}/calls\ncase "$1 $2" in\n"pr list") cat ${bin}/list.json ;;\n"pr view") cat ${bin}/view.json ;;\nesac`,
+    );
+    process.env.PATH = `${bin}:${process.env.PATH}`;
+    return { calls: () => readFileSync(join(bin, "calls"), "utf8"), answer };
   }
 
   /** A clone with a remote, and a fake workwork offering the given ids in it. */
   function setup(ids: string[]) {
+    gh();
     const origin = mkdtempSync(join(scratch, "origin-"));
     sh(origin, "git", "init", "-q", "--bare");
     const repo = mkdtempSync(join(scratch, "repo-"));
@@ -227,6 +244,17 @@ describe("the factory", () => {
   const status = (state: string): Status =>
     JSON.parse(readFileSync(join(state, "status.json"), "utf8"));
   const OK = "echo 'opened https://github.com/o/r/pull/7'";
+  const OPEN_PR = {
+    state: "OPEN",
+    isDraft: false,
+    title: "fix: a",
+    body: "## Summary\nMakes a simpler.\n\n## Changes\nNone\n\nLevel: skim\nPlay: simplify",
+    additions: 3,
+    deletions: 9,
+    files: [{ path: "a.ts" }],
+    mergeable: "MERGEABLE",
+    statusCheckRollup: [{ conclusion: "SUCCESS" }, { state: "SUCCESS" }],
+  };
 
   test("does picks before auto jobs, links the PR and reuses one worktree per agent and repo", async () => {
     const base = setup(["a", "b", "c"]);
@@ -257,13 +285,26 @@ describe("the factory", () => {
     const base = setup(["a", "b"]);
     agents({ claude: "test -e left.txt && exit 1; echo x > left.txt" });
     const a = base.pick("a");
-    base.pick("b");
+    const b = base.pick("b");
     const [first, second] = await work(options(base));
     expect([first.state, second.state]).toEqual(["done", "done"]);
     expect(first.attempts[0].branch).toBe(`factory/${a.id}-1`);
     expect(
       sh(base.repo, "git", "show", "--name-only", "--format=", first.attempts[0].branch!),
     ).toBe("left.txt\n");
+    await removeJob(base.state, a.id);
+    // b's stays, and the next checkout didn't save a's work a second time.
+    expect(sh(base.repo, "git", "branch", "--list", "factory/*")).toBe(`  factory/${b.id}-1\n`);
+  });
+
+  test("links the PR GitHub has on workwork's branch over the log's last link", async () => {
+    const base = setup(["a"]);
+    const github = gh({}, [{ url: "https://github.com/o/r/pull/8" }]);
+    agents({ claude: OK });
+    base.pick("a");
+    const [job] = await work(options(base));
+    expect(job.attempts[0].url).toBe("https://github.com/o/r/pull/8");
+    expect(github.calls()).toContain("pr list --head workwork/a --state all");
   });
 
   test("a job keeps its agent: one retry after a failure, then only by hand", async () => {
@@ -422,6 +463,43 @@ describe("the factory", () => {
       expect(jobs.map((job) => [job.item.id, job.state])).toEqual([["a", "done"]]);
       expect(await (await fetch(url(`/${jobs[0].attempts[0].log}`))).text()).toContain("pull/7");
       expect(await (await fetch(url("/runs/%2E%2E/jobs.jsonl"))).text()).not.toContain('"add"');
+    } finally {
+      server.close();
+    }
+  });
+
+  test("serve shows each job's PR and merges it only once GitHub says it's ready", async () => {
+    const base = setup(["a"]);
+    const github = gh({ statusCheckRollup: [{ conclusion: "" }] });
+    agents({ claude: OK });
+    const job = base.pick("a");
+    await work(options(base));
+    const server = serve(base.state, 0, "127.0.0.1");
+    await once(server, "listening");
+    const { port } = server.address() as AddressInfo;
+    const url = (path: string) => `http://127.0.0.1:${port}${path}`;
+    const pr = "https://github.com/o/r/pull/7";
+    try {
+      let prs: Snapshot["prs"] = {};
+      // The first poll starts asking gh; a later one has the answer.
+      while (!prs[pr]) {
+        prs = ((await (await fetch(url("/api/state"))).json()) as Snapshot).prs;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      expect(prs[pr]).toMatchObject({
+        summary: "Makes a simpler.",
+        level: "skim",
+        checks: "pending",
+        files: ["a.ts"],
+        conflicts: false,
+      });
+      const merge = () => fetch(url(`/api/jobs/${job.id}/merge`), { method: "POST" });
+      expect(await (await merge()).json()).toEqual({
+        error: `${pr} isn't ready to merge: see it on GitHub`,
+      });
+      github.answer({});
+      expect((await merge()).status).toBe(200);
+      expect(github.calls()).toContain(`pr merge ${pr} --squash --delete-branch`);
     } finally {
       server.close();
     }

@@ -11,8 +11,9 @@ import {
 import { join } from "node:path";
 import { agent as makeAgent, classify, resetTime, type Agent } from "./agents.ts";
 import { addJobs, autoPicks, endJob, nextJob, readJobs, requeueJob, startJob } from "./jobs.ts";
+import { findPr } from "./review.ts";
 import { output, readCandidates, readSettings, refreshCandidates } from "./state.ts";
-import type { Attempt, Job, Status, Tuning, Worker } from "./types.ts";
+import type { Attempt, Item, Job, Status, Tuning, Worker } from "./types.ts";
 
 export type RunOptions = {
   /** The agents of this run, each with its model and effort. */
@@ -207,8 +208,9 @@ export async function run(options: RunOptions): Promise<string> {
     const branch = await keepWork(worktree, `factory/${slug}`);
     if (stopping) return undefined;
     const text = readFileSync(logPath, "utf8");
-    return attempt(timedOut ? "timeout" : classify(agent, code, text), {
-      url: text.match(URL)?.at(-1),
+    const outcome = timedOut ? "timeout" : classify(agent, code, text);
+    return attempt(outcome, {
+      url: (outcome === "done" && (await delivered(job.item))) || text.match(URL)?.at(-1),
       branch,
     });
   }
@@ -270,6 +272,16 @@ export async function run(options: RunOptions): Promise<string> {
   return id;
 }
 
+/** The PR the agent opened, as GitHub knows it; undefined when gh can't tell, and the log's last link stands in. */
+async function delivered(item: Item): Promise<string | undefined> {
+  try {
+    return await findPr(item);
+  } catch (error) {
+    log(`gh can't find the PR for ${item.id}: ${(error as Error).message.trim().split("\n")[0]}`);
+    return undefined;
+  }
+}
+
 /** The worktree at origin's fresh default branch; reused across jobs so installed dependencies survive. */
 async function checkout(worktree: string, repo: string): Promise<void> {
   await output("git", ["fetch", "--quiet", "origin"], repo);
@@ -283,15 +295,19 @@ async function checkout(worktree: string, repo: string): Promise<void> {
     await output("git", ["worktree", "add", "--quiet", "--detach", worktree, base], repo);
     return;
   }
-  // Whatever a crashed run left here is kept before the reset.
-  await keepWork(worktree, `factory/leftover-${Date.now()}`);
+  // Whatever a crashed run left here is kept before the reset; work the last attempt kept is already on its branch.
+  await keepWork(worktree, `factory/leftover-${Date.now()}`, ["--remotes", "--branches"]);
   await output("git", ["checkout", "--quiet", "--force", "--detach", base], worktree);
   // Untracked files go; ignored ones like node_modules stay.
   await output("git", ["clean", "-fdq"], worktree);
 }
 
-/** Saves commits and changes that aren't on a remote to a branch; returns its name, if there was any. */
-async function keepWork(worktree: string, branch: string): Promise<string | undefined> {
+/** Saves commits and changes that aren't on `saved` refs to a branch; returns its name, if there was any. */
+async function keepWork(
+  worktree: string,
+  branch: string,
+  saved = ["--remotes"],
+): Promise<string | undefined> {
   if ((await output("git", ["status", "--porcelain"], worktree)).trim()) {
     await output("git", ["add", "-A"], worktree);
     await output(
@@ -300,11 +316,7 @@ async function keepWork(worktree: string, branch: string): Promise<string | unde
       worktree,
     );
   }
-  const unpushed = await output(
-    "git",
-    ["log", "--oneline", "HEAD", "--not", "--remotes"],
-    worktree,
-  );
+  const unpushed = await output("git", ["log", "--oneline", "HEAD", "--not", ...saved], worktree);
   if (!unpushed.trim()) return undefined;
   await output("git", ["branch", "--force", branch, "HEAD"], worktree);
   return branch;
