@@ -6,7 +6,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeAll, describe, expect, test } from "vite-plus/test";
 import { agent, classify, resetTime } from "../src/backend/agents.ts";
-import { addJobs, moveJob, order, readJobs, removeJob, retryJob } from "../src/backend/jobs.ts";
+import {
+  addJobs,
+  autoPicks,
+  moveJob,
+  order,
+  readJobs,
+  removeJob,
+  retryJob,
+} from "../src/backend/jobs.ts";
 import { run, type RunOptions } from "../src/backend/loop.ts";
 import { readSettings, writeSettings } from "../src/backend/state.ts";
 import type { Item, Job, Status } from "../src/backend/types.ts";
@@ -127,6 +135,15 @@ describe("queue", () => {
     expect(order(items, ["auto"]).map((item) => item.id)).toEqual(["a4"]);
   });
 
+  test("auto mode takes only the chosen repos and plays, none chosen meaning all", () => {
+    const items = [item("a", "a1"), item("b", "b1", "skim", "simplify"), item("c", "c1")];
+    const ids = (auto: { plays: string[]; repos: string[] }) =>
+      autoPicks(items, [], { levels: ["skim"], ...auto }, 5).map((item) => item.id);
+    expect(ids({ plays: [], repos: [] })).toEqual(["a1", "b1", "c1"]);
+    expect(ids({ plays: [], repos: ["a", "b"] })).toEqual(["a1", "b1"]);
+    expect(ids({ plays: ["simplify"], repos: ["a", "b"] })).toEqual(["b1"]);
+  });
+
   test("picks come before auto jobs, in the order the user gives them", () => {
     const state = mkdtempSync(join(scratch, "state-"));
     addJobs(state, [item("r", "auto1")], "auto");
@@ -173,7 +190,6 @@ describe("the factory", () => {
     sh(repo, "git", "clone", "-q", origin, ".");
     sh(repo, "git", "commit", "-q", "--allow-empty", "-m", "start");
     sh(repo, "git", "push", "-q", "origin", "main");
-    sh(repo, "git", "remote", "set-head", "origin", "main");
     const items = ids.map((id) => ({ ...item(repo, id), label: "repo" }));
     const bin = mkdtempSync(join(scratch, "bin-"));
     script(
@@ -218,7 +234,7 @@ describe("the factory", () => {
     base.pick("b");
     writeSettings(base.state, {
       ...readSettings(base.state),
-      auto: { on: true, levels: ["skim"], plays: [] },
+      auto: { on: true, levels: ["skim"], plays: [], repos: [] },
     });
     const jobs = await work(
       options(base),
@@ -344,12 +360,24 @@ describe("the factory", () => {
     expect(wakes).toHaveLength(3);
   });
 
-  test("three quick failures in a row count as a limit", async () => {
+  test("three quick failures in a row stop the agent", async () => {
     const base = setup(["a", "b", "c"]);
     agents({ claude: "echo 'Not logged in'; exit 1" });
     for (const id of ["a", "b", "c"]) base.pick(id);
-    const jobs = await work({ ...options(base), limit: 1 }, () => false);
+    const jobs = await work(options(base), () => false);
     expect(jobs.map((job) => job.attempts.length)).toEqual([2, 1, 0]);
+    expect(status(base.state).workers[0].reason).toMatch(/^3 failures in a row/);
+  });
+
+  test("a repo that can't be set up fails the job with the reason in its log", async () => {
+    const base = setup(["a", "b", "c"]);
+    agents({ claude: OK });
+    sh(base.repo, "git", "remote", "set-url", "origin", join(scratch, "gone"));
+    for (const id of ["a", "b", "c"]) base.pick(id);
+    const jobs = await work(options(base), () => false);
+    expect(jobs.map((job) => job.attempts.length)).toEqual([2, 1, 0]);
+    const attempt = jobs[0].attempts[0];
+    expect(readFileSync(attempt.log, "utf8")).toBe(`${attempt.error}\n`);
   });
 
   test("kills an agent that runs past the timeout, children included", async () => {

@@ -23,11 +23,11 @@ export function ago(iso: string): string {
 export const minutes = (start: string, end: string) =>
   `${Math.max(1, Math.round((Date.parse(end) - Date.parse(start)) / 60_000))} min`;
 
-const repoName = (path: string) => path.split("/").filter(Boolean).at(-1) ?? path;
+export const repoName = (path: string) => path.split("/").filter(Boolean).at(-1) ?? path;
 
 /** workwork titles like "the whole repo" only make sense with the repo in front. */
-export const itemTitle = (item: { repo: string; title: string }) =>
-  `${repoName(item.repo)}: ${item.title}`;
+export const itemTitle = (item: { repo: string; title: string; id: string }) =>
+  `${repoName(item.repo)}: ${item.title || item.id}`;
 
 /** Run ids are ISO times without colons: 2026-11-16T013000. */
 export const runStart = (run: string) => run.replace(/T(\d\d)(\d\d)(\d\d)$/, "T$1:$2:$3Z");

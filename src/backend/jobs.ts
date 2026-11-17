@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { itemKey, LEVELS } from "./state.ts";
-import type { Attempt, Item, Job, Tuning } from "./types.ts";
+import type { Attempt, Item, Job, Settings, Tuning } from "./types.ts";
 
 /**
  * jobs.jsonl is append-only, so the CLI, the factory and serve can all write to it without overwriting
@@ -146,13 +146,15 @@ export function order(items: Item[], levels: string[]): Item[] {
 export function autoPicks(
   candidates: Item[],
   jobs: Job[],
-  auto: { levels: string[]; plays: string[] },
+  auto: Omit<Settings["auto"], "on">,
   count: number,
 ): Item[] {
   const seen = new Set(jobs.map((job) => itemKey(job.item)));
   const wanted = candidates.filter(
     (item) =>
-      !seen.has(itemKey(item)) && (auto.plays.length === 0 || auto.plays.includes(item.play)),
+      !seen.has(itemKey(item)) &&
+      (auto.plays.length === 0 || auto.plays.includes(item.play)) &&
+      (auto.repos.length === 0 || auto.repos.includes(item.repo)),
   );
   return order(wanted, auto.levels).slice(0, count);
 }

@@ -141,24 +141,23 @@ export async function run(options: RunOptions): Promise<string> {
       endJob(state, job.id, attempt);
       log(`${worker.agent} ${attempt.outcome} ${job.id} ${attempt.url ?? attempt.error ?? ""}`);
       const seconds = (Date.parse(attempt.end) - Date.parse(attempt.start)) / 1000;
-      quickFailures =
-        attempt.outcome === "failed" && !attempt.error && seconds < 60 ? quickFailures + 1 : 0;
-      // Three fast failures in a row is a broken login or a limit message we don't know yet.
-      if (attempt.outcome !== "limited" && quickFailures < 3) {
+      quickFailures = attempt.outcome === "failed" && seconds < 60 ? quickFailures + 1 : 0;
+      if (quickFailures >= 3)
+        return set(worker, {
+          state: "stopped",
+          reason: `3 failures in a row under a minute; last: ${attempt.error?.split("\n")[0] ?? "see its log"}`,
+        });
+      if (attempt.outcome !== "limited") {
         set(worker, { state: "idle" });
         continue;
       }
-      quickFailures = 0;
       worker.limits++;
       if (options.limit !== null && worker.limits >= options.limit)
         return set(worker, {
           state: "stopped",
           reason: `limit ${worker.limits} of ${options.limit}`,
         });
-      const reset =
-        attempt.outcome === "limited"
-          ? resetTime(readFileSync(attempt.log, "utf8"), Date.now())
-          : undefined;
+      const reset = resetTime(readFileSync(attempt.log, "utf8"), Date.now());
       const wake = Math.min(
         reset === undefined ? Date.now() + 30 * MINUTE : reset + 2 * MINUTE,
         options.until ?? Infinity,
@@ -198,7 +197,9 @@ export async function run(options: RunOptions): Promise<string> {
       prompt = await output(options.workwork, ["prompt", job.item.id], job.item.repo);
     } catch (error) {
       // The repo or workwork failed, not the agent: record why and move on.
-      return attempt("failed", { error: (error as Error).message.trim().slice(0, 2000) });
+      const message = (error as Error).message.trim();
+      writeFileSync(logPath, `${message}\n`);
+      return attempt("failed", { error: message.slice(0, 2000) });
     }
     writeFileSync(join(dir, "prompt.md"), prompt);
     if (stopping) return undefined;
@@ -269,12 +270,14 @@ export async function run(options: RunOptions): Promise<string> {
   return id;
 }
 
-/** The worktree at a fresh origin/HEAD; reused across jobs so installed dependencies survive. */
+/** The worktree at origin's fresh default branch; reused across jobs so installed dependencies survive. */
 async function checkout(worktree: string, repo: string): Promise<void> {
   await output("git", ["fetch", "--quiet", "origin"], repo);
-  const base = (
-    await output("git", ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], repo)
-  ).trim();
+  // Asks origin itself: clones made with `git remote add` have no refs/remotes/origin/HEAD.
+  const head = await output("git", ["ls-remote", "--symref", "origin", "HEAD"], repo);
+  const branch = /^ref: refs\/heads\/(\S+)\tHEAD$/m.exec(head)?.[1];
+  if (!branch) throw new Error(`origin of ${repo} names no default branch`);
+  const base = `origin/${branch}`;
   if (!existsSync(worktree)) {
     await output("git", ["worktree", "prune"], repo);
     await output("git", ["worktree", "add", "--quiet", "--detach", worktree, base], repo);

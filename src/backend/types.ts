@@ -15,8 +15,8 @@ export type Settings = {
   until?: string;
   /** Minutes before an agent is killed. */
   timeout: number;
-  /** Auto mode tops up the queue from workwork; empty plays means every play. */
-  auto: { on: boolean; levels: string[]; plays: string[] };
+  /** Auto mode tops up the queue from workwork; empty repos or plays means all of them. */
+  auto: { on: boolean; levels: string[]; plays: string[]; repos: string[] };
 };
 
 /** A workwork candidate, as `workwork --json` prints it. `id` is workwork's, not a job's. */

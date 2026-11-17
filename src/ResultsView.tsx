@@ -86,13 +86,16 @@ function Meta({ job, attempt }: { job: Job; attempt: Attempt }) {
         <a href={`/${attempt.log}`} target="_blank" rel="noreferrer">
           log
         </a>
-        <a
-          href={`/${attempt.log.replace(/agent\.log$/, "prompt.md")}`}
-          target="_blank"
-          rel="noreferrer"
-        >
-          prompt
-        </a>
+        {/* An error means the job failed before its prompt was written. */}
+        {!attempt.error && (
+          <a
+            href={`/${attempt.log.replace(/agent\.log$/, "prompt.md")}`}
+            target="_blank"
+            rel="noreferrer"
+          >
+            prompt
+          </a>
+        )}
       </span>
     </span>
   );

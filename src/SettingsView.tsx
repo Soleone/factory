@@ -12,22 +12,23 @@ import {
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { repoName } from "@/format";
 import { RunFields } from "@/RunFields";
 
 /** The defaults every run starts from, and what auto mode may queue. */
 export function SettingsView({ snapshot, act }: { snapshot: Snapshot; act: Act }) {
   const [draft, setDraft] = useState<Settings>(snapshot.settings);
   const [plays, setPlays] = useState<string[]>([]);
+  const [repos, setRepos] = useState<string[]>([]);
   // The Auto switch in the header saves on its own; this form never changes it.
   const current = { ...draft, auto: { ...draft.auto, on: snapshot.settings.auto.on } };
   const saved = JSON.stringify(current) === JSON.stringify(snapshot.settings);
 
   useEffect(() => {
-    void api
-      .candidates()
-      .then((candidates) =>
-        setPlays([...new Set(candidates.items.map((item) => item.play))].sort()),
-      );
+    void api.candidates().then((candidates) => {
+      setPlays([...new Set(candidates.items.map((item) => item.play))].sort());
+      setRepos([...new Set(candidates.items.map((item) => item.repo))].sort());
+    });
   }, [snapshot.candidates.at]);
 
   const auto = draft.auto;
@@ -88,6 +89,25 @@ export function SettingsView({ snapshot, act }: { snapshot: Snapshot; act: Act }
               ))}
             </ToggleGroup>
             <FieldDescription>None selected means every play.</FieldDescription>
+          </Field>
+          <Field>
+            <FieldLabel>Repos</FieldLabel>
+            <ToggleGroup
+              multiple
+              variant="outline"
+              className="flex-wrap"
+              value={auto.repos}
+              onValueChange={(chosen) => setDraft({ ...draft, auto: { ...auto, repos: chosen } })}
+            >
+              {repos.map((repo) => (
+                <ToggleGroupItem key={repo} value={repo}>
+                  {repoName(repo)}
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
+            <FieldDescription>
+              The repos workwork found. None selected means every repo.
+            </FieldDescription>
           </Field>
         </FieldGroup>
       </FieldSet>

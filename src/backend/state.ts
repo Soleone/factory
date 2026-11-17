@@ -34,7 +34,7 @@ const DEFAULTS: Settings = {
   agents: { claude: {}, pi: {} },
   limit: 1,
   timeout: 60,
-  auto: { on: false, levels: LEVELS, plays: [] },
+  auto: { on: false, levels: LEVELS, plays: [], repos: [] },
 };
 
 const settingsPath = (state: string) => join(state, "settings.json");
