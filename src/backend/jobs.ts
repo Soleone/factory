@@ -62,7 +62,7 @@ export function readJobs(state: string): Job[] {
       job.attempts.push(event.attempt);
       const { outcome } = event.attempt;
       if (outcome === "done") job.state = "done";
-      else if (outcome === "limited") job.state = "queued";
+      else if (outcome === "limited" || outcome === "stopped") job.state = "queued";
       else {
         const count = (failures.get(job.id) ?? 0) + 1;
         failures.set(job.id, count);
@@ -133,7 +133,7 @@ export function endJob(state: string, id: string, attempt: Attempt): void {
   append(state, { at: new Date().toISOString(), type: "attempt", id, attempt });
 }
 
-/** A job that was running when its run stopped goes back to the queue, its agent kept. */
+/** A job whose run stopped before its agent started goes back to the queue, its agent kept. */
 export function requeueJob(state: string, id: string): void {
   append(state, { at: new Date().toISOString(), type: "requeue", id });
 }

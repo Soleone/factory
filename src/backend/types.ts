@@ -3,7 +3,8 @@
 /** Unset means the agent's own default. */
 export type Tuning = { model?: string; effort?: string };
 
-export type Outcome = "done" | "failed" | "limited" | "timeout";
+/** stopped: the factory was turned off with --kill while the agent worked. */
+export type Outcome = "done" | "failed" | "limited" | "timeout" | "stopped";
 
 /** The global settings; a run starts from these unless told otherwise. */
 export type Settings = {

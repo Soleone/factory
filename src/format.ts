@@ -39,6 +39,7 @@ export const OUTCOME_BADGE: Record<Outcome, BadgeVariant> = {
   failed: "destructive",
   timeout: "destructive",
   limited: "outline",
+  stopped: "outline",
 };
 
 export const WORKER_BADGE: Record<Worker["state"], BadgeVariant> = {

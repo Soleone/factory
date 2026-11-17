@@ -16,7 +16,8 @@ const USAGE = `factory: works a queue of workwork candidates with headless codin
 
   factory start [run options]  turn the factory on, in the background
   factory run [run options]    the same, in the foreground
-  factory stop                 turn it off; jobs in progress go back to the queue
+  factory stop [--kill]        turn it off; agents at work finish, and the next start records them;
+                               --kill stops them too and puts their jobs back in the queue
   factory status               on or off, what each agent is doing, the queue
   factory add <id>... [--repo DIR] [--agent NAME] [--model M] [--effort E]
                                queue workwork candidates from DIR (default: here), ahead of auto jobs
@@ -50,6 +51,7 @@ async function main(): Promise<void> {
       repo: { type: "string" },
       agent: { type: "string" },
       all: { type: "boolean" },
+      kill: { type: "boolean" },
       port: { type: "string", default: "7040" },
       host: { type: "string", default: "127.0.0.1" },
       help: { type: "boolean", short: "h" },
@@ -71,7 +73,7 @@ async function main(): Promise<void> {
   if (command === "add") return add(args, values);
   if (command === "serve") return void serve(STATE, count(values.port, "--port"), values.host);
   if (command === "stop") {
-    const pid = await turnOff(STATE);
+    const pid = await turnOff(STATE, values.kill);
     return console.log(pid ? `turned off (pid ${pid})` : "already off");
   }
   if (command !== "start" && command !== "run")

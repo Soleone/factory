@@ -20,12 +20,15 @@ export function turnOn(state: string, args: string[]): number {
   return child.pid!;
 }
 
-/** Stops the run; jobs in progress go back to the queue. Returns the pid it stopped, if one was running. */
-export async function turnOff(state: string): Promise<number | undefined> {
+/**
+ * Stops the run. Its agents keep working and the next run records what they did; with kill they get
+ * SIGTERM, then SIGKILL after 10 seconds, and their jobs go back to the queue. Returns the pid it
+ * stopped, if one was running.
+ */
+export async function turnOff(state: string, kill = false): Promise<number | undefined> {
   const pid = runningPid(state);
   if (!pid) return undefined;
-  process.kill(pid, "SIGTERM");
-  // Agents get SIGTERM, then SIGKILL after 10 seconds; the loop exits once they're gone.
+  process.kill(pid, kill ? "SIGINT" : "SIGTERM");
   for (let waited = 0; alive(pid); waited++) {
     if (waited === 60) throw new Error(`pid ${pid} is still running after 30 seconds`);
     await new Promise((resolve) => setTimeout(resolve, 500));

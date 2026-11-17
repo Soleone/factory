@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { once } from "node:events";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -229,12 +229,16 @@ describe("the factory", () => {
     jobs.some((job) => job.state === "queued" || job.state === "running");
 
   /** Runs the factory until it turns itself off or `done` holds, then turns it off. */
-  async function work(options: RunOptions, done = (jobs: Job[]) => !busy(jobs)): Promise<Job[]> {
+  async function work(
+    options: RunOptions,
+    done = (jobs: Job[]) => !busy(jobs),
+    how?: "kill",
+  ): Promise<Job[]> {
     const controller = new AbortController();
     let finished = false;
     const running = run({ ...options, signal: controller.signal }).finally(() => (finished = true));
     while (!finished) {
-      if (done(readJobs(options.state))) controller.abort();
+      if (done(readJobs(options.state))) controller.abort(how);
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
     await running;
@@ -432,12 +436,30 @@ describe("the factory", () => {
     expect(() => readFileSync(marker)).toThrow();
   });
 
-  test("turning it off puts the job in progress back, with its agent", async () => {
+  test("turning it off leaves the agent working, and the next run records what it did", async () => {
     const base = setup(["a"]);
-    agents({ claude: "sleep 30" });
+    const started = join(scratch, `started-${Date.now()}`);
+    agents({ claude: `touch ${started}; sleep 1; echo x > left.txt; ${OK}` });
     base.pick("a");
-    const [job] = await work(options(base), (jobs) => jobs[0].state === "running");
-    expect(job).toMatchObject({ state: "queued", agent: "claude", attempts: [] });
+    const [running] = await work(options(base), () => existsSync(started));
+    expect(running).toMatchObject({ state: "running", attempts: [] });
+    const [job] = await work(options(base));
+    expect(job.attempts).toMatchObject([
+      { outcome: "done", url: "https://github.com/o/r/pull/7", branch: `factory/${job.id}-1` },
+    ]);
+  });
+
+  test("turning it off with kill stops the agent and puts its job back, its work kept", async () => {
+    const base = setup(["a"]);
+    const started = join(scratch, `started-${Date.now()}`);
+    agents({ claude: `echo x > left.txt; touch ${started}; sleep 30` });
+    base.pick("a");
+    const [job] = await work(options(base), () => existsSync(started), "kill");
+    expect(job).toMatchObject({
+      state: "queued",
+      agent: "claude",
+      attempts: [{ outcome: "stopped", branch: `factory/${job.id}-1` }],
+    });
   });
 
   test("serve queues cached candidates and shows the results and their logs, nothing outside runs/", async () => {

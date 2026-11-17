@@ -1,19 +1,19 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn } from "node:child_process";
 import {
-  appendFileSync,
   closeSync,
   existsSync,
   mkdirSync,
   openSync,
   readFileSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { agent as makeAgent, classify, resetTime, type Agent } from "./agents.ts";
 import { addJobs, autoPicks, endJob, nextJob, readJobs, requeueJob, startJob } from "./jobs.ts";
 import { findPr } from "./review.ts";
-import { output, readCandidates, readSettings, refreshCandidates } from "./state.ts";
-import type { Attempt, Item, Job, Status, Tuning, Worker } from "./types.ts";
+import { alive, output, readCandidates, readSettings, refreshCandidates } from "./state.ts";
+import type { Attempt, Item, Job, Outcome, Status, Tuning, Worker } from "./types.ts";
 
 export type RunOptions = {
   /** The agents of this run, each with its model and effort. */
@@ -26,7 +26,7 @@ export type RunOptions = {
   state: string;
   /** The workwork command; tests swap in a script. */
   workwork: string;
-  /** Stops the run like SIGTERM does. */
+  /** Stops the run like SIGTERM does, or like SIGINT when aborted with the reason "kill". */
   signal?: AbortSignal;
   /** How often an idle worker looks for new jobs. */
   pollMs?: number;
@@ -38,6 +38,15 @@ const MINUTE = 60_000;
 /** Auto mode keeps this many of its jobs queued per agent, so picks never drown in them. */
 const AUTO_PER_AGENT = 5;
 const STALE_CANDIDATES = 6 * 60 * MINUTE;
+/**
+ * An agent at work, kept in running/<job id>.json until its attempt is recorded. A run that stops
+ * leaves its agents working, and the next run finishes their attempts from this.
+ */
+type Live = { begun: Begun; pid: number; worktree: string };
+type Begun = Pick<Attempt, "run" | "agent" | "model" | "effort" | "start" | "log">;
+
+const livePath = (state: string, id: string) => join(state, "running", `${id}.json`);
+
 const URL = /https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/(?:pull|issues)\/\d+/g;
 
 /** Works the queue until every agent is out of limits, until passes, or it's stopped; returns the run id. */
@@ -46,7 +55,8 @@ export async function run(options: RunOptions): Promise<string> {
   const id = new Date().toISOString().slice(0, 19).replaceAll(":", "");
   const runDir = join(state, "runs", id);
   mkdirSync(runDir, { recursive: true });
-  const children = new Set<ChildProcess>();
+  mkdirSync(join(state, "running"), { recursive: true });
+  const agents = new Set<number>();
   const wakers = new Set<() => void>();
   const workers: Worker[] = Object.entries(options.agents).map(([agent, tuning]) => ({
     agent,
@@ -56,6 +66,7 @@ export async function run(options: RunOptions): Promise<string> {
     limits: 0,
   }));
   let stopping = false;
+  let killing = false;
   let topping: Promise<void> | undefined;
 
   function writeStatus(): void {
@@ -70,11 +81,16 @@ export async function run(options: RunOptions): Promise<string> {
     writeStatus();
   }
 
-  function stop(): void {
+  /** Starts nothing new; agents keep working for the next run to finish, unless killed. */
+  function stop(kill: boolean): void {
     stopping = true;
-    for (const child of children) killGroup(child);
+    killing ||= kill;
+    if (kill) for (const pid of agents) killGroup(pid);
     for (const wake of wakers) wake();
   }
+  const handOff = () => stop(false);
+  const kill = () => stop(true);
+  const aborted = () => stop(options.signal?.reason === "kill");
 
   function ended(): string | undefined {
     if (stopping) return "turned off";
@@ -121,25 +137,37 @@ export async function run(options: RunOptions): Promise<string> {
     if (added.length) log(`auto mode queued ${added.length}`);
   }
 
-  async function work(worker: Worker): Promise<void> {
+  async function work(worker: Worker, handed?: Handed): Promise<void> {
     let quickFailures = 0;
     while (!ended()) {
       topUp();
-      const job = nextJob(readJobs(state), worker.agent);
-      if (!job) {
-        if (worker.state !== "idle") set(worker, { state: "idle" });
-        await nap(options.pollMs ?? 3000);
-        continue;
+      let job: Job | undefined;
+      let attempt: Attempt | undefined;
+      if (handed) {
+        ({ job } = handed);
+        set(worker, { state: "working", job: job.id });
+        log(`${worker.agent} takes over ${job.id} from run ${handed.live.begun.run}`);
+        attempt = await finish(job, handed.live);
+        handed = undefined;
+      } else {
+        job = nextJob(readJobs(state), worker.agent);
+        if (!job) {
+          if (worker.state !== "idle") set(worker, { state: "idle" });
+          await nap(options.pollMs ?? 3000);
+          continue;
+        }
+        startJob(state, job.id, worker.agent);
+        set(worker, { state: "working", job: job.id });
+        log(`${worker.agent} starts ${job.id}: ${job.item.label} ${job.item.id}`);
+        attempt = await attemptJob(worker, job);
       }
-      startJob(state, job.id, worker.agent);
-      set(worker, { state: "working", job: job.id });
-      log(`${worker.agent} starts ${job.id}: ${job.item.label} ${job.item.id}`);
-      const attempt = await attemptJob(worker, job);
       if (!attempt) {
-        requeueJob(state, job.id);
+        // Without a live agent it stopped before the agent started.
+        if (!existsSync(livePath(state, job.id))) requeueJob(state, job.id);
         break;
       }
       endJob(state, job.id, attempt);
+      rmSync(livePath(state, job.id), { force: true });
       log(`${worker.agent} ${attempt.outcome} ${job.id} ${attempt.url ?? attempt.error ?? ""}`);
       const seconds = (Date.parse(attempt.end) - Date.parse(attempt.start)) / 1000;
       quickFailures = attempt.outcome === "failed" && seconds < 60 ? quickFailures + 1 : 0;
@@ -181,17 +209,13 @@ export async function run(options: RunOptions): Promise<string> {
     mkdirSync(dir, { recursive: true });
     const logPath = join(dir, "agent.log");
     const worktree = join(state, "worktrees", agent.name, job.item.label.replace(/[^\w.-]+/g, "-"));
-    const start = new Date().toISOString();
-    const attempt = (outcome: Attempt["outcome"], rest: Partial<Attempt> = {}): Attempt => ({
+    const begun: Begun = {
       run: id,
       agent: agent.name,
       ...tuning,
-      start,
-      end: new Date().toISOString(),
-      outcome,
+      start: new Date().toISOString(),
       log: logPath,
-      ...rest,
-    });
+    };
     let prompt: string;
     try {
       await checkout(worktree, job.item.repo);
@@ -200,76 +224,115 @@ export async function run(options: RunOptions): Promise<string> {
       // The repo or workwork failed, not the agent: record why and move on.
       const message = (error as Error).message.trim();
       writeFileSync(logPath, `${message}\n`);
-      return attempt("failed", { error: message.slice(0, 2000) });
+      return attempt(begun, "failed", { error: message.slice(0, 2000) });
     }
     writeFileSync(join(dir, "prompt.md"), prompt);
     if (stopping) return undefined;
-    const { code, timedOut } = await spawnAgent(agent, prompt, worktree, logPath);
-    const branch = await keepWork(worktree, `factory/${slug}`);
-    if (stopping) return undefined;
-    const text = readFileSync(logPath, "utf8");
+    const live: Live = { begun, pid: startAgent(agent, worktree, dir), worktree };
+    writeFileSync(livePath(state, job.id), JSON.stringify(live));
+    return finish(job, live);
+  }
+
+  /** Waits for the agent, killing it at the timeout, and records what it did; undefined when the run hands it off. */
+  async function finish(job: Job, { begun, pid, worktree }: Live): Promise<Attempt | undefined> {
+    const dir = dirname(begun.log);
+    const exit = join(dir, "exit");
+    const deadline = Date.parse(begun.start) + options.timeoutMs;
+    let timedOut = false;
+    agents.add(pid);
+    try {
+      // The exit file first: after a long hand-off the pid may be some other process's by now.
+      while (!existsSync(exit) && alive(pid)) {
+        if (stopping && !killing) return undefined;
+        if (!timedOut && Date.now() >= deadline) {
+          timedOut = true;
+          killGroup(pid);
+        }
+        await nap(Math.max(0, Math.min(options.pollMs ?? 1000, deadline - Date.now())));
+      }
+    } finally {
+      agents.delete(pid);
+    }
+    // Whatever the agent left running in its group goes with it.
+    killGroup(pid);
+    const branch = await keepWork(worktree, `factory/${basename(dir)}`);
+    if (killing) return attempt(begun, "stopped", { branch });
+    const text = readFileSync(begun.log, "utf8");
+    // No exit file: something killed the agent and its shell.
+    const code = existsSync(exit) ? Number(readFileSync(exit, "utf8")) : 1;
+    const agent = makeAgent(begun.agent, begun);
     const outcome = timedOut ? "timeout" : classify(agent, code, text);
-    return attempt(outcome, {
+    return attempt(begun, outcome, {
       url: (outcome === "done" && (await delivered(job.item))) || text.match(URL)?.at(-1),
       branch,
     });
   }
 
-  function spawnAgent(agent: Agent, prompt: string, cwd: string, logPath: string) {
-    return new Promise<{ code: number; timedOut: boolean }>((resolve) => {
-      const logFile = openSync(logPath, "w");
-      // Its own process group, so a timeout or stop takes down everything the agent started.
-      const child = spawn(agent.command, agent.args, {
-        cwd,
-        detached: true,
-        stdio: ["pipe", logFile, logFile],
-      });
-      closeSync(logFile);
-      children.add(child);
-      let timedOut = false;
-      const timer = setTimeout(() => {
-        timedOut = true;
-        killGroup(child);
-      }, options.timeoutMs);
-      const done = (code: number) => {
-        clearTimeout(timer);
-        children.delete(child);
-        resolve({ code, timedOut });
-      };
-      child.on("error", (error) => {
-        appendFileSync(logPath, `factory: could not start ${agent.command}: ${error.message}\n`);
-        done(127);
-      });
-      child.on("close", (code) => {
-        killGroup(child);
-        done(code ?? 1);
-      });
-      // The agent may exit before reading its prompt; its log tells why.
-      // stdin is a pipe, as asked above; node's types can't tell when the other fds are numbers.
-      child.stdin!.on("error", () => {});
-      child.stdin!.end(prompt);
-    });
+  /**
+   * Jobs the last run left running: those with a live agent go to this run's worker for that agent;
+   * the rest stopped before their agent started, so they go back to the queue.
+   */
+  const handed = new Map<string, Handed>();
+  for (const job of readJobs(state)) {
+    if (job.state !== "running") continue;
+    if (!existsSync(livePath(state, job.id))) {
+      requeueJob(state, job.id);
+      continue;
+    }
+    const live: Live = JSON.parse(readFileSync(livePath(state, job.id), "utf8"));
+    // One worker per agent, so each agent has at most one job to take over.
+    handed.set(live.begun.agent, { job, live });
   }
-
-  // A run that crashed left its jobs running; they go back to the queue with their agent.
-  for (const job of readJobs(state)) if (job.state === "running") requeueJob(state, job.id);
-  process.on("SIGTERM", stop);
-  process.on("SIGINT", stop);
-  options.signal?.addEventListener("abort", stop);
+  process.on("SIGTERM", handOff);
+  process.on("SIGINT", kill);
+  options.signal?.addEventListener("abort", aborted);
   writeStatus();
   try {
-    await Promise.all(workers.map(work));
+    await Promise.all(workers.map((worker) => work(worker, handed.get(worker.agent))));
   } catch (error) {
-    stop();
+    kill();
     throw error;
   } finally {
-    process.off("SIGTERM", stop);
-    process.off("SIGINT", stop);
-    options.signal?.removeEventListener("abort", stop);
+    process.off("SIGTERM", handOff);
+    process.off("SIGINT", kill);
+    options.signal?.removeEventListener("abort", aborted);
     await topping;
     writeStatus();
   }
   return id;
+}
+
+type Handed = { job: Job; live: Live };
+
+const attempt = (begun: Begun, outcome: Outcome, rest: Partial<Attempt> = {}): Attempt => ({
+  ...begun,
+  end: new Date().toISOString(),
+  outcome,
+  ...rest,
+});
+
+/**
+ * The agent in its own process group, so a timeout or kill takes down everything it started, and
+ * detached, so it outlives a run that hands it off. The shell in between reads the prompt from a file
+ * and writes the exit code to one, both of which outlast this process. Returns the group's pid.
+ */
+function startAgent(agent: Agent, cwd: string, dir: string): number {
+  const log = openSync(join(dir, "agent.log"), "w");
+  const child = spawn(
+    "sh",
+    [
+      "-c",
+      'dir=$1; shift; "$@" <"$dir/prompt.md"; echo $? >"$dir/exit"',
+      "sh",
+      dir,
+      agent.command,
+      ...agent.args,
+    ],
+    { cwd, detached: true, stdio: ["ignore", log, log] },
+  );
+  closeSync(log);
+  child.unref();
+  return child.pid!;
 }
 
 /** The PR the agent opened, as GitHub knows it; undefined when gh can't tell, and the log's last link stands in. */
@@ -322,9 +385,7 @@ async function keepWork(
   return branch;
 }
 
-function killGroup(child: ChildProcess): void {
-  const pid = child.pid;
-  if (pid === undefined) return;
+function killGroup(pid: number): void {
   for (const [signal, delay] of [
     ["SIGTERM", 0],
     ["SIGKILL", 10_000],
