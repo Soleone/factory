@@ -1,0 +1,151 @@
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { extname, join, relative, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
+import { addJobs, moveJob, readJobs, removeJob, retryJob } from "./jobs.ts";
+import { turnOff, turnOn } from "./power.ts";
+import {
+  checkSettings,
+  itemKey,
+  readCandidates,
+  readSettings,
+  refreshCandidates,
+  refreshingCandidates,
+  runningPid,
+  writeSettings,
+} from "./state.ts";
+import type { Settings, Snapshot, Status } from "./types.ts";
+
+/** The built page; under pn dev, Vite serves it instead and proxies /api and /runs here. */
+const WEB = fileURLToPath(new URL("./web", import.meta.url));
+
+const TYPES: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript",
+  ".css": "text/css",
+  ".svg": "image/svg+xml",
+  ".woff2": "font/woff2",
+};
+
+/** The page and the API it uses: the same state and commands as the CLI, nothing more. */
+export function serve(state: string, port: number, host: string): Server {
+  const routes: Record<string, (body: never, id: string) => unknown> = {
+    "GET /api/state": () => snapshot(state),
+    "GET /api/candidates": () => readCandidates(state) ?? { at: null, items: [] },
+    "POST /api/candidates/refresh": () => {
+      void refreshCandidates(state, "workwork").catch((error: Error) =>
+        console.error(`factory: workwork failed: ${error.message}`),
+      );
+    },
+    "POST /api/jobs": (body: { items: { repo: string; id: string }[]; agent?: string }) => {
+      const cached = new Map(readCandidates(state)?.items.map((item) => [itemKey(item), item]));
+      const items = body.items.map((wanted) => {
+        const item = cached.get(itemKey(wanted));
+        if (!item) throw new Error(`no candidate ${wanted.id} in ${wanted.repo}`);
+        return item;
+      });
+      return addJobs(state, items, "pick", { agent: body.agent || undefined });
+    },
+    "POST /api/jobs/remove": (_, id) => removeJob(state, id),
+    "POST /api/jobs/retry": (_, id) => retryJob(state, id),
+    "POST /api/jobs/move": (body: { index: number }, id) => moveJob(state, id, body.index),
+    "PUT /api/settings": (body: Settings) => writeSettings(state, checkSettings(body)),
+    "POST /api/on": (body: Pick<Settings, "agents" | "limit" | "until">) => {
+      checkSettings({ ...readSettings(state), ...body });
+      return turnOn(state, runArgs(body));
+    },
+    "POST /api/off": () => turnOff(state),
+  };
+
+  return createServer(async (request, response) => {
+    // Job ids and run folders are [\w.-] only, so the path needs no decoding.
+    const path = new URL(request.url ?? "/", "http://factory").pathname;
+    // /api/jobs/<id>/<action> is routed as /api/jobs/<action> with the id.
+    const [, jobId, action] = /^\/api\/jobs\/(\w+)\/(\w+)$/.exec(path) ?? [];
+    const route = routes[`${request.method} ${jobId ? `/api/jobs/${action}` : path}`];
+    try {
+      if (route) {
+        // Each route says what body it takes; JSON from the page is trusted to match it, the commands check the rest.
+        const result = await route((await body(request)) as never, jobId);
+        return send(response, "application/json", JSON.stringify(result ?? null));
+      }
+      const file = resolve(state, `.${path}`);
+      if (file.startsWith(join(state, "runs") + sep) && isFile(file))
+        return send(response, "text/plain; charset=utf-8", readFileSync(file));
+      const asset = resolve(WEB, `.${path}`);
+      if (asset.startsWith(WEB + sep) && isFile(asset))
+        return send(
+          response,
+          TYPES[extname(asset)] ?? "application/octet-stream",
+          readFileSync(asset),
+        );
+      if (path.startsWith("/api/") || path.startsWith("/runs/")) {
+        response.writeHead(404).end("not found");
+        return;
+      }
+      const page = join(WEB, "index.html");
+      if (!isFile(page))
+        return send(
+          response,
+          "text/plain",
+          "The page isn't built: run `vp build`, or use `pn dev`.",
+        );
+      send(response, TYPES[".html"], readFileSync(page));
+    } catch (error) {
+      response
+        .writeHead(400, { "content-type": "application/json" })
+        .end(JSON.stringify({ error: (error as Error).message }));
+    }
+  }).listen(port, host, () => {
+    console.log(`factory: serving http://${host}:${port}`);
+    if (host !== "127.0.0.1" && host !== "localhost")
+      console.log("factory: anyone who reaches this address can run agents on this machine");
+  });
+}
+
+function snapshot(state: string): Snapshot {
+  const statusPath = join(state, "status.json");
+  const candidates = readCandidates(state);
+  return {
+    on: runningPid(state) !== undefined,
+    status: existsSync(statusPath)
+      ? (JSON.parse(readFileSync(statusPath, "utf8")) as Status)
+      : null,
+    settings: readSettings(state),
+    // Paths under runs/ are where this server serves them.
+    jobs: readJobs(state).map((job) => ({
+      ...job,
+      attempts: job.attempts.map((attempt) => ({ ...attempt, log: relative(state, attempt.log) })),
+    })),
+    candidates: {
+      at: candidates?.at ?? null,
+      count: candidates?.items.length ?? 0,
+      refreshing: refreshingCandidates(state),
+    },
+  };
+}
+
+/** A run asked for from the page, as the flags `factory run` takes. */
+function runArgs({ agents, limit, until }: Pick<Settings, "agents" | "limit" | "until">): string[] {
+  const args = ["--agents", Object.keys(agents).join(","), "--limit", String(limit ?? "none")];
+  if (until) args.push("--until", until);
+  for (const [name, { model, effort }] of Object.entries(agents)) {
+    if (model) args.push("--model", `${name}=${model}`);
+    if (effort) args.push("--effort", `${name}=${effort}`);
+  }
+  return args;
+}
+
+async function body(request: IncomingMessage): Promise<unknown> {
+  let text = "";
+  for await (const chunk of request) text += chunk;
+  return text ? JSON.parse(text) : {};
+}
+
+function isFile(path: string): boolean {
+  return existsSync(path) && statSync(path).isFile();
+}
+
+function send(response: ServerResponse, type: string, body: string | Buffer): void {
+  response.writeHead(200, { "content-type": type, "cache-control": "no-store" }).end(body);
+}

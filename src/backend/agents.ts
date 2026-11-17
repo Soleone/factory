@@ -1,3 +1,5 @@
+import type { Outcome, Tuning } from "./types.ts";
+
 /** A headless coding agent: how to start it (the prompt goes on stdin) and what its usage limit looks like. */
 export type Agent = { name: string; command: string; args: string[]; limit: RegExp };
 
@@ -11,22 +13,40 @@ const LIMITS: Record<string, RegExp> = {
   pi: /usage limit|usage_limit_reached|usage_not_included|rate_limit_exceeded/i,
 };
 
-const AGENT_NAMES = Object.keys(LIMITS);
+export const AGENT_NAMES = Object.keys(LIMITS);
 
-export function agent(name: string, model?: string): Agent {
+/** What each agent takes for effort: claude's --effort, pi's --thinking. */
+export const EFFORTS: Record<string, string[]> = {
+  claude: ["low", "medium", "high", "xhigh", "max"],
+  pi: ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
+};
+
+export function agent(name: string, { model, effort }: Tuning = {}): Agent {
   const pick = model ? ["--model", model] : [];
   if (name === "claude")
     return {
       name,
       command: "claude",
-      args: ["-p", "--permission-mode", "bypassPermissions", "--output-format", "json", ...pick],
+      args: [
+        "-p",
+        "--permission-mode",
+        "bypassPermissions",
+        "--output-format",
+        "json",
+        ...pick,
+        ...(effort ? ["--effort", effort] : []),
+      ],
       limit: LIMITS.claude,
     };
-  if (name === "pi") return { name, command: "pi", args: ["-p", ...pick], limit: LIMITS.pi };
+  if (name === "pi")
+    return {
+      name,
+      command: "pi",
+      args: ["-p", ...pick, ...(effort ? ["--thinking", effort] : [])],
+      limit: LIMITS.pi,
+    };
   throw new Error(`unknown agent ${name} (known: ${AGENT_NAMES.join(", ")})`);
 }
-
-export type Outcome = "done" | "failed" | "limited" | "timeout";
 
 /** Only the end of the log decides: the agent's own work earlier on may mention limits too. */
 export function classify(agent: Agent, code: number, log: string): Exclude<Outcome, "timeout"> {

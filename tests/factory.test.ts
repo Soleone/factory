@@ -1,14 +1,16 @@
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { once } from "node:events";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { beforeAll, describe, expect, test } from "vite-plus/test";
-import { agent, classify, resetTime, type Agent } from "../src/agents.ts";
-import { run, type Options } from "../src/loop.ts";
-import { order, readLedger, replay, type Entry, type Item } from "../src/state.ts";
-import { serve } from "../src/web.ts";
+import { afterEach, beforeAll, describe, expect, test } from "vite-plus/test";
+import { agent, classify, resetTime } from "../src/backend/agents.ts";
+import { addJobs, moveJob, order, readJobs, removeJob, retryJob } from "../src/backend/jobs.ts";
+import { run, type RunOptions } from "../src/backend/loop.ts";
+import { readSettings, writeSettings } from "../src/backend/state.ts";
+import type { Item, Job, Status } from "../src/backend/types.ts";
+import { serve } from "../src/backend/web.ts";
 
 const scratch = mkdtempSync(join(tmpdir(), "factory-test-"));
 const NOW = Date.parse("2026-11-16T04:00:00Z");
@@ -93,25 +95,25 @@ describe("limit messages", () => {
   });
 });
 
-describe("queue", () => {
-  const item = (repo: string, id: string, level: string): Item => ({
-    repo,
-    label: repo,
-    id,
-    play: id,
-    level,
-    title: "",
-  });
+const item = (repo: string, id: string, level = "skim", play = "fake"): Item => ({
+  repo,
+  label: repo,
+  id,
+  play,
+  level,
+  title: `fix ${id}`,
+});
 
+describe("queue", () => {
   test("cheapest attention first, taking turns between repos, only the wanted levels", () => {
     const items = [
-      item("a", "a1", "skim"),
-      item("a", "a2", "skim"),
-      item("a", "a3", "skim"),
-      item("b", "b1", "skim"),
+      item("a", "a1"),
+      item("a", "a2"),
+      item("a", "a3"),
+      item("b", "b1"),
       item("a", "a4", "auto"),
       item("b", "b2", "decide"),
-      item("c", "c1", "skim"),
+      item("c", "c1"),
     ];
     expect(order(items, ["auto", "skim", "decide"]).map((item) => item.id)).toEqual([
       "a4",
@@ -125,36 +127,46 @@ describe("queue", () => {
     expect(order(items, ["auto"]).map((item) => item.id)).toEqual(["a4"]);
   });
 
-  test("replay skips done and twice-failed items and remembers who failed", () => {
-    const entry = (id: string, agent: string, outcome: Entry["outcome"]) =>
-      ({ repo: "r", id, agent, outcome }) as Entry;
-    const { finished, failedBy } = replay([
-      entry("done", "claude", "done"),
-      entry("twice", "claude", "failed"),
-      entry("twice", "pi", "timeout"),
-      entry("once", "claude", "failed"),
-      entry("limited", "pi", "limited"),
-    ]);
-    expect([...finished].sort()).toEqual(["r done", "r twice"]);
-    expect(failedBy.get("r once")).toEqual(["claude"]);
-    expect(failedBy.has("r limited")).toBe(false);
+  test("picks come before auto jobs, in the order the user gives them", () => {
+    const state = mkdtempSync(join(scratch, "state-"));
+    addJobs(state, [item("r", "auto1")], "auto");
+    const [a, b, c] = addJobs(state, [item("r", "a"), item("r", "b"), item("r", "c")], "pick");
+    moveJob(state, c.id, 0);
+    removeJob(state, b.id);
+    const ids = (jobs: Job[]) =>
+      jobs.filter((job) => job.state === "queued").map((job) => job.item.id);
+    expect(ids(readJobs(state))).toEqual(["c", "a", "auto1"]);
+    moveJob(state, c.id, 1);
+    expect(ids(readJobs(state))).toEqual(["a", "c", "auto1"]);
+    expect(() => removeJob(state, b.id)).toThrow("is removed");
+    expect(() => retryJob(state, a.id)).toThrow("is queued");
   });
 });
 
-describe("the loop", () => {
+describe("the factory", () => {
+  const path = process.env.PATH;
+  afterEach(() => {
+    process.env.PATH = path;
+  });
+
   function sh(cwd: string, command: string, ...args: string[]): string {
     return execFileSync(command, args, { cwd, encoding: "utf8" });
   }
 
-  function script(name: string, body: string): string {
-    const path = join(mkdtempSync(join(scratch, "bin-")), name);
-    writeFileSync(path, `#!/bin/sh\n${body}\n`);
-    chmodSync(path, 0o755);
-    return path;
+  function script(dir: string, name: string, body: string): void {
+    writeFileSync(join(dir, name), `#!/bin/sh\n${body}\n`);
+    chmodSync(join(dir, name), 0o755);
+  }
+
+  /** Fake claude and pi on PATH; each reads its prompt and runs its body. */
+  function agents(bodies: { claude?: string; pi?: string }): void {
+    const bin = mkdtempSync(join(scratch, "bin-"));
+    for (const [name, body] of Object.entries(bodies)) script(bin, name, `cat >/dev/null\n${body}`);
+    process.env.PATH = `${bin}:${path}`;
   }
 
   /** A clone with a remote, and a fake workwork offering the given ids in it. */
-  function setup(ids: string[]): { repo: string; state: string; workwork: string } {
+  function setup(ids: string[]) {
     const origin = mkdtempSync(join(scratch, "origin-"));
     sh(origin, "git", "init", "-q", "--bare");
     const repo = mkdtempSync(join(scratch, "repo-"));
@@ -162,159 +174,226 @@ describe("the loop", () => {
     sh(repo, "git", "commit", "-q", "--allow-empty", "-m", "start");
     sh(repo, "git", "push", "-q", "origin", "main");
     sh(repo, "git", "remote", "set-head", "origin", "main");
-    const items = ids.map((id) => ({
-      repo,
-      label: "repo",
-      id,
-      play: "fake",
-      level: "skim",
-      title: `fix ${id}`,
-    }));
-    const workwork = script(
+    const items = ids.map((id) => ({ ...item(repo, id), label: "repo" }));
+    const bin = mkdtempSync(join(scratch, "bin-"));
+    script(
+      bin,
       "workwork",
       `if [ "$1" = prompt ]; then echo "do $2"; else echo '${JSON.stringify(items)}'; fi`,
     );
-    return { repo, state: mkdtempSync(join(scratch, "state-")), workwork };
+    const state = mkdtempSync(join(scratch, "state-"));
+    const pick = (id: string, pin = {}) =>
+      addJobs(state, [items.find((item) => item.id === id)!], "pick", pin)[0];
+    return { repo, state, workwork: join(bin, "workwork"), items, pick };
   }
 
-  function fake(name: string, body: string): Agent {
-    return {
-      name,
-      command: script(name, `cat >/dev/null\n${body}`),
-      args: [],
-      limit: agent("claude").limit,
-    };
+  const options = (
+    base: { state: string; workwork: string },
+    agents: RunOptions["agents"] = { claude: {} },
+  ): RunOptions => ({ ...base, agents, limit: 2, timeoutMs: 60_000, pollMs: 20 });
+
+  const busy = (jobs: Job[]) =>
+    jobs.some((job) => job.state === "queued" || job.state === "running");
+
+  /** Runs the factory until it turns itself off or `done` holds, then turns it off. */
+  async function work(options: RunOptions, done = (jobs: Job[]) => !busy(jobs)): Promise<Job[]> {
+    const controller = new AbortController();
+    let finished = false;
+    const running = run({ ...options, signal: controller.signal }).finally(() => (finished = true));
+    while (!finished) {
+      if (done(readJobs(options.state))) controller.abort();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    await running;
+    return readJobs(options.state);
   }
 
-  const options = (base: { state: string; workwork: string }, agents: Agent[]): Options => ({
-    ...base,
-    agents,
-    levels: ["skim"],
-    windows: 2,
-    timeoutMs: 60_000,
-  });
+  const status = (state: string): Status =>
+    JSON.parse(readFileSync(join(state, "status.json"), "utf8"));
+  const OK = "echo 'opened https://github.com/o/r/pull/7'";
 
-  const OK = fake("ok", "echo 'opened https://github.com/o/r/pull/7'");
-
-  test("does each item once, links the PR and removes clean worktrees", async () => {
-    const base = setup(["fix/a.ts", "fix/b.ts"]);
-    await run(options(base, [OK]));
-    const ledger = readLedger(base.state);
-    expect(ledger.map((entry) => [entry.id, entry.outcome, entry.url])).toEqual([
-      ["fix/a.ts", "done", "https://github.com/o/r/pull/7"],
-      ["fix/b.ts", "done", "https://github.com/o/r/pull/7"],
+  test("does picks before auto jobs, links the PR and reuses one worktree per agent and repo", async () => {
+    const base = setup(["a", "b", "c"]);
+    agents({ claude: OK });
+    base.pick("b");
+    writeSettings(base.state, {
+      ...readSettings(base.state),
+      auto: { on: true, levels: ["skim"], plays: [] },
+    });
+    const jobs = await work(
+      options(base),
+      (jobs) => jobs.filter((job) => job.state === "done").length === 3,
+    );
+    const attempts = jobs
+      .flatMap((job) => job.attempts.map((attempt) => ({ id: job.item.id, ...attempt })))
+      .sort((a, b) => a.start.localeCompare(b.start));
+    expect(attempts.map((attempt) => [attempt.id, attempt.outcome, attempt.url])).toEqual([
+      ["b", "done", "https://github.com/o/r/pull/7"],
+      ["a", "done", "https://github.com/o/r/pull/7"],
+      ["c", "done", "https://github.com/o/r/pull/7"],
     ]);
-    expect(readFileSync(join(ledger[0].log, "..", "prompt.md"), "utf8")).toBe("do fix/a.ts\n");
-    expect(sh(base.repo, "git", "worktree", "list").trim().split("\n")).toHaveLength(1);
-    const status = JSON.parse(readFileSync(join(base.state, "status.json"), "utf8"));
-    expect(status.workers[0]).toMatchObject({ state: "stopped", reason: "nothing left to do" });
-
-    await run(options(base, [OK]));
-    expect(readLedger(base.state)).toHaveLength(2);
+    expect(jobs.map((job) => job.source)).toEqual(["pick", "auto", "auto"]);
+    expect(readFileSync(join(attempts[0].log, "..", "prompt.md"), "utf8")).toBe("do b\n");
+    expect(sh(base.repo, "git", "worktree", "list").trim().split("\n")).toHaveLength(2);
   });
 
-  test("keeps a worktree with unpushed commits", async () => {
-    const base = setup(["fix/a.ts"]);
-    await run(options(base, [fake("ok", "git commit -q --allow-empty -m wip")]));
-    const [entry] = readLedger(base.state);
-    expect(entry.outcome).toBe("done");
-    expect(existsSync(entry.worktree!)).toBe(true);
+  test("keeps work an agent left unpushed on a branch and starts the next job clean", async () => {
+    const base = setup(["a", "b"]);
+    agents({ claude: "test -e left.txt && exit 1; echo x > left.txt" });
+    const a = base.pick("a");
+    base.pick("b");
+    const [first, second] = await work(options(base));
+    expect([first.state, second.state]).toEqual(["done", "done"]);
+    expect(first.attempts[0].branch).toBe(`factory/${a.id}-1`);
+    expect(
+      sh(base.repo, "git", "show", "--name-only", "--format=", first.attempts[0].branch!),
+    ).toBe("left.txt\n");
   });
 
-  test("a failed item goes to the other agent once, then never again", async () => {
-    const base = setup(["fix/a.ts"]);
-    const fail = (name: string) => fake(name, "exit 1");
-    await run(options(base, [fail("claude")]));
-    await run(options(base, [fail("claude")]));
-    expect(readLedger(base.state).map((entry) => entry.outcome)).toEqual(["failed"]);
-    await run(options(base, [fail("pi")]));
-    await run(options(base, [OK]));
-    expect(readLedger(base.state).map((entry) => [entry.agent, entry.outcome])).toEqual([
+  test("a job keeps its agent: one retry after a failure, then only by hand", async () => {
+    const base = setup(["a"]);
+    agents({ claude: "echo broken; exit 1", pi: OK });
+    const job = base.pick("a");
+    const [failed] = await work(options(base, { claude: {}, pi: {} }));
+    expect(failed.attempts.map((attempt) => [attempt.agent, attempt.outcome])).toEqual([
       ["claude", "failed"],
-      ["pi", "failed"],
+      ["claude", "failed"],
     ]);
+    expect(failed.state).toBe("failed");
+    retryJob(base.state, job.id);
+    agents({ claude: OK, pi: OK });
+    const [done] = await work(options(base, { claude: {}, pi: {} }));
+    expect(done.attempts.map((attempt) => attempt.agent)).toEqual(["claude", "claude", "claude"]);
+    expect(done.state).toBe("done");
   });
 
-  test("one window stops at the first limit without sleeping and leaves the item for a later run", async () => {
-    const base = setup(["fix/a.ts"]);
+  test("a job for an agent outside the run waits for it", async () => {
+    const base = setup(["a", "b"]);
+    agents({ claude: OK });
+    base.pick("a", { agent: "pi" });
+    base.pick("b");
+    const jobs = await work(options(base), (jobs) => jobs[1].state === "done");
+    expect(jobs.map((job) => job.state)).toEqual(["queued", "done"]);
+  });
+
+  test("the run's model and effort per agent, unless the job has its own", async () => {
+    const base = setup(["a"]);
+    agents({ claude: 'echo "args: $*"' });
+    base.pick("a", { effort: "low" });
+    const [job] = await work(options(base, { claude: { model: "opus", effort: "high" } }));
+    expect(job.attempts[0]).toMatchObject({ model: "opus", effort: "low", outcome: "done" });
+    expect(readFileSync(job.attempts[0].log, "utf8")).toContain("--model opus --effort low");
+  });
+
+  test("limit 1: an agent stops at its first limit hit and the factory turns off with no agent left", async () => {
+    const base = setup(["a"]);
+    agents({ claude: "echo 'Claude AI usage limit reached|1794801600'; exit 1" });
+    base.pick("a");
     const wakes: number[] = [];
-    await run({
-      ...options(base, [fake("claude", "echo 'Claude AI usage limit reached|1794801600'; exit 1")]),
-      windows: 1,
-      sleep: async (ms) => void wakes.push(ms),
-    });
-    expect(readLedger(base.state).map((entry) => entry.outcome)).toEqual(["limited"]);
+    const [job] = await work(
+      { ...options(base), limit: 1, sleep: async (ms) => void wakes.push(ms) },
+      () => false,
+    );
+    expect(job.state).toBe("queued");
+    expect(job.agent).toBe("claude");
+    expect(job.attempts.map((attempt) => attempt.outcome)).toEqual(["limited"]);
     expect(wakes).toHaveLength(0);
-    const status = JSON.parse(readFileSync(join(base.state, "status.json"), "utf8"));
-    expect(status.workers[0]).toMatchObject({ state: "stopped", reason: "limit 1 of 1" });
-    await run(options(base, [OK]));
-    expect(readLedger(base.state).map((entry) => entry.outcome)).toEqual(["limited", "done"]);
+    expect(status(base.state).workers[0]).toMatchObject({
+      state: "stopped",
+      reason: "limit 1 of 1",
+    });
   });
 
-  test("sleeps until the parsed reset, puts the item back, and stops after its windows", async () => {
-    const base = setup(["fix/a.ts", "fix/b.ts"]);
+  test("sleeps until the parsed reset, keeps the job, and stops at its limit", async () => {
+    const base = setup(["a", "b"]);
     const reset = Math.floor(Date.now() / 1000) + 3600;
+    agents({ claude: `echo 'Claude AI usage limit reached|${reset}'; exit 1` });
+    base.pick("a");
+    base.pick("b");
     const wakes: number[] = [];
-    await run({
-      ...options(base, [fake("claude", `echo 'Claude AI usage limit reached|${reset}'; exit 1`)]),
-      sleep: async (ms) => void wakes.push(Date.now() + ms),
-    });
-    const ledger = readLedger(base.state);
-    // The same item again after the wait: it went back to the front.
-    expect(ledger.map((entry) => [entry.id, entry.outcome])).toEqual([
-      ["fix/a.ts", "limited"],
-      ["fix/a.ts", "limited"],
-    ]);
+    const jobs = await work(
+      { ...options(base), sleep: async (ms) => void wakes.push(Date.now() + ms) },
+      () => false,
+    );
+    expect(jobs[0].attempts.map((attempt) => attempt.outcome)).toEqual(["limited", "limited"]);
+    expect(jobs[1].attempts).toEqual([]);
     expect(wakes).toHaveLength(1);
     expect(Math.abs(wakes[0] - (reset * 1000 + 2 * MINUTE))).toBeLessThan(100);
-    const status = JSON.parse(readFileSync(join(base.state, "status.json"), "utf8"));
-    expect(status.workers[0]).toMatchObject({ state: "stopped", reason: "limit 2 of 2" });
+    expect(status(base.state).workers[0]).toMatchObject({ reason: "limit 2 of 2" });
+  });
+
+  test("without a limit it waits for every reset", async () => {
+    const base = setup(["a"]);
+    const counter = join(scratch, `count-${Date.now()}`);
+    agents({
+      claude: `echo x >> ${counter}; [ $(wc -l < ${counter}) -gt 3 ] && exit 0; echo 'Claude AI usage limit reached|1794801600'; exit 1`,
+    });
+    base.pick("a");
+    const wakes: number[] = [];
+    const [job] = await work({
+      ...options(base),
+      limit: null,
+      sleep: async (ms) => void wakes.push(ms),
+    });
+    expect(job.attempts.map((attempt) => attempt.outcome)).toEqual([
+      "limited",
+      "limited",
+      "limited",
+      "done",
+    ]);
+    expect(wakes).toHaveLength(3);
   });
 
   test("three quick failures in a row count as a limit", async () => {
-    const base = setup(["fix/a.ts", "fix/b.ts", "fix/c.ts", "fix/d.ts"]);
-    await run({ ...options(base, [fake("claude", "echo 'Not logged in'; exit 1")]), windows: 1 });
-    expect(readLedger(base.state).map((entry) => entry.outcome)).toEqual([
-      "failed",
-      "failed",
-      "failed",
-    ]);
+    const base = setup(["a", "b", "c"]);
+    agents({ claude: "echo 'Not logged in'; exit 1" });
+    for (const id of ["a", "b", "c"]) base.pick(id);
+    const jobs = await work({ ...options(base), limit: 1 }, () => false);
+    expect(jobs.map((job) => job.attempts.length)).toEqual([2, 1, 0]);
   });
 
   test("kills an agent that runs past the timeout, children included", async () => {
-    const base = setup(["fix/a.ts"]);
-    const marker = join(scratch, "survived");
-    await run({
-      ...options(base, [fake("claude", `(sleep 2; touch ${marker}) & sleep 30`)]),
-      timeoutMs: 300,
-    });
-    expect(readLedger(base.state).map((entry) => entry.outcome)).toEqual(["timeout"]);
+    const base = setup(["a"]);
+    const marker = join(scratch, `survived-${Date.now()}`);
+    agents({ claude: `(sleep 2; touch ${marker}) & sleep 30` });
+    base.pick("a");
+    const [job] = await work({ ...options(base), timeoutMs: 300 });
+    expect(job.attempts.map((attempt) => attempt.outcome)).toEqual(["timeout", "timeout"]);
     await new Promise((resolve) => setTimeout(resolve, 2500));
-    expect(existsSync(marker)).toBe(false);
+    expect(() => readFileSync(marker)).toThrow();
   });
 
-  test("--max-items stops after starting that many", async () => {
-    const base = setup(["fix/a.ts", "fix/b.ts"]);
-    await run({ ...options(base, [OK]), maxItems: 1 });
-    expect(readLedger(base.state)).toHaveLength(1);
-    const status = JSON.parse(readFileSync(join(base.state, "status.json"), "utf8"));
-    expect(status.queue.map((item: Item) => item.title)).toEqual(["fix fix/b.ts"]);
+  test("turning it off puts the job in progress back, with its agent", async () => {
+    const base = setup(["a"]);
+    agents({ claude: "sleep 30" });
+    base.pick("a");
+    const [job] = await work(options(base), (jobs) => jobs[0].state === "running");
+    expect(job).toMatchObject({ state: "queued", agent: "claude", attempts: [] });
   });
 
-  test("serve shows the results and their logs, and nothing outside runs/", async () => {
-    const base = setup(["fix/a.ts"]);
-    await run(options(base, [OK]));
+  test("serve queues cached candidates and shows the results and their logs, nothing outside runs/", async () => {
+    const base = setup(["a"]);
+    agents({ claude: OK });
+    writeFileSync(
+      join(base.state, "candidates.json"),
+      JSON.stringify({ at: new Date().toISOString(), items: base.items }),
+    );
     const server = serve(base.state, 0, "127.0.0.1");
     await once(server, "listening");
     const { port } = server.address() as AddressInfo;
-    const get = (path: string) => fetch(`http://127.0.0.1:${port}${path}`);
+    const url = (path: string) => `http://127.0.0.1:${port}${path}`;
     try {
-      const { results } = (await (await get("/state.json")).json()) as { results: Entry[] };
-      expect(results.map((entry) => [entry.title, entry.outcome])).toEqual([
-        ["fix fix/a.ts", "done"],
-      ]);
-      expect(await (await get(`/${results[0].log}`)).text()).toContain("pull/7");
-      expect((await get("/runs/%2E%2E/ledger.jsonl")).status).toBe(404);
+      const post = (path: string, body: unknown) =>
+        fetch(url(path), { method: "POST", body: JSON.stringify(body) });
+      expect((await post("/api/jobs", { items: [{ repo: base.repo, id: "nope" }] })).status).toBe(
+        400,
+      );
+      await post("/api/jobs", { items: [{ repo: base.repo, id: "a" }] });
+      await work(options(base));
+      const { jobs } = (await (await fetch(url("/api/state"))).json()) as { jobs: Job[] };
+      expect(jobs.map((job) => [job.item.id, job.state])).toEqual([["a", "done"]]);
+      expect(await (await fetch(url(`/${jobs[0].attempts[0].log}`))).text()).toContain("pull/7");
+      expect(await (await fetch(url("/runs/%2E%2E/jobs.jsonl"))).text()).not.toContain('"add"');
     } finally {
       server.close();
     }
