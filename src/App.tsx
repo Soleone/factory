@@ -44,7 +44,10 @@ export function App() {
     <div className="mx-auto flex min-h-svh w-full max-w-5xl flex-col gap-6 p-4">
       <header className="flex flex-wrap items-center gap-x-4 gap-y-3">
         <div className="flex flex-1 items-baseline gap-3">
-          <h1 className="font-heading text-xl font-semibold">factory</h1>
+          <h1 className="flex items-center gap-2 font-heading text-xl font-semibold">
+            <img src={`${import.meta.env.BASE_URL}favicon.svg`} alt="" width={32} height={32} />
+            factory
+          </h1>
           <Badge variant={on ? "default" : "outline"}>{on ? "on" : "off"}</Badge>
           <span className="text-sm text-muted-foreground">{run}</span>
         </div>
