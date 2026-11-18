@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig, lazyPlugins } from "vite-plus";
+import { demoApi } from "./scripts/demo";
 import { BUILTIN_THEMES } from "./src/components/soleone/theme/palettes";
 import { themePlugin } from "./src/components/soleone/theme-vite";
 import { DEFAULT_THEME, THEME_STORAGE_KEY } from "./src/theme/config";
@@ -24,13 +25,14 @@ const noCva = {
 /** Where `factory serve` listens under `pn dev`; Vite takes the usual 7040 and proxies to it. */
 const API = "http://127.0.0.1:7041";
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   // The CLI, bundled to dist/cli.mjs. `vp build` then puts the page next to it in dist/web.
   pack: {
     entry: ["src/backend/cli.ts"],
     dts: false,
   },
   plugins: lazyPlugins(() => [
+    ...(mode === "demo" ? [demoApi()] : []),
     react(),
     tailwindcss(),
     themePlugin({
@@ -42,9 +44,9 @@ export default defineConfig({
   resolve: { alias: { "@": resolve(import.meta.dirname, "./src") } },
   build: { outDir: "dist/web" },
   server: {
-    port: 7040,
+    port: mode === "demo" ? 7042 : 7040,
     strictPort: true,
-    proxy: { "/api": API, "/runs": API },
+    proxy: mode === "demo" ? undefined : { "/api": API, "/runs": API },
   },
   clearScreen: false,
   staged: { "*": "vp check --fix" },
@@ -84,4 +86,4 @@ export default defineConfig({
       },
     ],
   },
-});
+}));

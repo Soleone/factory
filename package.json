@@ -30,6 +30,7 @@
   },
   "scripts": {
     "dev": "node scripts/dev.mjs",
+    "dev:demo": "node node_modules/vite/dist/vite/node/cli.js dev --mode demo",
     "build": "vp pack && vp build",
     "test": "vp test run",
     "check": "vp check",

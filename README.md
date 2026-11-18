@@ -65,6 +65,12 @@ vp check && vp test run && kit check
 
 The page is built on the [kit](https://github.com/Soleone/kit) web stack: Vite+, React, shadcn base-nova and the @soleone theme. `src/backend/` holds the CLI, the factory and the server; `src/` the page. `pn dev` runs Vite with hot reload at http://localhost:7040 in front of `factory serve` on 7041, which restarts when `src/backend/` changes. It uses your real state folder, so Turn on starts real agents. `pn build` bundles the CLI to `dist/cli.mjs` and the page to `dist/web/`.
 
+### Try the UI with dummy data
+
+Run `pnpm dev:demo` and open [factory (demo)](http://localhost:7042). Browse sample candidates, reorder the queue, retry a failed job, review sample PRs, or try the run and settings controls. Turn on shows simulated workers without executing any jobs.
+
+The demo does not start `factory serve`, call `workwork` or GitHub, or read or write your real Factory state. Changes are shared across tabs and reset when you restart the demo server.
+
 ### Release
 
 From `main` with a clean working tree, authenticated Git push access, and pnpm logged in to npm (`pn whoami`):
