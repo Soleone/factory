@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 import type { Model } from "./types.ts";
 
-/** The short list each agent offers, rather than every model it knows. */
+/** Every model each agent offers, its short list first. */
 export function agentModels(name: string): Promise<Model[]> {
   if (name === "pi") return piModels();
   if (name === "claude") return claudeModels();
@@ -22,7 +22,7 @@ type PiModel = {
 
 const PI_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
-/** Pi's scoped models (Ctrl+P in Pi, `enabledModels` in its settings), or all it knows without them. */
+/** Pi's scoped models (Ctrl+P in Pi, `enabledModels` in its settings) first, then all it knows. */
 async function piModels(): Promise<Model[]> {
   const settings = join(
     process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi", "agent"),
@@ -39,12 +39,13 @@ async function piModels(): Promise<Model[]> {
   );
   const known: PiModel[] = answer.data.models;
   // In the scope's order. A pattern names provider/id, or else just the id; * matches anything.
-  const scope =
-    scoped.length === 0 ? known : [...new Set(scoped.flatMap((each) => matches(known, each)))];
-  return scope.map((model) => ({
+  const scope = new Set(scoped.flatMap((each) => matches(known, each)));
+  const rest = known.filter((model) => !scope.has(model));
+  return [...scope, ...rest].map((model) => ({
     value: `${model.provider}/${model.id}`,
     label: model.name,
     efforts: piLevels(model),
+    scoped: scope.has(model),
   }));
 }
 
@@ -89,6 +90,7 @@ async function claudeModels(): Promise<Model[]> {
       value: model.value,
       label: model.displayName,
       efforts: model.supportsEffort ? (model.supportedEffortLevels ?? []) : [],
+      scoped: true,
     }));
 }
 

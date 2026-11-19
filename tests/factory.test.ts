@@ -734,7 +734,7 @@ esac; done`,
     }
   });
 
-  test("Pi offers its scoped models in their order, each with the efforts it supports", async () => {
+  test("Pi offers its scoped models in their order, then the rest, each with its efforts", async () => {
     const dir = mkdtempSync(join(scratch, "pi-models-"));
     writeFileSync(
       join(dir, "settings.json"),
@@ -759,12 +759,24 @@ esac; done`,
     process.env.PI_CODING_AGENT_DIR = dir;
     try {
       expect(await agentModels("pi")).toEqual([
-        { value: "openai/sol", label: "sol", efforts: ["low", "medium", "high", "xhigh"] },
-        { value: "local/qwen", label: "qwen", efforts: ["off"] },
+        {
+          value: "openai/sol",
+          label: "sol",
+          efforts: ["low", "medium", "high", "xhigh"],
+          scoped: true,
+        },
+        { value: "local/qwen", label: "qwen", efforts: ["off"], scoped: true },
         {
           value: "codex/luna",
           label: "luna",
           efforts: ["off", "minimal", "low", "medium", "high"],
+          scoped: true,
+        },
+        {
+          value: "openrouter/openai/sol",
+          label: "openai/sol",
+          efforts: ["off", "minimal", "low", "medium", "high"],
+          scoped: false,
         },
       ]);
     } finally {

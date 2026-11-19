@@ -6,6 +6,7 @@ import {
   prUrl,
   type Item,
   type Job,
+  type Preset,
   type Settings,
   type Snapshot,
 } from "../src/backend/types.ts";
@@ -49,6 +50,7 @@ function seed(): Snapshot {
     settings: {
       agents: { claude: {}, pi: {} },
       chat: { agent: "pi" },
+      presets: [{ agent: "pi", effort: "max" }],
       limit: 2,
       timeout: 60,
       auto: { on: true, levels: ["auto"], plays: [], repos: [] },
@@ -183,7 +185,7 @@ function dispatch(snapshot: Snapshot, route: string, body: unknown): unknown {
       snapshot.candidates.at = new Date().toISOString();
       return null;
     case "POST /api/jobs": {
-      const selection = body as { items: Pick<Item, "repo" | "id">[]; agent?: string };
+      const selection = body as { items: Pick<Item, "repo" | "id">[]; pin?: Preset };
       for (const wanted of selection.items) {
         const item = items.find(({ repo, id }) => repo === wanted.repo && id === wanted.id);
         if (!item || jobs.some((job) => job.item === item && job.state !== "removed")) continue;
@@ -193,7 +195,7 @@ function dispatch(snapshot: Snapshot, route: string, body: unknown): unknown {
           source: "pick",
           state: "queued",
           added: new Date().toISOString(),
-          agent: selection.agent,
+          ...selection.pin,
           attempts: [],
         });
       }
@@ -202,15 +204,38 @@ function dispatch(snapshot: Snapshot, route: string, body: unknown): unknown {
     case "GET /api/models":
       return {
         claude: [
-          { value: "opus", label: "Opus 5.5", efforts: ["low", "medium", "high", "xhigh", "max"] },
-          { value: "sonnet", label: "Sonnet 5.5", efforts: ["low", "medium", "high"] },
+          {
+            value: "opus",
+            label: "Opus 5.5",
+            efforts: ["low", "medium", "high", "xhigh", "max"],
+            scoped: true,
+          },
+          {
+            value: "sonnet",
+            label: "Sonnet 5.5",
+            efforts: ["low", "medium", "high"],
+            scoped: true,
+          },
         ],
         pi: [
           {
             value: "openai/gpt-6.2-sol",
             label: "GPT-6.2 Sol",
             efforts: ["low", "medium", "high", "xhigh", "max"],
+            scoped: true,
           },
+          {
+            value: "openai-codex/gpt-6-luna",
+            label: "GPT-6 Luna",
+            efforts: ["low", "medium", "high", "xhigh", "max"],
+            scoped: true,
+          },
+          ...["GPT-5.2", "GPT-6.1 Terra", "DeepSeek V4 Pro", "Qwen3.8 Flash"].map((label) => ({
+            value: `openrouter/${label.toLowerCase().replaceAll(" ", "-")}`,
+            label,
+            efforts: ["off", "low", "medium", "high"],
+            scoped: false,
+          })),
         ],
       };
     case "PUT /api/settings":

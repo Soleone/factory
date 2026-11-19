@@ -11,22 +11,22 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { ItemGroup } from "@/components/ui/item";
-import { clock, itemTitle, tuning, WORKER_BADGE } from "@/format";
+import { clock, itemTitle, pinName, tuning, WORKER_BADGE } from "@/format";
 import { Row, Section } from "@/Row";
 
 function jobMeta(job: Job): string {
-  const pin = job.agent ? [job.agent, tuning(job)].filter(Boolean).join(" ") : "";
+  const pin = job.agent ? pinName({ ...job, agent: job.agent }) : "";
   return [job.item.play, job.item.level, pin].filter(Boolean).join(" · ");
 }
 
 export function QueueView({
   snapshot,
   act,
-  onBrowse,
+  onCandidates,
 }: {
   snapshot: Snapshot;
   act: Act;
-  onBrowse: () => void;
+  onCandidates: () => void;
 }) {
   const { jobs, status, on, settings } = snapshot;
   const byId = new Map(jobs.map((job) => [job.id, job]));
@@ -81,11 +81,11 @@ export function QueueView({
             <EmptyHeader>
               <EmptyTitle>Nothing picked</EmptyTitle>
               <EmptyDescription>
-                Picks go before anything auto mode queues. Find work under Browse.
+                Picks go before anything auto mode queues. Find work under Candidates.
               </EmptyDescription>
             </EmptyHeader>
             <EmptyContent>
-              <Button variant="outline" onClick={onBrowse}>
+              <Button variant="outline" onClick={onCandidates}>
                 Browse candidates
               </Button>
             </EmptyContent>

@@ -61,5 +61,9 @@ export const JOB_BADGE: Record<Job["state"], BadgeVariant> = {
 export const tuning = ({ model, effort }: { model?: string; effort?: string }) =>
   [model, effort].filter(Boolean).join(", ");
 
+/** An agent with its model and effort, e.g. "pi luna-6, max". */
+export const pinName = (pin: { agent: string; model?: string; effort?: string }) =>
+  [pin.agent, tuning(pin)].filter(Boolean).join(" ");
+
 /** How the page names an agent: claude as Claude, pi as Pi. */
 export const agentName = (name: string) => name.charAt(0).toUpperCase() + name.slice(1);

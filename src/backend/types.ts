@@ -3,8 +3,14 @@
 /** Unset means the agent's own default. */
 export type Tuning = { model?: string; effort?: string };
 
-/** A model the settings offer for an agent: what --model takes, how to show it, and its efforts. */
-export type Model = { value: string; label: string; efforts: string[] };
+/** An agent with a model and effort, saved to queue jobs with in one click. */
+export type Preset = Tuning & { agent: string };
+
+/**
+ * A model the settings offer for an agent: what --model takes, how to show it, and its efforts.
+ * Scoped models are the agent's short list (Pi's Ctrl+P scope), shown above the rest.
+ */
+export type Model = { value: string; label: string; efforts: string[]; scoped: boolean };
 
 /** stopped: the factory was turned off with --kill while the agent worked. */
 export type Outcome = "done" | "failed" | "limited" | "timeout" | "stopped";
@@ -15,6 +21,8 @@ export type Settings = {
   agents: Record<string, Tuning>;
   /** The agent the Plan chat talks to, with its model and effort; a change starts a new chat. */
   chat: Tuning & { agent: string };
+  /** Agents with a model and effort to queue candidates with, like pi on its biggest model. */
+  presets: Preset[];
   /** Usage-limit hits per agent per run before that agent stops; null: never stop, wait for the reset. */
   limit: number | null;
   /** HH:MM local time after which a run starts nothing new. */

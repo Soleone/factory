@@ -1,9 +1,20 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, type Act } from "@/api";
+import { ChevronDownIcon } from "lucide-react";
 import { AGENT_NAMES } from "@/backend/agents.ts";
-import type { Item, Job, Snapshot } from "@/backend/types.ts";
+import type { Item, Job, Preset, Snapshot } from "@/backend/types.ts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ButtonGroup } from "@/components/ui/button-group";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Empty,
   EmptyContent,
@@ -22,22 +33,20 @@ import {
 } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { ago, itemTitle, JOB_BADGE, repoName } from "@/format";
+import { ago, itemTitle, JOB_BADGE, pinName, repoName } from "@/format";
 import { Row, Section } from "@/Row";
 
 const ALL = "";
-const ANY_AGENT = "any";
 const PAGE = 100;
 const key = (item: { repo: string; id: string }) => `${item.repo} ${item.id}`;
 
 /** Everything workwork found, by play, to pick from. */
-export function BrowseView({ snapshot, act }: { snapshot: Snapshot; act: Act }) {
+export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act }) {
   const [items, setItems] = useState<Item[]>([]);
   const [repo, setRepo] = useState(ALL);
   const [play, setPlay] = useState(ALL);
   const [levels, setLevels] = useState(["auto", "skim", "decide"]);
   const [search, setSearch] = useState("");
-  const [agent, setAgent] = useState(ANY_AGENT);
   const [shown, setShown] = useState(PAGE);
   const { at, count, refreshing } = snapshot.candidates;
 
@@ -76,8 +85,7 @@ export function BrowseView({ snapshot, act }: { snapshot: Snapshot; act: Act }) 
         `${itemTitle(item)} ${item.id} ${item.label}`.toLowerCase().includes(word),
       ),
   );
-  const queue = (wanted: Item[]) =>
-    act(() => api.queue(wanted, agent === ANY_AGENT ? undefined : agent));
+  const queue = (wanted: Item[], pin?: Preset) => act(() => api.queue(wanted, pin));
   const open = matches.filter((item) => !jobs.has(key(item)));
 
   if (items.length === 0)
@@ -98,10 +106,6 @@ export function BrowseView({ snapshot, act }: { snapshot: Snapshot; act: Act }) 
         </EmptyContent>
       </Empty>
     );
-
-  const agents = [{ value: ANY_AGENT, label: "Any agent" }].concat(
-    AGENT_NAMES.map((name) => ({ value: name, label: name })),
-  );
 
   return (
     <div className="flex flex-col gap-4 pt-2">
@@ -135,22 +139,6 @@ export function BrowseView({ snapshot, act }: { snapshot: Snapshot; act: Act }) 
           </SelectTrigger>
           <SelectContent>
             {repos.map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select
-          items={agents}
-          value={agent}
-          onValueChange={(value) => setAgent(value ?? ANY_AGENT)}
-        >
-          <SelectTrigger aria-label="Queue for">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {agents.map((option) => (
               <SelectItem key={option.value} value={option.value}>
                 {option.label}
               </SelectItem>
@@ -196,9 +184,11 @@ export function BrowseView({ snapshot, act }: { snapshot: Snapshot; act: Act }) 
                   {matches.length} matching, {open.length} not queued yet
                 </span>
                 {open.length > 0 && open.length <= 20 && (
-                  <Button variant="outline" size="sm" onClick={() => queue(open)}>
-                    Queue all {open.length}
-                  </Button>
+                  <QueueButton
+                    label={`Queue all ${open.length}`}
+                    presets={snapshot.settings.presets}
+                    onQueue={(pin) => queue(open, pin)}
+                  />
                 )}
               </span>
             }
@@ -215,9 +205,11 @@ export function BrowseView({ snapshot, act }: { snapshot: Snapshot; act: Act }) 
                     {job ? (
                       <Badge variant={JOB_BADGE[job.state]}>{job.state}</Badge>
                     ) : (
-                      <Button variant="outline" size="sm" onClick={() => queue([item])}>
-                        Queue
-                      </Button>
+                      <QueueButton
+                        label="Queue"
+                        presets={snapshot.settings.presets}
+                        onQueue={(pin) => queue([item], pin)}
+                      />
                     )}
                   </Row>
                 );
@@ -232,5 +224,53 @@ export function BrowseView({ snapshot, act }: { snapshot: Snapshot; act: Act }) 
         </div>
       </div>
     </div>
+  );
+}
+
+/** Queues for whichever agent is free first, or, from the arrow's menu, for one agent or preset. */
+function QueueButton({
+  label,
+  presets,
+  onQueue,
+}: {
+  label: string;
+  presets: Preset[];
+  onQueue: (pin?: Preset) => void;
+}) {
+  return (
+    <ButtonGroup>
+      <Button variant="outline" size="sm" onClick={() => onQueue()}>
+        {label}
+      </Button>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={<Button variant="outline" size="icon-sm" aria-label={`${label} with`} />}
+        >
+          <ChevronDownIcon />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-auto">
+          <DropdownMenuGroup>
+            <DropdownMenuLabel>Agent</DropdownMenuLabel>
+            {AGENT_NAMES.map((agent) => (
+              <DropdownMenuItem key={agent} onClick={() => onQueue({ agent })}>
+                {agent}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuGroup>
+          <DropdownMenuSeparator />
+          <DropdownMenuGroup>
+            <DropdownMenuLabel>Preset</DropdownMenuLabel>
+            {presets.length === 0 && (
+              <DropdownMenuItem disabled>Add presets in Settings</DropdownMenuItem>
+            )}
+            {presets.map((preset, index) => (
+              <DropdownMenuItem key={index} onClick={() => onQueue(preset)}>
+                {pinName(preset)}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </ButtonGroup>
   );
 }

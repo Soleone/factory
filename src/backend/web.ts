@@ -25,6 +25,7 @@ import {
   canRebase,
   prUrl,
   type Model,
+  type Preset,
   type Settings,
   type Snapshot,
   type Status,
@@ -89,14 +90,14 @@ export function serve(state: string, port: number, host: string): Server {
         console.error(`factory: workwork failed: ${error.message}`),
       );
     },
-    "POST /api/jobs": (body: { items: { repo: string; id: string }[]; agent?: string }) => {
+    "POST /api/jobs": (body: { items: { repo: string; id: string }[]; pin?: Preset }) => {
       const cached = new Map(readCandidates(state)?.items.map((item) => [itemKey(item), item]));
       const items = body.items.map((wanted) => {
         const item = cached.get(itemKey(wanted));
         if (!item) throw new Error(`no candidate ${wanted.id} in ${wanted.repo}`);
         return item;
       });
-      return addJobs(state, items, "pick", { agent: body.agent || undefined });
+      return addJobs(state, items, "pick", body.pin);
     },
     "POST /api/jobs/remove": (_, id) => removeJob(state, id),
     "POST /api/jobs/retry": (_, id) => retryJob(state, id),

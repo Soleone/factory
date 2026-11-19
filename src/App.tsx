@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Bot, Compass, ListOrdered, PackageCheck } from "lucide-react";
+import { Bot, Inbox, ListOrdered, PackageCheck } from "lucide-react";
 import { useFactory } from "@/api";
 import { ThemePicker } from "@/components/soleone/theme-picker";
 import { Badge } from "@/components/ui/badge";
@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/tooltip/tooltip";
-import { BrowseView } from "@/BrowseView";
+import { CandidatesView } from "@/CandidatesView";
 import { CloneDialog } from "@/CloneDialog";
 import { Controls } from "@/Controls";
 import { Logo } from "@/Logo";
@@ -77,9 +77,9 @@ export function App() {
               <ListOrdered />
               Queue{queued ? ` (${queued})` : ""}
             </TabsTrigger>
-            <TabsTrigger value="browse">
-              <Compass />
-              Browse
+            <TabsTrigger value="candidates">
+              <Inbox />
+              Candidates
             </TabsTrigger>
             <TabsTrigger value="results">
               <PackageCheck />
@@ -107,10 +107,10 @@ export function App() {
           </div>
         </div>
         <TabsContent value="queue">
-          <QueueView snapshot={snapshot} act={act} onBrowse={() => setTab("browse")} />
+          <QueueView snapshot={snapshot} act={act} onCandidates={() => setTab("candidates")} />
         </TabsContent>
-        <TabsContent value="browse">
-          <BrowseView snapshot={snapshot} act={act} />
+        <TabsContent value="candidates">
+          <CandidatesView snapshot={snapshot} act={act} />
         </TabsContent>
         <TabsContent value="results">
           <ResultsView

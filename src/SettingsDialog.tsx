@@ -1,7 +1,7 @@
 import { type ComponentProps, useEffect, useState } from "react";
-import { Settings2 } from "lucide-react";
+import { PlusIcon, Settings2, XIcon } from "lucide-react";
 import { api, type Act } from "@/api";
-import type { Settings, Snapshot } from "@/backend/types.ts";
+import type { Preset, Settings, Snapshot } from "@/backend/types.ts";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -84,6 +84,7 @@ function SettingsForm({
       <Tabs defaultValue="runs">
         <TabsList>
           <TabsTrigger value="runs">Runs</TabsTrigger>
+          <TabsTrigger value="presets">Presets</TabsTrigger>
           <TabsTrigger value="auto">Auto mode</TabsTrigger>
           <TabsTrigger value="chat">Live Agent</TabsTrigger>
         </TabsList>
@@ -103,6 +104,12 @@ function SettingsForm({
                 />
               </Field>
             </FieldGroup>
+          </StackedTabsContent>
+          <StackedTabsContent value="presets">
+            <PresetFields
+              value={draft.presets}
+              onChange={(presets) => setDraft({ ...draft, presets })}
+            />
           </StackedTabsContent>
           <StackedTabsContent value="auto">
             <FieldGroup>
@@ -191,6 +198,59 @@ function SettingsForm({
         </Button>
       </DialogFooter>
     </form>
+  );
+}
+
+/** The agents with a model and effort that the arrow next to Queue offers. */
+function PresetFields({
+  value,
+  onChange,
+}: {
+  value: Preset[];
+  onChange: (presets: Preset[]) => void;
+}) {
+  const set = (index: number, preset: Preset) =>
+    onChange(value.map((each, at) => (at === index ? preset : each)));
+
+  return (
+    <FieldGroup>
+      <FieldDescription>
+        Queue a candidate with one of these from the arrow next to its Queue button.
+      </FieldDescription>
+      {value.map((preset, index) => (
+        <Field key={index} orientation="horizontal">
+          <Choice
+            label="Preset agent"
+            className="w-24 flex-none"
+            items={AGENT_NAMES.map((name) => ({ value: name, label: agentName(name) }))}
+            value={preset.agent}
+            onChange={(agent) => agent && set(index, { agent })}
+          />
+          <TuningFields
+            agent={preset.agent}
+            value={preset}
+            onChange={(tuning) => set(index, { ...tuning, agent: preset.agent })}
+          />
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Remove preset"
+            onClick={() => onChange(value.filter((_, at) => at !== index))}
+          >
+            <XIcon />
+          </Button>
+        </Field>
+      ))}
+      <Button
+        type="button"
+        variant="outline"
+        className="self-start"
+        onClick={() => onChange([...value, { agent: AGENT_NAMES[0] }])}
+      >
+        <PlusIcon /> Add preset
+      </Button>
+    </FieldGroup>
   );
 }
 

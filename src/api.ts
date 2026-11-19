@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type { Candidates, Model, Snapshot } from "./backend/types.ts";
+import type { Candidates, Model, Preset, Snapshot } from "./backend/types.ts";
 import type { clonableRepos } from "./backend/repos.ts";
 import type { DialogAnswer } from "./pi";
 
@@ -18,8 +18,9 @@ export const api = {
   refreshCandidates: () => call("POST", "/api/candidates/refresh"),
   repos: () => call<Awaited<ReturnType<typeof clonableRepos>>>("GET", "/api/repos"),
   clone: (name: string, folder: string) => call("POST", "/api/repos/clone", { name, folder }),
-  queue: (items: { repo: string; id: string }[], agent?: string) =>
-    call("POST", "/api/jobs", { items, agent }),
+  /** Without a pin, the job goes to whichever agent is free first, on its run's model and effort. */
+  queue: (items: { repo: string; id: string }[], pin?: Preset) =>
+    call("POST", "/api/jobs", { items, pin }),
   remove: (id: string) => call("POST", `/api/jobs/${id}/remove`),
   retry: (id: string) => call("POST", `/api/jobs/${id}/retry`),
   prDetails: (id: string) => call<{ body: string; diff: string }>("GET", `/api/jobs/${id}/pr`),
