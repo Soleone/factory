@@ -1,4 +1,4 @@
-import { mergePr, rebasePr, type prCache } from "./review.ts";
+import { Conflicts, mergePr, rebasePr, type prCache } from "./review.ts";
 import { canMerge, onTrain, type Pr, type TrainCar } from "./types.ts";
 
 const POLL = 10_000;
@@ -8,9 +8,13 @@ const TRIES = 3;
 
 /**
  * Merges PRs one after another per repo, since each merge moves the base under the next one.
- * Repos go in parallel. A PR that conflicts is rebased; one that can't be is skipped with the reason.
+ * Repos go in parallel. A PR that conflicts is rebased; one that can't be is skipped with the reason,
+ * and when git stopped on conflicts, handed to `onConflicts` to queue for an agent.
  */
-export function mergeTrain(prs: ReturnType<typeof prCache>) {
+export function mergeTrain(
+  prs: ReturnType<typeof prCache>,
+  onConflicts: (id: string, url: string, files: string[]) => void,
+) {
   const cars = new Map<string, TrainCar>();
   /** Each repo's last PR on the train; a new one waits for it, even from a later start. */
   const tracks = new Map<string, Promise<void>>();
@@ -65,7 +69,13 @@ export function mergeTrain(prs: ReturnType<typeof prCache>) {
           .then(() => land(id, url))
           .then(
             () => void cars.set(id, { step: "merged" }),
-            (error: Error) => void cars.set(id, { step: "skipped", reason: error.message }),
+            (error: Error) => {
+              if (!(error instanceof Conflicts))
+                return void cars.set(id, { step: "skipped", reason: error.message });
+              onConflicts(id, url, error.files);
+              const reason = `conflicts in ${error.files.join(", ")}; a job to resolve them is queued`;
+              cars.set(id, { step: "skipped", reason });
+            },
           );
         tracks.set(repo, track);
       }

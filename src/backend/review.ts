@@ -79,6 +79,15 @@ export async function readPrDetails(url: string): Promise<{ body: string; diff: 
 export const mergePr = (url: string) => gh(["pr", "merge", url, "--squash", "--delete-branch"]);
 export const closePr = (url: string) => gh(["pr", "close", url, "--delete-branch"]);
 
+/** A rebase that stopped on conflicts git can't resolve; nothing was pushed. */
+export class Conflicts extends Error {
+  constructor(readonly files: string[]) {
+    super(
+      `Rebase stopped. Resolve these conflicts manually; no changes were pushed:\n${files.join("\n")}`,
+    );
+  }
+}
+
 export async function rebasePr(url: string): Promise<void> {
   const pull = /^(https:\/\/github\.com\/[\w.-]+\/[\w.-]+)\/pull\/(\d+)$/.exec(url);
   if (!pull) throw new Error("Rebase requires a github.com pull request URL");
@@ -113,9 +122,7 @@ export async function rebasePr(url: string): Promise<void> {
     } catch (error) {
       const conflicts = (await git("diff", "--name-only", "--diff-filter=U")).trim();
       if (!conflicts) throw error;
-      throw new Error(
-        `Rebase stopped. Resolve these conflicts manually; no changes were pushed:\n${conflicts}`,
-      );
+      throw new Conflicts(conflicts.split("\n"));
     }
     // Only update the branch if it still points at the PR head we rebased.
     await git("push", `--force-with-lease=${branch}:${before}`, remote, `HEAD:${branch}`);

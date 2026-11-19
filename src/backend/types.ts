@@ -57,6 +57,8 @@ export type Job = Tuning & {
   agent?: string;
   state: "queued" | "running" | "done" | "failed" | "removed";
   attempts: Attempt[];
+  /** For jobs factory writes itself, like resolving a PR's conflicts; the rest ask workwork. */
+  prompt?: string;
 };
 
 export type Worker = Tuning & {

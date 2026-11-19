@@ -2,14 +2,17 @@ import { randomBytes } from "node:crypto";
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { itemKey, LEVELS, output } from "./state.ts";
-import type { Attempt, Item, Job, Settings, Tuning } from "./types.ts";
+import type { Attempt, Item, Job, Settings } from "./types.ts";
 
 /**
  * jobs.jsonl is append-only, so the CLI, the factory and serve can all write to it without overwriting
  * each other; the queue is whatever replaying it gives.
  */
 type Event = { at: string } & (
-  | { type: "add"; job: Pick<Job, "id" | "item" | "source" | "agent" | "model" | "effort"> }
+  | {
+      type: "add";
+      job: Pick<Job, "id" | "item" | "source" | "agent" | "model" | "effort" | "prompt">;
+    }
   | { type: "remove" | "requeue" | "retry"; id: string }
   | { type: "move"; id: string; index: number }
   | { type: "start"; id: string; agent: string }
@@ -82,7 +85,7 @@ export function addJobs(
   state: string,
   items: Item[],
   source: Job["source"],
-  pin: { agent?: string } & Tuning = {},
+  pin: Pick<Job, "agent" | "model" | "effort" | "prompt"> = {},
 ): Job[] {
   const at = new Date().toISOString();
   return items.map((item) => {
@@ -91,6 +94,40 @@ export function addJobs(
     return { ...job, added: at, state: "queued", attempts: [] };
   });
 }
+
+/**
+ * Queues a job to rebase the job's PR and resolve its conflicts, unless one is already waiting. It
+ * keeps the job's workwork id, so the attempt links the same PR.
+ */
+export function queueConflicts(state: string, id: string, url: string, files: string[]): void {
+  const jobs = readJobs(state);
+  const job = jobs.find((job) => job.id === id)!;
+  const waiting = jobs.some(
+    (other) =>
+      other.item.play === "conflicts" &&
+      itemKey(other.item) === itemKey(job.item) &&
+      (other.state === "queued" || other.state === "running"),
+  );
+  if (waiting) return;
+  const item = { ...job.item, play: "conflicts", title: `Resolve conflicts: ${job.item.title}` };
+  addJobs(state, [item], "pick", { prompt: conflictsPrompt(url, files) });
+}
+
+const conflictsPrompt = (
+  url: string,
+  files: string[],
+) => `Pull request ${url} conflicts with its base branch in:
+${files.map((file) => `- ${file}`).join("\n")}
+
+1. Check out its branch with \`gh pr checkout ${url}\`.
+2. Rebase it onto the freshly fetched base branch. Resolve each conflict so the intent of both sides survives; read the commits on both sides before choosing.
+3. Run the repo's checks and tests, and fix what the rebase broke.
+4. Push with \`git push --force-with-lease\`. Don't open a new pull request.
+
+If a conflict can't be resolved without guessing what someone meant, don't push. Comment on the pull request with what's in the way instead.
+
+End your reply with the pull request's URL.
+`;
 
 function find(state: string, id: string, ...states: Job["state"][]): Job {
   const job = readJobs(state).find((job) => job.id === id);

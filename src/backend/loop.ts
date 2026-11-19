@@ -221,7 +221,8 @@ export async function run(options: RunOptions): Promise<string> {
     let prompt: string;
     try {
       await checkout(worktree, job.item.repo);
-      prompt = await output(options.workwork, ["prompt", job.item.id], job.item.repo);
+      prompt =
+        job.prompt ?? (await output(options.workwork, ["prompt", job.item.id], job.item.repo));
     } catch (error) {
       // The repo or workwork failed, not the agent: record why and move on.
       const message = (error as Error).message.trim();

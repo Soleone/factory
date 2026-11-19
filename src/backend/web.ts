@@ -2,7 +2,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { addJobs, moveJob, readJobs, removeJob, retryJob } from "./jobs.ts";
+import { addJobs, moveJob, queueConflicts, readJobs, removeJob, retryJob } from "./jobs.ts";
 import { turnOff, turnOn } from "./power.ts";
 import { closePr, mergePr, prCache, readPrDetails, rebasePr } from "./review.ts";
 import { mergeTrain } from "./train.ts";
@@ -32,7 +32,7 @@ const TYPES: Record<string, string> = {
 /** The page and the API it uses: the same state and commands as the CLI, nothing more. */
 export function serve(state: string, port: number, host: string): Server {
   const prs = prCache();
-  const train = mergeTrain(prs);
+  const train = mergeTrain(prs, (id, url, files) => queueConflicts(state, id, url, files));
   function jobPr(id: string) {
     const job = readJobs(state).find((job) => job.id === id);
     const url = job && prUrl(job);

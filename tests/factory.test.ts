@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { once } from "node:events";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, beforeAll, describe, expect, test } from "vite-plus/test";
 import { agent, classify, resetTime } from "../src/backend/agents.ts";
 import {
@@ -17,7 +17,14 @@ import {
 } from "../src/backend/jobs.ts";
 import { run, type RunOptions } from "../src/backend/loop.ts";
 import { readSettings, writeSettings } from "../src/backend/state.ts";
-import { onTrain, type Item, type Job, type Snapshot, type Status } from "../src/backend/types.ts";
+import {
+  onTrain,
+  type Item,
+  type Job,
+  type Snapshot,
+  type Status,
+  type TrainCar,
+} from "../src/backend/types.ts";
 import { serve } from "../src/backend/web.ts";
 
 const scratch = mkdtempSync(join(tmpdir(), "factory-test-"));
@@ -650,6 +657,35 @@ describe("the factory", () => {
               "Rebase stopped. Resolve these conflicts manually; no changes were pushed:\nshared.txt",
           });
           expect(after).toBe(before);
+
+          // The train skips it the same way and queues an agent to resolve the conflicts, once.
+          for (let start = 0; start < 2; start++) {
+            await fetch(`${url}/api/train`, {
+              method: "POST",
+              body: JSON.stringify({ ids: [job.id] }),
+            });
+            let car: TrainCar | undefined;
+            while (!car || onTrain(car)) {
+              car = ((await (await fetch(`${url}/api/state`)).json()) as Snapshot).train[job.id];
+              await new Promise((resolve) => setTimeout(resolve, 20));
+            }
+            expect(car).toEqual({
+              step: "skipped",
+              reason: "conflicts in shared.txt; a job to resolve them is queued",
+            });
+          }
+          const fixes = readJobs(base.state).filter((other) => other.item.play === "conflicts");
+          expect(fixes.map((fix) => [fix.state, fix.item.title])).toEqual([
+            ["queued", "Resolve conflicts: fix a"],
+          ]);
+          const [fix] = await work(options(base)).then((jobs) =>
+            jobs.filter((other) => other.id === fixes[0].id),
+          );
+          const prompt = readFileSync(join(dirname(fix.attempts[0].log), "prompt.md"), "utf8");
+          expect(prompt).toBe(fixes[0].prompt);
+          expect(prompt).toContain(`gh pr checkout ${pr}`);
+          expect(prompt).toContain("- shared.txt");
+          expect(fix.attempts[0].url).toBe(pr);
         } else {
           expect(response.status, await response.text()).toBe(200);
           expect(after).not.toBe(before);
