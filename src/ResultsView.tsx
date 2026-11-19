@@ -85,7 +85,15 @@ const TRAIN_STEP: Partial<Record<TrainCar["step"], string>> = {
 };
 
 /** One row per job that ran, latest first, with its PR to review and merge. */
-export function ResultsView({ snapshot, act }: { snapshot: Snapshot; act: Act }) {
+export function ResultsView({
+  snapshot,
+  act,
+  onAsk,
+}: {
+  snapshot: Snapshot;
+  act: Act;
+  onAsk: (question: string) => void;
+}) {
   const [filter, setFilter] = useState("all");
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [dismissing, setDismissing] = useState(false);
@@ -217,6 +225,7 @@ export function ResultsView({ snapshot, act }: { snapshot: Snapshot; act: Act })
             prs={prs}
             act={act}
             car={train[job.id]}
+            onAsk={onAsk}
             disabled={dismissing && selected.has(job.id)}
             selection={
               canDismiss(job) && (
@@ -240,6 +249,7 @@ function Result({
   prs,
   act,
   car,
+  onAsk,
   disabled: dismissing,
   selection,
 }: {
@@ -247,6 +257,7 @@ function Result({
   prs: Prs;
   act: Act;
   car?: TrainCar;
+  onAsk: (question: string) => void;
   disabled: boolean;
   selection: ReactNode;
 }) {
@@ -257,6 +268,12 @@ function Result({
   const open = pr?.state === "OPEN";
   const disabled = dismissing || pending !== undefined || onTrain(car);
   const primary = pr && (canRebase(pr) ? "rebase" : canMerge(pr) ? "merge" : undefined);
+  const question =
+    car?.step === "skipped"
+      ? `The merge train skipped ${url}, "${itemTitle(job.item)}": ${car.reason}. Why, and what should I do about it?`
+      : job.state === "failed"
+        ? `Job ${job.id}, "${itemTitle(job.item)}" (workwork ${job.item.id} in ${job.item.repo}), failed${last.error ? `: ${last.error}` : ""}. Its log is ${last.log}. Why did it fail, and should I retry it, pin another agent, or drop it?`
+        : undefined;
 
   async function changePr(action: NonNullable<typeof pending>) {
     setPending(action);
@@ -328,6 +345,11 @@ function Result({
           onClick={() => act(() => api.retry(job.id))}
         >
           Retry
+        </Button>
+      )}
+      {question && (
+        <Button variant="outline" size="sm" onClick={() => onAsk(question)}>
+          Ask Pi
         </Button>
       )}
       {canDismiss(job) && (

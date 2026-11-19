@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import { RotateCcw } from "lucide-react";
 import { api } from "@/api";
 import { AgentPanel } from "@/components/soleone/agent";
@@ -6,9 +6,14 @@ import { Button } from "@/components/ui/button";
 import { agentMessages, applyRecord, emptyTranscript } from "@/pi";
 
 /** A chat with Pi about what to queue; Pi adds jobs through the factory CLI once you agree. */
-export function PlanView() {
+export function PlanView({
+  prompt,
+  onPromptChange,
+}: {
+  prompt: string;
+  onPromptChange: Dispatch<SetStateAction<string>>;
+}) {
   const [transcript, setTranscript] = useState(emptyTranscript);
-  const [prompt, setPrompt] = useState("");
   const [error, setError] = useState<string>();
 
   useEffect(() => {
@@ -51,7 +56,7 @@ export function PlanView() {
       <AgentPanel
         messages={agentMessages(transcript)}
         prompt={prompt}
-        onPromptChange={setPrompt}
+        onPromptChange={onPromptChange}
         busy={transcript.busy}
         model={transcript.model}
         error={error ?? transcript.error}

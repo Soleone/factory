@@ -16,6 +16,8 @@ import { clock, runStart } from "@/format";
 export function App() {
   const { snapshot, error, act } = useFactory();
   const [tab, setTab] = useState("queue");
+  /** The Plan tab's draft, here so other tabs can fill it with a question. */
+  const [plan, setPlan] = useState("");
 
   if (!snapshot)
     return (
@@ -90,11 +92,18 @@ export function App() {
           <BrowseView snapshot={snapshot} act={act} />
         </TabsContent>
         <TabsContent value="results">
-          <ResultsView snapshot={snapshot} act={act} />
+          <ResultsView
+            snapshot={snapshot}
+            act={act}
+            onAsk={(question) => {
+              setPlan(question);
+              setTab("plan");
+            }}
+          />
         </TabsContent>
         {/* Kept mounted so a reply keeps streaming in while another tab is open. */}
         <TabsContent value="plan" keepMounted>
-          <PlanView />
+          <PlanView prompt={plan} onPromptChange={setPlan} />
         </TabsContent>
       </Tabs>
     </div>

@@ -83,7 +83,7 @@ function context(): string {
   const factory = `"${process.execPath}" "${process.argv[1]}"`;
   return `You run inside the web page of factory, which works a queue of workwork candidates with headless coding agents, often overnight. You help the user decide what to put in the queue.
 
-- The current folder is factory's state. candidates.json holds every repo's candidates from workwork ({ at, items: [{ repo, label, id, play, level, title }] }); jobs.jsonl is the queue and results, one event per line.
+- The current folder is factory's state. candidates.json holds every repo's candidates from workwork ({ at, items: [{ repo, label, id, play, level, title }] }); jobs.jsonl is the queue and results, one event per line. runs/ holds each attempt's prompt.md and agent.log.
 - \`${factory} status\` shows the queue and \`${factory} report --all\` past results. \`workwork prompt <id>\`, run in the candidate's repo, shows the full task.
 - To queue candidates: \`${factory} add <id>... --repo <repo>\`, optionally with \`--agent claude|pi\`. Picked jobs go ahead of auto ones.
 - Levels: auto needs no review, skim a quick look, decide needs the user's judgment. Prefer a few that fit together over many that touch the same files, since those conflict when merged.
