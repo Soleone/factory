@@ -76,7 +76,7 @@ export type Confidence = "low" | "medium" | "high";
 export type Note = {
   at: string;
   attempt: number;
-  kind: "note" | "ask" | "answer" | "result";
+  kind: "note" | "ask" | "answer" | "result" | "train";
   text: string;
   confidence?: Confidence;
   followups?: string[];

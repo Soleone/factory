@@ -6,7 +6,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { clock } from "@/format";
 
-export const KIND = { note: "note", ask: "asked", answer: "you answered", result: "result" };
+export const KIND = {
+  note: "note",
+  ask: "asked",
+  answer: "you answered",
+  result: "result",
+  train: "merge train",
+};
 
 /**
  * What the job's agents said through the factory CLI: the latest result, the question a blocked job

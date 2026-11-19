@@ -9,11 +9,13 @@ const TRIES = 3;
 /**
  * Merges PRs one after another per repo, since each merge moves the base under the next one.
  * Repos go in parallel. A PR that conflicts is rebased; one that can't be is skipped with the reason,
- * and when git stopped on conflicts, handed to `onConflicts` to queue for an agent.
+ * and when git stopped on conflicts, handed to `onConflicts` to queue for an agent. `onEnd` hears
+ * how each PR's ride ended.
  */
 export function mergeTrain(
   prs: ReturnType<typeof prCache>,
   onConflicts: (id: string, url: string, files: string[]) => void,
+  onEnd: (id: string, text: string) => void,
 ) {
   const cars = new Map<string, TrainCar>();
   /** Each repo's last PR on the train; a new one waits for it, even from a later start. */
@@ -68,13 +70,18 @@ export function mergeTrain(
         const track = (tracks.get(repo) ?? Promise.resolve())
           .then(() => land(id, url))
           .then(
-            () => void cars.set(id, { step: "merged" }),
+            () => {
+              cars.set(id, { step: "merged" });
+              onEnd(id, "merged");
+            },
             (error: Error) => {
-              if (!(error instanceof Conflicts))
-                return void cars.set(id, { step: "skipped", reason: error.message });
-              onConflicts(id, url, error.files);
-              const reason = `conflicts in ${error.files.join(", ")}; a job to resolve them is queued`;
+              let reason = error.message;
+              if (error instanceof Conflicts) {
+                onConflicts(id, url, error.files);
+                reason = `conflicts in ${error.files.join(", ")}; a job to resolve them is queued`;
+              }
               cars.set(id, { step: "skipped", reason });
+              onEnd(id, `skipped: ${reason}`);
             },
           );
         tracks.set(repo, track);

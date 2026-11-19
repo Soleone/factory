@@ -352,7 +352,13 @@ function startAgent(agent: Agent, cwd: string, dir: string, job: string): number
   return child.pid!;
 }
 
-const NOTE_LABEL = { note: "note", ask: "it asked", answer: "the user answered", result: "result" };
+const NOTE_LABEL = {
+  note: "note",
+  ask: "it asked",
+  answer: "the user answered",
+  result: "result",
+  train: "merge train",
+};
 
 /** What earlier attempts said and kept, so a retry or an answered question picks up where they left off. */
 function earlier(job: Job): string {
@@ -376,7 +382,7 @@ function reporting(job: Job, { agent, model, effort }: Begun): string {
 You run headless for factory as job ${job.id}, and nobody watches live. Report through its CLI:
 
 - \`${factory} note "<text>"\` records something worth knowing later: what you found, tried, or what's in the way. A few per job, not a play-by-play.
-- When you reach a decision only the user can make, run \`${factory} ask "<question, with the options and your recommendation>"\` and end there. Your work in this folder is kept. The user answers later, and the job goes on with your notes, the answer and your work.
+- Decide for yourself wherever a reasonable engineer would, and note the call you made so the user can revisit it. Asking parks the job until the user is back, often the next morning, so it's for the rare decision that's costly to get wrong and that you can't settle from the code, the docs or the task: deleting data, a public API change, two directions that would each waste the work of the other. Then run \`${factory} ask "<question, with the options and your recommendation>"\` and end there. Your work in this folder is kept, and the job goes on later with your notes, the answer and your work.
 - Before you end, run \`${factory} result "<what changed and why, in a sentence or two>" --confidence low|medium|high\`, adding \`--url <link>\` for the PR or issue you opened and \`--followup "<task>"\` for each task you saw that deserves its own job.
 - In a PR description you write, add the line \`Agent: ${signature}\`.
 `;

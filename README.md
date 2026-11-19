@@ -17,8 +17,8 @@ Needs node 22+, git, [workwork](https://github.com/Soleone/workwork) with `--jso
 - **The factory** is what works the queue, one worker per agent. With nothing to do it waits, and it picks up new jobs within seconds. Turning it on starts a **run** with its own agents, models, efforts, limit and end time, defaulting to the settings.
 - **Limits:** a limit of 1 (the default) stops an agent at its first usage-limit hit, so only the current allowance gets used. A limit of 2 waits for one reset and stops at the second hit. "None" always waits for the reset, which it logs. Once every agent has stopped, the factory turns itself off. Three quick failures in a row also count as a limit hit, so a broken login can't burn through the queue.
 - **Failures:** a failed or timed-out job gets one more try by the same agent. After that it waits for you to retry it.
-- **Agents report back** through the CLI, which factory names in each prompt: `note` for what's worth knowing later, `result` for a summary with a confidence, follow-up tasks and the PR link, and `ask` for a decision only you can make. A job whose agent asked waits for your answer, on the page or with `factory answer`. Then it goes back in the queue, and the next attempt gets the earlier notes, your answer and the branch with the earlier work. Retries get the same.
-- **Jobs can wait on each other:** `--after <job>` holds one until the other is done. **Review with** queues a review of a job's PR by another agent, which posts its findings as a PR comment.
+- **Agents report back** through the CLI, which factory names in each prompt: `note` for what's worth knowing later, `result` for a summary with a confidence, follow-up tasks and the PR link, and `ask` for the rare decision only you can make; the prompt tells agents to decide everything else themselves and note the call. A job whose agent asked waits for your answer, on the page or with `factory answer`. Then it goes back in the queue, and the next attempt gets the earlier notes, your answer and the branch with the earlier work. Retries get the same.
+- **Jobs can wait on each other:** `--after <job>` holds one until the other is done, and drops it if the other fails or is removed (a retry brings it back). **Review with** queues a review of a job's PR by another agent, which posts its findings as a PR comment.
 
 ## Reviewing results
 
@@ -26,7 +26,7 @@ Results waiting for your answer come first under **Waiting for you**; a dot mark
 
 Each result links the PR or issue the agent opened. From the page you can read a PR's description and diff, merge it, rebase it onto its base when GitHub reports conflicts, or close it. Rebasing never guesses: if git stops on a conflict, nothing is pushed and the page lists the files.
 
-**Merge train:** select several results and merge them in one go. PRs merge one after another per repo, since each merge moves the base under the next one; repos go in parallel. The train waits for checks, rebases a PR that conflicts, and skips one it can't merge, with the reason. When a rebase stops on real conflicts, a job to resolve them goes to the front of the queue, so an agent picks it up on the next run.
+**Merge train:** select several results and merge them in one go. PRs merge one after another per repo, since each merge moves the base under the next one; repos go in parallel. The train waits for checks, rebases a PR that conflicts, and skips one it can't merge, with the reason. What it did with each PR shows on the job and in Activity. When a rebase stops on real conflicts, a job to resolve them goes to the front of the queue, so an agent picks it up on the next run.
 
 ## Live Agent
 

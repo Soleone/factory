@@ -57,7 +57,11 @@ const TYPES: Record<string, string> = {
 /** The page and the API it uses: the same state and commands as the CLI, nothing more. */
 export function serve(state: string, port: number, host: string): Server {
   const prs = prCache();
-  const train = mergeTrain(prs, (id, url, files) => queueConflicts(state, id, url, files));
+  const train = mergeTrain(
+    prs,
+    (id, url, files) => queueConflicts(state, id, url, files),
+    (id, text) => addNote(state, id, { kind: "train", text }),
+  );
   const planner = chat(state);
   // Listing takes a second or two per agent, and the lists rarely change while serve runs.
   const models = new Map<string, Promise<Model[]>>();

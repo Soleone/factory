@@ -80,11 +80,12 @@ export function readJobs(state: string): Job[] {
       job.agent = event.agent;
     }
     if (event.type === "note") {
-      const answer = event.note.kind === "answer";
-      // A note comes during the attempt that isn't recorded yet; an answer after the one that asked.
-      const attempt = job.attempts.length + (answer ? 0 : 1);
+      const { kind } = event.note;
+      // An agent's note comes during the attempt that isn't recorded yet; the user's answer and
+      // the merge train's report after the attempt they follow.
+      const attempt = job.attempts.length + (kind === "answer" || kind === "train" ? 0 : 1);
       job.notes.push({ ...event.note, at: event.at, attempt });
-      if (answer) job.state = "queued";
+      if (kind === "answer") job.state = "queued";
     }
     if (event.type === "attempt") {
       job.attempts.push(event.attempt);
@@ -101,6 +102,13 @@ export function readJobs(state: string): Job[] {
         job.state = count >= TRIES ? "failed" : "queued";
       }
     }
+  }
+  // A job waiting on one that failed or was removed would wait forever. It goes too, and comes
+  // back if that job is retried. Jobs replay in the order added, so chains of them follow.
+  for (const job of jobs.values()) {
+    const state = job.after && jobs.get(job.after)!.state;
+    if (job.state === "queued" && (state === "failed" || state === "removed"))
+      job.state = "removed";
   }
   return [...picks, ...autos];
 }
@@ -241,9 +249,13 @@ export function moveJob(state: string, id: string, index: number): void {
   append(state, { at: new Date().toISOString(), type: "move", id, index });
 }
 
-/** An agent's note on the job it works, or the user's answer to a blocked job, which queues it again. */
+/**
+ * An agent's note on the job it works, the user's answer to a blocked job, which queues it again,
+ * or what the merge train did with the job's PR.
+ */
 export function addNote(state: string, id: string, note: NoteBody): void {
-  find(state, id, note.kind === "answer" ? "blocked" : "running");
+  // The train only takes jobs with a PR, and the job may have been removed since it boarded.
+  if (note.kind !== "train") find(state, id, note.kind === "answer" ? "blocked" : "running");
   append(state, { at: new Date().toISOString(), type: "note", id, note });
 }
 

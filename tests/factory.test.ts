@@ -198,6 +198,28 @@ describe("jobs that wait on others", () => {
     expect(nextJob(readJobs(state), "pi")?.id).toBe(review.id);
   });
 
+  test("a job waiting on one that failed goes with it, and comes back on a retry", () => {
+    const state = mkdtempSync(join(scratch, "state-"));
+    const [fix] = addJobs(state, [item("r", "a")], "pick", { agent: "claude" });
+    const review = queueReview(state, fix.id, "pi")!;
+    addJobs(state, [item("r", "b")], "pick", { after: review.id });
+    for (let i = 0; i < 2; i++) {
+      startJob(state, fix.id, "claude");
+      endJob(state, fix.id, {
+        run: "r",
+        agent: "claude",
+        start: "",
+        end: "",
+        outcome: "failed",
+        log: "",
+      });
+    }
+    const states = () => readJobs(state).map((job) => job.state);
+    expect(states()).toEqual(["failed", "removed", "removed"]);
+    retryJob(state, fix.id);
+    expect(states()).toEqual(["queued", "queued", "queued"]);
+  });
+
   test("a follow-up an agent reported becomes its own job, once", () => {
     const state = mkdtempSync(join(scratch, "state-"));
     const [job] = addJobs(state, [item("r", "a")], "pick");
@@ -671,6 +693,8 @@ ${report(base.state, { kind: "ask", text: "A or B?" })}`,
         [jobs[1].id]: { step: "skipped", reason: "already merged" },
       });
       expect(github.calls().match(/pr merge/g)).toHaveLength(1);
+      const said = readJobs(base.state).map((job) => job.notes.map((note) => note.text));
+      expect(said).toEqual([["merged"], ["skipped: already merged"]]);
     } finally {
       server.close();
     }
