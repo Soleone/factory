@@ -1,18 +1,28 @@
 import type { ReactNode } from "react";
-import { Item, ItemActions, ItemContent, ItemDescription, ItemTitle } from "@/components/ui/item";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemMedia,
+  ItemTitle,
+} from "@/components/ui/item";
 
 /** One line in a list: a title, a muted line under it, and buttons on the right. */
 export function Row({
+  leading,
   title,
   meta,
   children,
 }: {
+  leading?: ReactNode;
   title: ReactNode;
   meta: ReactNode;
   children?: ReactNode;
 }) {
   return (
     <Item variant="outline" size="sm">
+      {leading && <ItemMedia>{leading}</ItemMedia>}
       <ItemContent>
         <ItemTitle>{title}</ItemTitle>
         <ItemDescription>{meta}</ItemDescription>

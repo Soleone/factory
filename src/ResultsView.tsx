@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { XIcon } from "lucide-react";
+import { useState, type ReactNode } from "react";
 import { api, type Act } from "@/api";
 import {
   canMerge,
@@ -10,6 +11,7 @@ import {
 } from "@/backend/types.ts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { ItemGroup } from "@/components/ui/item";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -46,9 +48,15 @@ const CHECKS = {
   none: "no checks",
 };
 
+function canDismiss(job: Job) {
+  return job.state === "done" || job.state === "failed";
+}
+
 /** One row per job that ran, latest first, with its PR to review and merge. */
 export function ResultsView({ snapshot, act }: { snapshot: Snapshot; act: Act }) {
   const [filter, setFilter] = useState("all");
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const [dismissing, setDismissing] = useState(false);
   const { prs } = snapshot;
   const jobs = snapshot.jobs
     .filter((job) => job.state !== "removed" && job.attempts.length > 0)
@@ -66,7 +74,38 @@ export function ResultsView({ snapshot, act }: { snapshot: Snapshot; act: Act })
     );
 
   const shown = jobs.filter((job) => FILTERS[filter].shows(job, prs));
-  const failed = jobs.filter((job) => job.state === "failed");
+  const dismissible = shown.filter(canDismiss);
+  const selection = dismissible.filter((job) => selected.has(job.id));
+  const allSelected = selection.length === dismissible.length;
+
+  const select = (id: string, checked: boolean) => {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  };
+
+  const dismissSelected = async () => {
+    if (
+      selection.some((job) => job.attempts.some((attempt) => attempt.branch)) &&
+      !window.confirm("Dismiss selected results and delete their unpushed branches?")
+    )
+      return;
+
+    setDismissing(true);
+    try {
+      await act(async () => {
+        const outcomes = await Promise.allSettled(selection.map((job) => api.remove(job.id)));
+        const failure = outcomes.find((outcome) => outcome.status === "rejected");
+        if (failure) throw failure.reason;
+      });
+    } finally {
+      setDismissing(false);
+    }
+  };
+
   return (
     <div className="flex flex-col gap-4 pt-2">
       <div className="flex flex-wrap items-center gap-3">
@@ -74,7 +113,12 @@ export function ResultsView({ snapshot, act }: { snapshot: Snapshot; act: Act })
           variant="outline"
           className="flex-wrap"
           value={[filter]}
-          onValueChange={([chosen]) => chosen && setFilter(chosen)}
+          disabled={dismissing}
+          onValueChange={([chosen]) => {
+            if (!chosen || chosen === filter) return;
+            setFilter(chosen);
+            setSelected(new Set());
+          }}
         >
           {Object.entries(FILTERS).map(([name, { label, shows }]) => (
             <ToggleGroupItem key={name} value={name}>
@@ -82,32 +126,79 @@ export function ResultsView({ snapshot, act }: { snapshot: Snapshot; act: Act })
             </ToggleGroupItem>
           ))}
         </ToggleGroup>
-        {filter === "failed" && failed.length > 0 && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => act(() => Promise.all(failed.map((job) => api.remove(job.id))))}
+        {dismissible.length > 0 && (
+          <div
+            role="group"
+            aria-label="Batch actions"
+            className="flex items-center gap-2 sm:ml-auto"
           >
-            Dismiss all {failed.length}
-          </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-label={allSelected ? "Clear selection" : undefined}
+              disabled={dismissing}
+              onClick={() =>
+                setSelected(new Set(allSelected ? [] : dismissible.map((job) => job.id)))
+              }
+            >
+              {allSelected ? "Clear" : "Select all"}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={dismissing || selection.length === 0}
+              onClick={dismissSelected}
+            >
+              {dismissing ? "Dismissing…" : `Dismiss (${selection.length})`}
+            </Button>
+          </div>
         )}
       </div>
       <ItemGroup>
         {shown.map((job) => (
-          <Result key={job.id} job={job} prs={prs} act={act} />
+          <Result
+            key={job.id}
+            job={job}
+            prs={prs}
+            act={act}
+            disabled={dismissing && selected.has(job.id)}
+            selection={
+              canDismiss(job) && (
+                <Checkbox
+                  aria-label={`Select ${itemTitle(job.item)}`}
+                  checked={selected.has(job.id)}
+                  disabled={dismissing}
+                  onCheckedChange={(checked) => select(job.id, checked)}
+                />
+              )
+            }
+          />
         ))}
       </ItemGroup>
     </div>
   );
 }
 
-function Result({ job, prs, act }: { job: Job; prs: Prs; act: Act }) {
+function Result({
+  job,
+  prs,
+  act,
+  disabled,
+  selection,
+}: {
+  job: Job;
+  prs: Prs;
+  act: Act;
+  disabled: boolean;
+  selection: ReactNode;
+}) {
   const last = job.attempts.at(-1)!;
   const url = prUrl(job);
   const pr = url ? prs[url] : undefined;
   const open = pr?.state === "OPEN";
   return (
     <Row
+      leading={selection}
       title={
         <>
           {pr ? (
@@ -138,23 +229,40 @@ function Result({ job, prs, act }: { job: Job; prs: Prs; act: Act }) {
       }
     >
       {pr && canMerge(pr) && (
-        <Button size="sm" onClick={() => act(() => api.merge(job.id))}>
+        <Button size="sm" disabled={disabled} onClick={() => act(() => api.merge(job.id))}>
           Merge
         </Button>
       )}
       {open && (
-        <Button variant="outline" size="sm" onClick={() => act(() => api.close(job.id))}>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={disabled}
+          onClick={() => act(() => api.close(job.id))}
+        >
           Close
         </Button>
       )}
       {job.state === "failed" && (
-        <Button variant="outline" size="sm" onClick={() => act(() => api.retry(job.id))}>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={disabled}
+          onClick={() => act(() => api.retry(job.id))}
+        >
           Retry
         </Button>
       )}
-      {(job.state === "done" || job.state === "failed") && (
-        <Button variant="ghost" size="sm" onClick={() => act(() => api.remove(job.id))}>
-          Dismiss
+      {canDismiss(job) && (
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={`Dismiss ${itemTitle(job.item)}`}
+          title="Dismiss"
+          disabled={disabled}
+          onClick={() => act(() => api.remove(job.id))}
+        >
+          <XIcon aria-hidden="true" />
         </Button>
       )}
     </Row>
