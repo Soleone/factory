@@ -136,3 +136,31 @@
     cursor: pointer;
   }
 }
+
+/* The favicon's own colors, fixed across themes like the favicon itself. */
+.logo-tile {
+  fill: #0d0f12;
+}
+.logo-ink {
+  stroke: #d4af37;
+}
+.logo-working .logo-window {
+  animation: logo-window 1.5s ease-in-out infinite;
+}
+.logo-working .logo-window:nth-of-type(3) {
+  animation-delay: 0.25s;
+}
+.logo-working .logo-window:nth-of-type(4) {
+  animation-delay: 0.5s;
+}
+@keyframes logo-window {
+  30% {
+    stroke: #fff3c4;
+    filter: drop-shadow(0 0 1.6px #ffd86b);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .logo-working .logo-window {
+    animation: none;
+  }
+}

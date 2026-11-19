@@ -2,6 +2,7 @@ import { useState } from "react";
 import { api, type Act } from "@/api";
 import type { Snapshot } from "@/backend/types.ts";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -14,7 +15,7 @@ import { Field, FieldLabel } from "@/components/ui/field";
 import { Switch } from "@/components/ui/switch";
 import { RunFields, type Run } from "@/RunFields";
 
-/** The two switches: auto mode (fills the queue) and the factory itself (works it). */
+/** Auto mode (fills the queue) and the factory's power switch (works it). */
 export function Controls({ snapshot, act }: { snapshot: Snapshot; act: Act }) {
   const { settings, on } = snapshot;
   const [run, setRun] = useState<Run>();
@@ -22,7 +23,7 @@ export function Controls({ snapshot, act }: { snapshot: Snapshot; act: Act }) {
   return (
     <div className="flex items-center gap-4">
       <Field orientation="horizontal">
-        <Switch
+        <Checkbox
           id="auto"
           checked={settings.auto.on}
           onCheckedChange={(checked) =>
@@ -31,19 +32,18 @@ export function Controls({ snapshot, act }: { snapshot: Snapshot; act: Act }) {
         />
         <FieldLabel htmlFor="auto">Auto</FieldLabel>
       </Field>
-      {on ? (
-        <Button variant="outline" onClick={() => act(api.turnOff)}>
-          Turn off
-        </Button>
-      ) : (
-        <Button
-          onClick={() =>
-            setRun({ agents: settings.agents, limit: settings.limit, until: settings.until })
+      <Field orientation="horizontal">
+        <Switch
+          id="power"
+          checked={on}
+          onCheckedChange={(checked) =>
+            checked
+              ? setRun({ agents: settings.agents, limit: settings.limit, until: settings.until })
+              : act(api.turnOff)
           }
-        >
-          Turn on
-        </Button>
-      )}
+        />
+        <FieldLabel htmlFor="power">On</FieldLabel>
+      </Field>
       <Dialog open={run !== undefined} onOpenChange={(open) => !open && setRun(undefined)}>
         <DialogContent>
           <DialogHeader>

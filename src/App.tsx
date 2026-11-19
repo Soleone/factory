@@ -7,6 +7,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { BrowseView } from "@/BrowseView";
 import { Controls } from "@/Controls";
+import { Logo } from "@/Logo";
 import { PlanView } from "@/PlanView";
 import { QueueView } from "@/QueueView";
 import { ResultsView } from "@/ResultsView";
@@ -49,7 +50,7 @@ export function App() {
       <header className="flex flex-wrap items-center gap-x-4 gap-y-3">
         <div className="flex flex-1 items-center gap-3">
           <h1 className="flex items-center gap-2 font-heading text-xl font-semibold">
-            <img src={`${import.meta.env.BASE_URL}favicon.svg`} alt="" width={32} height={32} />
+            <Logo working={on} />
             factory
           </h1>
           <Badge variant={on ? "default" : "outline"}>{on ? "on" : "off"}</Badge>
