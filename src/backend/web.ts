@@ -110,6 +110,7 @@ export function serve(state: string, port: number, host: string): Server {
       train.start(body.ids.map((id) => ({ id, url: jobPr(id) }))),
     "POST /api/chat": (body: { message: string }) => planner.prompt(body.message),
     "POST /api/chat/abort": () => planner.abort(),
+    "POST /api/chat/answer": (body: { id: string }) => planner.answer(body),
     "POST /api/chat/reset": () => planner.reset(),
     "POST /api/jobs/close": async (_, id) => {
       const { url } = await openPr(id);

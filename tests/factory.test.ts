@@ -657,6 +657,39 @@ esac; done`,
     }
   });
 
+  test("a question from one of Pi's extensions reaches the page, and its answer reaches Pi", async () => {
+    const answers = join(scratch, "pi-answers");
+    const chat = await chatServer(
+      "pi",
+      `while read -r line; do case "$line" in
+*'"prompt"'*) echo '{"type":"extension_ui_request","id":"q","method":"confirm","title":"Allow?"}' ;;
+*extension_ui_response*) echo "$line" > ${answers}; echo '{"type":"agent_settled"}' ;;
+esac; done`,
+      { agent: "pi" },
+    );
+    try {
+      const page = await chat.page();
+      await chat.prompt("go");
+      expect((await page("extension_ui_request")).at(-1)).toMatchObject({
+        id: "q",
+        title: "Allow?",
+      });
+      await fetch(`${chat.url}/answer`, {
+        method: "POST",
+        body: JSON.stringify({ id: "q", confirmed: true }),
+      });
+      expect((await page("extension_ui_answered")).at(-1).id).toBe("q");
+      await page("agent_settled");
+      expect(JSON.parse(readFileSync(answers, "utf8"))).toEqual({
+        type: "extension_ui_response",
+        id: "q",
+        confirmed: true,
+      });
+    } finally {
+      chat.close();
+    }
+  });
+
   test("the Plan chat speaks to Claude Code in stream-json and gives the page Pi's records", async () => {
     const out = (...records: object[]) =>
       records.map((record) => `echo '${JSON.stringify(record)}'`).join("; ");

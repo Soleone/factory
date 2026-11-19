@@ -28,35 +28,61 @@ type StreamEvent =
   | { type: "toolcall_end"; contentIndex: number; toolCall: Part }
   | { type: string };
 
-/** Pi's records, plus `exit` and `reset` from factory serve. Which fields are set depends on `type`. */
+/** Pi's records, plus `exit`, `reset` and `extension_ui_answered` from factory serve. Which fields are set depends on `type`. */
 export type PiRecord = {
   type: string;
   message?: PiMessage;
   assistantMessageEvent?: StreamEvent;
   command?: string;
+  id?: string;
+  method?: string;
   success?: boolean;
   error?: string;
   data?: unknown;
 };
 
+/** A question from one of Pi's extensions; Pi waits for the answer, or its timeout. */
+export type PiDialog =
+  | { id: string; method: "select"; title: string; options: string[] }
+  | { id: string; method: "confirm"; title: string; message?: string }
+  | { id: string; method: "input"; title: string; placeholder?: string }
+  | { id: string; method: "editor"; title: string; prefill?: string };
+
+/** The answer fields of Pi's `extension_ui_response`, without its type and id. */
+export type DialogAnswer = { value: string } | { confirmed: boolean } | { cancelled: true };
+
+const DIALOGS = ["select", "confirm", "input", "editor"];
+
 export type Transcript = {
   messages: PiMessage[];
   busy: boolean;
+  /** Unanswered questions, oldest first. */
+  dialogs: PiDialog[];
   error?: string;
   model?: { name: string; thinking: string };
 };
 
-export const emptyTranscript: Transcript = { messages: [], busy: false };
+export const emptyTranscript: Transcript = { messages: [], busy: false, dialogs: [] };
 
 export function applyRecord(transcript: Transcript, record: PiRecord): Transcript {
   const { messages } = transcript;
   switch (record.type) {
     case "agent_start":
       return { ...transcript, busy: true, error: undefined };
+    // Pi gives up on a question when the run ends.
     case "agent_settled":
-      return { ...transcript, busy: false };
+      return { ...transcript, busy: false, dialogs: [] };
     case "exit":
-      return { ...transcript, busy: false, error: record.error };
+      return { ...transcript, busy: false, dialogs: [], error: record.error };
+    case "extension_ui_request":
+      // Notifications and status lines need no answer.
+      if (!DIALOGS.includes(record.method!)) return transcript;
+      return { ...transcript, dialogs: [...transcript.dialogs, record as unknown as PiDialog] };
+    case "extension_ui_answered":
+      return {
+        ...transcript,
+        dialogs: transcript.dialogs.filter((dialog) => dialog.id !== record.id),
+      };
     case "reset":
       return emptyTranscript;
     case "message_start":

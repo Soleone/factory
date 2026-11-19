@@ -1,5 +1,6 @@
 import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import { RotateCcw } from "lucide-react";
+import { AgentDialog } from "@/AgentDialog";
 import { api } from "@/api";
 import { AgentPanel } from "@/components/soleone/agent";
 import { Button } from "@/components/ui/button";
@@ -56,6 +57,15 @@ export function PlanView({
           New chat
         </Button>
       </div>
+      {transcript.dialogs[0] && (
+        <AgentDialog
+          key={transcript.dialogs[0].id}
+          dialog={transcript.dialogs[0]}
+          onAnswer={(answer) =>
+            void run(() => api.answerChat({ id: transcript.dialogs[0].id, ...answer }))
+          }
+        />
+      )}
       <AgentPanel
         messages={agentMessages(transcript)}
         prompt={prompt}

@@ -85,6 +85,12 @@ export function chat(state: string) {
     },
     prompt: (message: string) => send({ type: "prompt", message }),
     abort: () => session && send({ type: "abort" }),
+    /** Answers a question from one of Pi's extensions, which Pi waits on; every page closes it. */
+    answer(reply: { id: string }): void {
+      if (!session) return;
+      send({ type: "extension_ui_response", ...reply });
+      emit({ type: "extension_ui_answered", id: reply.id });
+    },
     reset(): void {
       // Closing stdin asks the agent to shut down.
       session?.child.stdin.end();

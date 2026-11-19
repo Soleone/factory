@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Candidates, Model, Snapshot } from "./backend/types.ts";
+import type { DialogAnswer } from "./pi";
 
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
   const response = await fetch(path, {
@@ -31,6 +32,7 @@ export const api = {
   turnOff: () => call("POST", "/api/off"),
   chat: (message: string) => call("POST", "/api/chat", { message }),
   abortChat: () => call("POST", "/api/chat/abort"),
+  answerChat: (answer: { id: string } & DialogAnswer) => call("POST", "/api/chat/answer", answer),
   resetChat: () => call("POST", "/api/chat/reset"),
 };
 
