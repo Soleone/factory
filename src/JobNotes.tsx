@@ -76,7 +76,7 @@ export function JobNotes({
   );
 }
 
-function Answer({ job, question, act }: { job: Job; question: Note; act: Act }) {
+export function Answer({ job, question, act }: { job: Job; question: Note; act: Act }) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const send = async () => {

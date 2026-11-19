@@ -35,11 +35,11 @@ import {
 } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/tooltip/tooltip";
-import { CandidateDetails } from "@/CandidateDetails";
 import { CloneDialog } from "@/CloneDialog";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ago, itemTitle, JOB_BADGE, pinName, repoName } from "@/format";
 import { Row, Section } from "@/Row";
+import { StateIcon, TaskDetails, taskState } from "@/TaskDetails";
 
 const ALL = "";
 const CLONE = { value: "clone-project", label: "Clone project..." };
@@ -275,7 +275,17 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
                   return (
                     <Row
                       key={key(item)}
-                      title={itemTitle(item)}
+                      leading={<StateIcon state={taskState(job, snapshot.prs)} />}
+                      title={
+                        <TaskDetails
+                          item={item}
+                          job={job}
+                          play={described.get(item.play)}
+                          snapshot={snapshot}
+                          act={act}
+                          actions={!job && queueButton}
+                        />
+                      }
                       meta={[item.play, item.level, item.id].join(" · ")}
                     >
                       {job ? (
@@ -283,9 +293,6 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
                       ) : (
                         queueButton
                       )}
-                      <CandidateDetails item={item} play={described.get(item.play)}>
-                        {!job && queueButton}
-                      </CandidateDetails>
                     </Row>
                   );
                 })}

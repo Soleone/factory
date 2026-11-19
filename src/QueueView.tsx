@@ -15,6 +15,7 @@ import {
 import { ItemGroup } from "@/components/ui/item";
 import { clock, itemTitle, minutesSince, pinName, tuning, WORKER_BADGE } from "@/format";
 import { Row, Section } from "@/Row";
+import { StateIcon, TaskDetails } from "@/TaskDetails";
 
 function jobMeta(job: Job, byId: Map<string, Job>): string {
   const pin = job.agent ? pinName({ ...job, agent: job.agent }) : "";
@@ -50,6 +51,21 @@ export function QueueView({
   const byId = new Map(jobs.map((job) => [job.id, job]));
   const picks = jobs.filter((job) => job.state === "queued" && job.source === "pick");
   const auto = jobs.filter((job) => job.state === "queued" && job.source === "auto");
+  const details = (job: Job, removable: boolean) => (
+    <TaskDetails
+      item={job.item}
+      job={job}
+      snapshot={snapshot}
+      act={act}
+      actions={
+        removable && (
+          <Button variant="outline" onClick={() => act(() => api.remove(job.id))}>
+            Remove from queue
+          </Button>
+        )
+      }
+    />
+  );
   const remove = (job: Job) => (
     <Button
       variant="ghost"
@@ -69,7 +85,7 @@ export function QueueView({
             {status.workers.map((worker) => {
               const job = worker.job ? byId.get(worker.job) : undefined;
               const what = job
-                ? itemTitle(job.item)
+                ? undefined
                 : worker.until
                   ? `until ${clock(worker.until)}`
                   : (worker.reason ?? "waiting for work");
@@ -87,6 +103,12 @@ export function QueueView({
                   }
                   meta={
                     <span className="flex flex-col gap-1">
+                      {job && (
+                        <span className="flex items-center gap-2 text-foreground">
+                          <StateIcon state={job.state} />
+                          {details(job, false)}
+                        </span>
+                      )}
                       <span>
                         {[what, tuning(worker), budget || `since ${clock(worker.since)}`, limits]
                           .filter(Boolean)
@@ -126,7 +148,11 @@ export function QueueView({
             <AnimatePresence mode="popLayout" initial={false}>
               {picks.map((job, index) => (
                 <Glide key={job.id}>
-                  <Row title={itemTitle(job.item)} meta={jobMeta(job, byId)}>
+                  <Row
+                    leading={<StateIcon state={job.state} />}
+                    title={details(job, true)}
+                    meta={jobMeta(job, byId)}
+                  >
                     <Button
                       variant="ghost"
                       size="icon-sm"
@@ -166,7 +192,11 @@ export function QueueView({
             <AnimatePresence mode="popLayout" initial={false}>
               {auto.map((job) => (
                 <Glide key={job.id}>
-                  <Row title={itemTitle(job.item)} meta={jobMeta(job, byId)}>
+                  <Row
+                    leading={<StateIcon state={job.state} />}
+                    title={details(job, true)}
+                    meta={jobMeta(job, byId)}
+                  >
                     {remove(job)}
                   </Row>
                 </Glide>

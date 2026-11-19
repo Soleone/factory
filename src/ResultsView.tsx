@@ -32,6 +32,7 @@ import { ItemGroup } from "@/components/ui/item";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { agentName, day, itemTitle, minutes, OUTCOME_BADGE, tuning } from "@/format";
 import { Row } from "@/Row";
+import { StateIcon, TaskDetails, taskState } from "@/TaskDetails";
 
 type Prs = Snapshot["prs"];
 
@@ -265,7 +266,7 @@ export function ResultsView({
           <Result
             key={job.id}
             job={job}
-            prs={prs}
+            snapshot={snapshot}
             act={act}
             car={train[job.id]}
             onAsk={onAsk}
@@ -297,7 +298,7 @@ export function ResultsView({
 
 function Result({
   job,
-  prs,
+  snapshot,
   act,
   car,
   onAsk,
@@ -309,7 +310,7 @@ function Result({
   selection,
 }: {
   job: Job;
-  prs: Prs;
+  snapshot: Snapshot;
   act: Act;
   car?: TrainCar;
   onAsk: (question: string) => void;
@@ -326,7 +327,7 @@ function Result({
   const [pending, setPending] = useState<"merge" | "rebase" | "close">();
   const last = job.attempts.at(-1)!;
   const url = prUrl(job);
-  const pr = url ? prs[url] : undefined;
+  const pr = url ? snapshot.prs[url] : undefined;
   const open = pr?.state === "OPEN";
   const disabled = dismissing || pending !== undefined || onTrain(car);
   const primary = pr && (canRebase(pr) ? "rebase" : canMerge(pr) ? "merge" : undefined);
@@ -346,53 +347,8 @@ function Result({
     }
   }
 
-  return (
-    <Row
-      leading={selection}
-      title={
-        <>
-          {unread && (
-            <span
-              role="img"
-              aria-label="new"
-              className="mr-1 inline-block size-2 rounded-full bg-(--om-accent) align-middle"
-            />
-          )}
-          {job.state === "blocked" ? (
-            <Badge variant="accent">waiting for you</Badge>
-          ) : pr ? (
-            <Badge variant={PR_BADGE[pr.state]}>{pr.state.toLowerCase()}</Badge>
-          ) : (
-            <Badge variant={OUTCOME_BADGE[last.outcome]}>{last.outcome}</Badge>
-          )}{" "}
-          <Badge variant="outline">{pr?.level ?? job.item.level}</Badge> {itemTitle(job.item)}
-        </>
-      }
-      meta={
-        <span className="flex flex-col gap-1">
-          <AttemptLine job={job} attempt={last} />
-          {notes}
-          {url && <PrLine jobId={job.id} url={url} pr={pr} />}
-          {car?.step === "skipped" && (
-            <span className="text-destructive">
-              Merge train skipped it: {car.reason.replaceAll("\n", " ")}
-            </span>
-          )}
-          {car && TRAIN_STEP[car.step] && <span>{TRAIN_STEP[car.step]}</span>}
-          {job.attempts.length > 1 && (
-            <details>
-              <summary className="cursor-pointer">
-                {job.attempts.length - 1} earlier{" "}
-                {job.attempts.length === 2 ? "attempt" : "attempts"}
-              </summary>
-              {job.attempts.slice(0, -1).map((attempt) => (
-                <AttemptLine key={attempt.log} job={job} attempt={attempt} withOutcome />
-              ))}
-            </details>
-          )}
-        </span>
-      }
-    >
+  const actions = (
+    <>
       {primary && (
         <Button size="sm" disabled={disabled} onClick={() => changePr(primary)}>
           {pending === "rebase"
@@ -434,6 +390,82 @@ function Result({
           Ask {agentName(asked)}
         </Button>
       )}
+    </>
+  );
+
+  return (
+    <Row
+      leading={
+        <>
+          {selection}
+          <StateIcon state={taskState(job, snapshot.prs)} />
+        </>
+      }
+      title={
+        <>
+          {unread && (
+            <span
+              role="img"
+              aria-label="new"
+              className="mr-1 inline-block size-2 rounded-full bg-(--om-accent) align-middle"
+            />
+          )}
+          {job.state === "blocked" ? (
+            <Badge variant="accent">waiting for you</Badge>
+          ) : pr ? (
+            <Badge variant={PR_BADGE[pr.state]}>{pr.state.toLowerCase()}</Badge>
+          ) : (
+            <Badge variant={OUTCOME_BADGE[last.outcome]}>{last.outcome}</Badge>
+          )}{" "}
+          <Badge variant="outline">{pr?.level ?? job.item.level}</Badge>{" "}
+          <TaskDetails
+            item={job.item}
+            job={job}
+            snapshot={snapshot}
+            act={act}
+            actions={
+              <>
+                {actions}
+                {canDismiss(job) && (
+                  <Button
+                    variant="outline"
+                    disabled={disabled}
+                    onClick={() => act(() => api.remove(job.id))}
+                  >
+                    Dismiss
+                  </Button>
+                )}
+              </>
+            }
+          />
+        </>
+      }
+      meta={
+        <span className="flex flex-col gap-1">
+          <AttemptLine job={job} attempt={last} />
+          {notes}
+          {url && <PrLine jobId={job.id} url={url} pr={pr} />}
+          {car?.step === "skipped" && (
+            <span className="text-destructive">
+              Merge train skipped it: {car.reason.replaceAll("\n", " ")}
+            </span>
+          )}
+          {car && TRAIN_STEP[car.step] && <span>{TRAIN_STEP[car.step]}</span>}
+          {job.attempts.length > 1 && (
+            <details>
+              <summary className="cursor-pointer">
+                {job.attempts.length - 1} earlier{" "}
+                {job.attempts.length === 2 ? "attempt" : "attempts"}
+              </summary>
+              {job.attempts.slice(0, -1).map((attempt) => (
+                <AttemptLine key={attempt.log} job={job} attempt={attempt} withOutcome />
+              ))}
+            </details>
+          )}
+        </span>
+      }
+    >
+      {actions}
       {canDismiss(job) && (
         <Button
           variant="ghost"
@@ -483,7 +515,7 @@ function AttemptLine({
   );
 }
 
-function PrLine({ jobId, url, pr }: { jobId: string; url: string; pr?: Pr }) {
+export function PrLine({ jobId, url, pr }: { jobId: string; url: string; pr?: Pr }) {
   const checks = pr && CHECKS[pr.checks];
   return (
     <span className="flex flex-wrap items-center gap-x-3">
