@@ -84,15 +84,18 @@ function Factory({
         <div className="flex flex-1 items-center gap-3">
           <h1 className="flex items-center gap-2 font-heading text-xl font-semibold">
             <Logo working={on} />
-            factory
+            Factory
           </h1>
-          <Badge variant={on ? "default" : "outline"}>{on ? "on" : "off"}</Badge>
+          <Badge
+            variant={on ? "default" : "outline"}
+            className={on ? "bg-(--om-accent) text-(--om-dark-background)" : undefined}
+          >{on ? "on" : "off"}</Badge>
           <span className="text-sm text-muted-foreground">{run}</span>
         </div>
         <Controls snapshot={snapshot} act={act} />
         <div className="flex items-center gap-1">
-          <SettingsDialog snapshot={snapshot} act={act} />
           <ThemePicker />
+          <SettingsDialog snapshot={snapshot} act={act} />
         </div>
       </header>
       {error && (
