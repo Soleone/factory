@@ -17,6 +17,18 @@ Needs node 22+, git, [workwork](https://github.com/Soleone/workwork) with `--jso
 - **Limits:** a limit of 1 (the default) stops an agent at its first usage-limit hit, so only the current allowance gets used. A limit of 2 waits for one reset and stops at the second hit. "None" always waits for the reset, which it logs. Once every agent has stopped, the factory turns itself off. Three quick failures in a row also count as a limit hit, so a broken login can't burn through the queue.
 - **Failures:** a failed or timed-out job gets one more try by the same agent. After that it waits for you to retry it.
 
+## Reviewing results
+
+Each result links the PR or issue the agent opened. From the page you can read a PR's description and diff, merge it, rebase it onto its base when GitHub reports conflicts, or close it. Rebasing never guesses: if git stops on a conflict, nothing is pushed and the page lists the files.
+
+**Merge train:** select several results and merge them in one go. PRs merge one after another per repo, since each merge moves the base under the next one; repos go in parallel. The train waits for checks, rebases a PR that conflicts, and skips one it can't merge, with the reason. When a rebase stops on real conflicts, a job to resolve them goes to the front of the queue, so an agent picks it up on the next run.
+
+## Plan chat
+
+The Plan tab is a chat with an agent about what to queue. It reads the candidates, the queue and past results, proposes a few jobs that won't step on each other, and adds them through the CLI once you agree. It never turns the factory on, merges or closes PRs, or changes your repos. That is an instruction to the agent, not a sandbox: it has a shell, like the agents doing jobs. Results that failed, or that the train skipped, have an **Ask** button that starts the chat with the question already written.
+
+Settings > Plan chat picks the agent (Claude Code or Pi), its model and effort. The same model and effort pickers serve runs. Model choices are short lists: Pi's scoped models (`enabledModels` in Pi's settings, the ones Ctrl+P cycles through), and Claude Code's current models (opus, sonnet, fable, haiku). The efforts on offer are the chosen model's. When one of Pi's extensions asks something mid-chat, the page shows the question. The chat lives in `factory serve`'s memory, so it starts over when serve restarts.
+
 ## Commands
 
 The page and the CLI do the same things on the same state; `serve` is only an interface, and the factory runs without it.
@@ -44,7 +56,7 @@ Each agent gets one worktree per repo, under the state folder, reused from job t
 
 In `$DATA/apps/factory/` when `DATA` is set, otherwise `~/.local/share/factory/`:
 
-- `settings.json`: registered agents with their model and effort, limit, until, timeout, auto mode (on, levels, plays)
+- `settings.json`: registered agents with their model and effort, the Plan chat's agent, limit, until, timeout, auto mode (on, levels, plays, repos)
 - `jobs.jsonl`: append-only events (add, remove, move, start, attempt, requeue, retry), so the CLI, the factory and the page never overwrite each other
 - `candidates.json`: the cached `workwork --all --json`, which takes minutes; refreshed from the page, or by auto mode when older than 6 hours
 - `runs/<run>/<job>-<attempt>/`: `prompt.md` and `agent.log`
