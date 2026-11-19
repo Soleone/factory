@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.2](https://github.com/Soleone/factory/compare/v0.2.1...v0.2.2) (2026-11-19)
+
+### Features
+
+* **candidates:** add local repo filters and clone action ([0261062](https://github.com/Soleone/factory/commit/0261062517354eae51c294cb07f563edf9b5e8ea))
+* one row layout everywhere, theme colors, quieter buttons ([c4f9b9d](https://github.com/Soleone/factory/commit/c4f9b9d9b9521c6501f307cd719942a6bb21452a))
+* unify task details across candidates, queue, and results ([f5337bb](https://github.com/Soleone/factory/commit/f5337bbb2bd53eb50532907ddfe0026b63cef166))
+
 ## [0.2.1](https://github.com/Soleone/factory/compare/v0.2.0...v0.2.1) (2026-11-19)
 
 ### Features
