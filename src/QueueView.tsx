@@ -1,4 +1,6 @@
 import { ArrowDownIcon, ArrowUpIcon, XIcon } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
+import type { ReactNode, Ref } from "react";
 import { api, type Act } from "@/api";
 import type { Job, Snapshot } from "@/backend/types.ts";
 import { Badge } from "@/components/ui/badge";
@@ -17,6 +19,20 @@ import { Row, Section } from "@/Row";
 function jobMeta(job: Job): string {
   const pin = job.agent ? pinName({ ...job, agent: job.agent }) : "";
   return [job.item.play, job.item.level, pin].filter(Boolean).join(" · ");
+}
+
+/** Glides to its new place when the order changes, and slides out to the right when it leaves the queue. */
+function Glide({ ref, children }: { ref?: Ref<HTMLDivElement>; children: ReactNode }) {
+  return (
+    <motion.div
+      ref={ref}
+      layout="position"
+      exit={{ opacity: 0, x: 64 }}
+      transition={{ duration: 0.2 }}
+    >
+      {children}
+    </motion.div>
+  );
 }
 
 export function QueueView({
@@ -92,29 +108,33 @@ export function QueueView({
           </Empty>
         ) : (
           <ItemGroup>
-            {picks.map((job, index) => (
-              <Row key={job.id} title={itemTitle(job.item)} meta={jobMeta(job)}>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label="Move up"
-                  disabled={index === 0}
-                  onClick={() => act(() => api.move(job.id, index - 1))}
-                >
-                  <ArrowUpIcon />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label="Move down"
-                  disabled={index === picks.length - 1}
-                  onClick={() => act(() => api.move(job.id, index + 1))}
-                >
-                  <ArrowDownIcon />
-                </Button>
-                {remove(job)}
-              </Row>
-            ))}
+            <AnimatePresence mode="popLayout" initial={false}>
+              {picks.map((job, index) => (
+                <Glide key={job.id}>
+                  <Row title={itemTitle(job.item)} meta={jobMeta(job)}>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label="Move up"
+                      disabled={index === 0}
+                      onClick={() => act(() => api.move(job.id, index - 1))}
+                    >
+                      <ArrowUpIcon />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label="Move down"
+                      disabled={index === picks.length - 1}
+                      onClick={() => act(() => api.move(job.id, index + 1))}
+                    >
+                      <ArrowDownIcon />
+                    </Button>
+                    {remove(job)}
+                  </Row>
+                </Glide>
+              ))}
+            </AnimatePresence>
           </ItemGroup>
         )}
       </Section>
@@ -128,11 +148,15 @@ export function QueueView({
           </p>
         ) : (
           <ItemGroup>
-            {auto.map((job) => (
-              <Row key={job.id} title={itemTitle(job.item)} meta={jobMeta(job)}>
-                {remove(job)}
-              </Row>
-            ))}
+            <AnimatePresence mode="popLayout" initial={false}>
+              {auto.map((job) => (
+                <Glide key={job.id}>
+                  <Row title={itemTitle(job.item)} meta={jobMeta(job)}>
+                    {remove(job)}
+                  </Row>
+                </Glide>
+              ))}
+            </AnimatePresence>
           </ItemGroup>
         )}
       </Section>
