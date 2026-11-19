@@ -12,11 +12,10 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Field, FieldLabel } from "@/components/ui/field";
-import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/tooltip/tooltip";
 import { RunFields, type Run } from "@/RunFields";
 
-/** Auto mode (fills the queue) and the factory's power switch (works it). */
+/** Auto mode (fills the queue) and the factory's power button (works it). */
 export function Controls({ snapshot, act }: { snapshot: Snapshot; act: Act }) {
   const { settings, on } = snapshot;
   const [run, setRun] = useState<Run>();
@@ -38,18 +37,28 @@ export function Controls({ snapshot, act }: { snapshot: Snapshot; act: Act }) {
           Keep the queue topped up from candidates while the factory is on
         </TooltipContent>
       </Tooltip>
-      <Field orientation="horizontal">
-        <Switch
-          id="power"
-          checked={on}
-          onCheckedChange={(checked) =>
-            checked
-              ? setRun({ agents: settings.agents, limit: settings.limit, until: settings.until })
-              : act(api.turnOff)
+      <Tooltip disabled={on}>
+        <TooltipTrigger
+          render={
+            <Button
+              variant={on ? "outline" : "default"}
+              onClick={(event) => {
+                const defaults = {
+                  agents: settings.agents,
+                  limit: settings.limit,
+                  until: settings.until,
+                };
+                if (on) void act(api.turnOff);
+                else if (event.shiftKey) void act(() => api.turnOn(defaults));
+                else setRun(defaults);
+              }}
+            />
           }
-        />
-        <FieldLabel htmlFor="power">On</FieldLabel>
-      </Field>
+        >
+          {on ? "Turn off" : "Turn on"}
+        </TooltipTrigger>
+        <TooltipContent>Shift-click to turn on with your defaults</TooltipContent>
+      </Tooltip>
       <Dialog open={run !== undefined} onOpenChange={(open) => !open && setRun(undefined)}>
         <DialogContent>
           <DialogHeader>

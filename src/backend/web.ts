@@ -13,6 +13,7 @@ import { mergeTrain } from "./train.ts";
 import {
   checkSettings,
   itemKey,
+  output,
   readCandidates,
   readSettings,
   refreshCandidates,
@@ -25,6 +26,7 @@ import {
   canRebase,
   prUrl,
   type Model,
+  type Play,
   type Preset,
   type Settings,
   type Snapshot,
@@ -62,6 +64,15 @@ export function serve(state: string, port: number, host: string): Server {
       );
     return models.get(name)!;
   }
+  /** Only cached candidates, so the page can't queue or run workwork for anything it names. */
+  function candidates(wanted: { repo: string; id: string }[]) {
+    const cached = new Map(readCandidates(state)?.items.map((item) => [itemKey(item), item]));
+    return wanted.map((each) => {
+      const item = cached.get(itemKey(each));
+      if (!item) throw new Error(`no candidate ${each.id} in ${each.repo}`);
+      return item;
+    });
+  }
   function jobPr(id: string) {
     const job = readJobs(state).find((job) => job.id === id);
     const url = job && prUrl(job);
@@ -90,15 +101,15 @@ export function serve(state: string, port: number, host: string): Server {
         console.error(`factory: workwork failed: ${error.message}`),
       );
     },
-    "POST /api/jobs": (body: { items: { repo: string; id: string }[]; pin?: Preset }) => {
-      const cached = new Map(readCandidates(state)?.items.map((item) => [itemKey(item), item]));
-      const items = body.items.map((wanted) => {
-        const item = cached.get(itemKey(wanted));
-        if (!item) throw new Error(`no candidate ${wanted.id} in ${wanted.repo}`);
-        return item;
-      });
-      return addJobs(state, items, "pick", body.pin);
+    // Read fresh each time: it's quick, and the user may have just edited a play of their own.
+    "GET /api/plays": async (): Promise<Play[]> =>
+      JSON.parse(await output("workwork", ["plays", "--json"], process.cwd())),
+    "POST /api/candidates/prompt": (body: { repo: string; id: string }) => {
+      const [item] = candidates([body]);
+      return output("workwork", ["prompt", item.id], item.repo);
     },
+    "POST /api/jobs": (body: { items: { repo: string; id: string }[]; pin?: Preset }) =>
+      addJobs(state, candidates(body.items), "pick", body.pin),
     "POST /api/jobs/remove": (_, id) => removeJob(state, id),
     "POST /api/jobs/retry": (_, id) => retryJob(state, id),
     "POST /api/jobs/move": (body: { index: number }, id) => moveJob(state, id, body.index),

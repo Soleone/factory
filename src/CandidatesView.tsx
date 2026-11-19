@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, type Act } from "@/api";
-import { ChevronDownIcon } from "lucide-react";
+import { ChevronDownIcon, RefreshCwIcon } from "lucide-react";
 import { AGENT_NAMES } from "@/backend/agents.ts";
 import type { Item, Job, Preset, Snapshot } from "@/backend/types.ts";
 import { Badge } from "@/components/ui/badge";
@@ -32,6 +32,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/tooltip/tooltip";
+import { CandidateDetails } from "@/CandidateDetails";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ago, itemTitle, JOB_BADGE, pinName, repoName } from "@/format";
 import { Row, Section } from "@/Row";
@@ -48,10 +50,17 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
   const [levels, setLevels] = useState(["auto", "skim", "decide"]);
   const [search, setSearch] = useState("");
   const [shown, setShown] = useState(PAGE);
+  /** What each play does, by name; empty until workwork answers. */
+  const [described, setDescribed] = useState(new Map<string, string>());
+  /** Refresh clicks, each turning the icon once. */
+  const [turns, setTurns] = useState(0);
   const { at, count, refreshing } = snapshot.candidates;
 
   useEffect(() => {
     void api.candidates().then((candidates) => setItems(candidates.items));
+    void api
+      .plays()
+      .then((plays) => setDescribed(new Map(plays.map((each) => [each.name, each.description]))));
   }, [at]);
 
   // The latest job per candidate, so the list says what already happened to it.
@@ -146,33 +155,53 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
           </SelectContent>
         </Select>
         <span className="flex flex-1 items-center justify-end gap-2 text-sm text-muted-foreground">
-          {count} candidates{at ? `, ${ago(at)}` : ""}
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={refreshing}
-            onClick={() => act(api.refreshCandidates)}
-          >
-            {refreshing && <Spinner />} {refreshing ? "Asking workwork" : "Refresh"}
-          </Button>
+          {refreshing ? "Asking workwork…" : `${count} candidates${at ? `, ${ago(at)}` : ""}`}
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Refresh candidates"
+                  disabled={refreshing}
+                  onClick={() => {
+                    setTurns(turns + 1);
+                    void act(api.refreshCandidates);
+                  }}
+                />
+              }
+            >
+              {/* A new key replays the turn on every click. */}
+              <RefreshCwIcon key={turns} className={turns ? "refresh-turn" : undefined} />
+            </TooltipTrigger>
+            <TooltipContent>
+              {refreshing ? "Asking workwork, takes a few minutes" : "Ask workwork again"}
+            </TooltipContent>
+          </Tooltip>
         </span>
       </div>
 
       <div className="flex flex-col gap-6 md:flex-row">
         <nav className="flex flex-wrap gap-1 md:w-48 md:flex-none md:flex-col">
           {[[ALL, inRepo.length] as const, ...plays].map(([name, total]) => (
-            <Button
-              key={name}
-              variant={play === name ? "secondary" : "ghost"}
-              size="sm"
-              onClick={() => {
-                setPlay(name);
-                setShown(PAGE);
-              }}
-            >
-              <span className="flex-1 text-left">{name || "All plays"}</span>
-              <span className="text-muted-foreground">{total}</span>
-            </Button>
+            <Tooltip key={name} disabled={!described.has(name)}>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant={play === name ? "secondary" : "ghost"}
+                    size="sm"
+                    onClick={() => {
+                      setPlay(name);
+                      setShown(PAGE);
+                    }}
+                  />
+                }
+              >
+                <span className="flex-1 text-left">{name || "All plays"}</span>
+                <span className="text-muted-foreground">{total}</span>
+              </TooltipTrigger>
+              <TooltipContent side="right">{described.get(name)}</TooltipContent>
+            </Tooltip>
           ))}
         </nav>
 
@@ -196,21 +225,23 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
             <ItemGroup>
               {matches.slice(0, shown).map((item) => {
                 const job = jobs.get(key(item));
+                const queueButton = (
+                  <QueueButton
+                    label="Queue"
+                    presets={snapshot.settings.presets}
+                    onQueue={(pin) => queue([item], pin)}
+                  />
+                );
                 return (
                   <Row
                     key={key(item)}
                     title={itemTitle(item)}
                     meta={[item.play, item.level, item.id].join(" · ")}
                   >
-                    {job ? (
-                      <Badge variant={JOB_BADGE[job.state]}>{job.state}</Badge>
-                    ) : (
-                      <QueueButton
-                        label="Queue"
-                        presets={snapshot.settings.presets}
-                        onQueue={(pin) => queue([item], pin)}
-                      />
-                    )}
+                    {job ? <Badge variant={JOB_BADGE[job.state]}>{job.state}</Badge> : queueButton}
+                    <CandidateDetails item={item} play={described.get(item.play)}>
+                      {!job && queueButton}
+                    </CandidateDetails>
                   </Row>
                 );
               })}

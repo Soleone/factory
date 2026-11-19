@@ -46,6 +46,9 @@ export type Item = {
 /** `workwork --all --json` takes minutes, so its answer is kept here for browsing and auto mode. */
 export type Candidates = { at: string; items: Item[] };
 
+/** A play as `workwork plays --json` prints it, with the fields factory shows. */
+export type Play = { name: string; description: string };
+
 /** One agent working one job. `branch` holds work it left unpushed. */
 export type Attempt = {
   run: string;

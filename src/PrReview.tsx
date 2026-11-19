@@ -15,11 +15,11 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-const SCROLL =
+export const SCROLL =
   "max-h-[60dvh] overflow-auto rounded-md border bg-muted/50 p-3 font-mono text-xs leading-relaxed";
 
 /** GitHub-flavored PR bodies, styled with the theme since the page has no prose styles. */
-const MARKDOWN: MarkdownToJSX.Options = {
+export const MARKDOWN: MarkdownToJSX.Options = {
   // Blocks land straight in the scroll box, which spaces them.
   wrapper: null,
   overrides: {

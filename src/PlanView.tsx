@@ -41,7 +41,7 @@ export function PlanView({
   }
 
   return (
-    <div className="flex h-[calc(100svh-11rem)] min-h-96 flex-col gap-3">
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm text-muted-foreground">
           {agentName(agent)} looks through the candidates and queues jobs once you agree. It never

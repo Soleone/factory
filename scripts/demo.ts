@@ -184,6 +184,17 @@ function dispatch(snapshot: Snapshot, route: string, body: unknown): unknown {
     case "POST /api/candidates/refresh":
       snapshot.candidates.at = new Date().toISOString();
       return null;
+    case "GET /api/plays":
+      return [
+        { name: "tests", description: "Adds a behavior test for something no test covers yet." },
+        { name: "docs", description: "Fixes docs that disagree with what the code does." },
+        { name: "cleanup", description: "Cuts dead paths and needless layers from one file." },
+      ];
+    case "POST /api/candidates/prompt": {
+      const { id } = body as Pick<Item, "id">;
+      const item = items.find((each) => each.id === id);
+      return `# workwork: ${id}\n\nPlay: ${item?.play}\nLevel: ${item?.level}\n\n## Task\n\nDemo task: ${item?.title?.toLowerCase()}. Keep the change small and covered by a test.\n\n## Done when\n\n- \`pnpm test\` passes.\n\n## Deliver\n\n- One commit, pushed as a PR labeled \`workwork\`.\n\n## Standard\n\nNot shown in the page.\n`;
+    }
     case "POST /api/jobs": {
       const selection = body as { items: Pick<Item, "repo" | "id">[]; pin?: Preset };
       for (const wanted of selection.items) {

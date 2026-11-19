@@ -36,10 +36,12 @@ export type Run = Pick<Settings, "agents" | "limit" | "until">;
 
 const DEFAULT = "default";
 const LIMITS = [
-  { value: "1", label: "1, stop at the first" },
-  { value: "2", label: "2, one reset" },
-  { value: "3", label: "3, two resets" },
-  { value: "none", label: "No limit" },
+  { value: "1", label: "Stop that agent" },
+  { value: "2", label: "Wait for 1 reset, then stop" },
+  { value: "3", label: "Wait for 2 resets, then stop" },
+  { value: "4", label: "Wait for 3 resets, then stop" },
+  { value: "5", label: "Wait for 4 resets, then stop" },
+  { value: "none", label: "Wait and always continue" },
 ];
 
 /** Which agents work, with which model and effort, and when they stop: for a run or as the defaults. */
@@ -76,10 +78,13 @@ export function RunFields({ value, onChange }: { value: Run; onChange: (run: Run
           );
         })}
       </FieldSet>
-      <Field orientation="horizontal">
+      <Field>
         <FieldContent>
-          <FieldLabel>Usage limit hits per agent</FieldLabel>
-          <FieldDescription>Once every agent is out, the factory turns off.</FieldDescription>
+          <FieldLabel>When an agent hits its usage limit</FieldLabel>
+          <FieldDescription>
+            Waiting pauses that agent until its plan resets, then it goes on. Once every agent has
+            stopped, the factory turns off.
+          </FieldDescription>
         </FieldContent>
         <Select
           items={LIMITS}
@@ -88,7 +93,7 @@ export function RunFields({ value, onChange }: { value: Run; onChange: (run: Run
             onChange({ ...value, limit: limit === "none" ? null : Number(limit) })
           }
         >
-          <SelectTrigger className="w-40">
+          <SelectTrigger className="w-56">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>

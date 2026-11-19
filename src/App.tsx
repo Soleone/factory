@@ -1,12 +1,13 @@
 import { useState } from "react";
-import { Bot, Inbox, ListOrdered, PackageCheck } from "lucide-react";
-import { useFactory } from "@/api";
+import { Inbox, ListOrdered, PackageCheck } from "lucide-react";
+import { useFactory, type Act } from "@/api";
+import type { Snapshot } from "@/backend/types.ts";
+import { AgentSidebar } from "@/components/soleone/agent";
 import { ThemePicker } from "@/components/soleone/theme-picker";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/tooltip/tooltip";
+import { useSidebar } from "@/components/ui/sidebar";
 import { CandidatesView } from "@/CandidatesView";
 import { CloneDialog } from "@/CloneDialog";
 import { Controls } from "@/Controls";
@@ -19,8 +20,7 @@ import { clock, runStart } from "@/format";
 
 export function App() {
   const { snapshot, error, act } = useFactory();
-  const [tab, setTab] = useState("queue");
-  /** The Live Agent draft, here so other tabs can fill it with a question. */
+  /** The Live Agent draft, here so the Results tab can fill it with a question. */
   const [plan, setPlan] = useState("");
 
   if (!snapshot)
@@ -34,6 +34,32 @@ export function App() {
       </div>
     );
 
+  return (
+    // The agent sits beside every tab, and stays mounted so a reply keeps streaming while it's closed.
+    <AgentSidebar
+      title="Live Agent"
+      agent={
+        <PlanView agent={snapshot.settings.chat.agent} prompt={plan} onPromptChange={setPlan} />
+      }
+    >
+      <Factory snapshot={snapshot} error={error} act={act} onAsk={setPlan} />
+    </AgentSidebar>
+  );
+}
+
+function Factory({
+  snapshot,
+  error,
+  act,
+  onAsk,
+}: {
+  snapshot: Snapshot;
+  error: string | undefined;
+  act: Act;
+  onAsk: (question: string) => void;
+}) {
+  const [tab, setTab] = useState("queue");
+  const { isMobile, setOpen, setOpenMobile } = useSidebar();
   const { on, status } = snapshot;
   const queued = snapshot.jobs.filter((job) => job.state === "queued").length;
   const failed = snapshot.jobs.filter((job) => job.state === "failed").length;
@@ -41,7 +67,11 @@ export function App() {
     on && status
       ? [
           `since ${clock(runStart(status.run))}`,
-          `limit ${status.limit ?? "none"}`,
+          status.limit === null
+            ? "always waits for usage resets"
+            : status.limit === 1
+              ? "stops at usage limits"
+              : `waits for ${status.limit - 1} usage reset${status.limit > 2 ? "s" : ""}`,
           status.until && `until ${clock(status.until)}`,
         ]
           .filter(Boolean)
@@ -86,24 +116,8 @@ export function App() {
               Results{failed ? ` (${failed} failed)` : ""}
             </TabsTrigger>
           </TabsList>
-          <div className="ml-auto flex items-center gap-1">
+          <div className="ml-auto">
             <CloneDialog act={act} />
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    variant={tab === "plan" ? "secondary" : "ghost"}
-                    size="icon"
-                    aria-label="Live Agent"
-                    aria-pressed={tab === "plan"}
-                    onClick={() => setTab("plan")}
-                  />
-                }
-              >
-                <Bot />
-              </TooltipTrigger>
-              <TooltipContent>Live Agent</TooltipContent>
-            </Tooltip>
           </div>
         </div>
         <TabsContent value="queue">
@@ -117,14 +131,10 @@ export function App() {
             snapshot={snapshot}
             act={act}
             onAsk={(question) => {
-              setPlan(question);
-              setTab("plan");
+              onAsk(question);
+              (isMobile ? setOpenMobile : setOpen)(true);
             }}
           />
-        </TabsContent>
-        {/* Kept mounted so a reply keeps streaming in while another tab is open. */}
-        <TabsContent value="plan" keepMounted>
-          <PlanView agent={snapshot.settings.chat.agent} prompt={plan} onPromptChange={setPlan} />
         </TabsContent>
       </Tabs>
     </div>

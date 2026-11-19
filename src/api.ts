@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type { Candidates, Model, Preset, Snapshot } from "./backend/types.ts";
+import type { Candidates, Model, Play, Preset, Snapshot } from "./backend/types.ts";
 import type { clonableRepos } from "./backend/repos.ts";
 import type { DialogAnswer } from "./pi";
 
@@ -16,6 +16,10 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
 export const api = {
   candidates: () => call<Candidates | { at: null; items: [] }>("GET", "/api/candidates"),
   refreshCandidates: () => call("POST", "/api/candidates/refresh"),
+  plays: () => call<Play[]>("GET", "/api/plays"),
+  /** What an agent is told to do for the candidate. */
+  prompt: (item: { repo: string; id: string }) =>
+    call<string>("POST", "/api/candidates/prompt", { repo: item.repo, id: item.id }),
   repos: () => call<Awaited<ReturnType<typeof clonableRepos>>>("GET", "/api/repos"),
   clone: (name: string, folder: string) => call("POST", "/api/repos/clone", { name, folder }),
   /** Without a pin, the job goes to whichever agent is free first, on its run's model and effort. */
