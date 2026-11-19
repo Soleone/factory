@@ -1,4 +1,4 @@
-import type { Job, Outcome, Worker } from "./backend/types.ts";
+import type { Worker } from "./backend/types.ts";
 
 export const clock = (iso: string) =>
   new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -36,28 +36,11 @@ export const runStart = (run: string) => run.replace(/T(\d\d)(\d\d)(\d\d)$/, "T$
 
 type BadgeVariant = "default" | "secondary" | "destructive" | "outline" | "accent";
 
-export const OUTCOME_BADGE: Record<Outcome, BadgeVariant> = {
-  done: "secondary",
-  failed: "destructive",
-  timeout: "destructive",
-  limited: "outline",
-  stopped: "outline",
-};
-
 export const WORKER_BADGE: Record<Worker["state"], BadgeVariant> = {
   working: "default",
   idle: "secondary",
   sleeping: "outline",
   stopped: "outline",
-};
-
-export const JOB_BADGE: Record<Job["state"], BadgeVariant> = {
-  queued: "outline",
-  running: "default",
-  blocked: "accent",
-  done: "secondary",
-  failed: "destructive",
-  removed: "outline",
 };
 
 /** Model and effort as one short line, e.g. "opus, high"; empty when both are the agent's default. */

@@ -41,7 +41,7 @@ export function Controls({ snapshot, act }: { snapshot: Snapshot; act: Act }) {
         <TooltipTrigger
           render={
             <Button
-              variant={on ? "outline" : "default"}
+              variant="outline"
               onClick={(event) => {
                 const defaults = {
                   agents: settings.agents,

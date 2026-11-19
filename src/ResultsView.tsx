@@ -8,8 +8,6 @@ import {
 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { api, type Act } from "@/api";
-import { AttemptFile } from "@/AttemptFile";
-import { JobNotes } from "@/JobNotes";
 import { useQueryParam } from "@/hooks/use-query-param";
 import { PrReview } from "@/PrReview";
 import {
@@ -24,15 +22,16 @@ import {
   type Snapshot,
   type TrainCar,
 } from "@/backend/types.ts";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
+import { NeutralCheckbox } from "@/components/variants/checkbox";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { ItemGroup } from "@/components/ui/item";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/tooltip/tooltip";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { agentName, day, itemTitle, minutes, OUTCOME_BADGE, tuning } from "@/format";
+import { agentName, ago, itemTitle } from "@/format";
+import { Answer } from "@/JobNotes";
 import { Row } from "@/Row";
-import { StateIcon, TaskDetails, taskState } from "@/TaskDetails";
+import { StateIcon, StatePill, TaskDetails, taskState } from "@/TaskDetails";
 
 type Prs = Snapshot["prs"];
 
@@ -57,7 +56,6 @@ const FILTERS: Record<string, { label: string; shows: (job: Job, prs: Prs) => bo
   all: { label: "All", shows: () => true },
 };
 
-const PR_BADGE = { OPEN: "default", MERGED: "secondary", CLOSED: "outline" } as const;
 const CHECKS = {
   passing: { label: "checks passing", Icon: CircleCheckIcon, className: "text-success" },
   failing: { label: "checks failing", Icon: CircleXIcon, className: "text-destructive" },
@@ -107,13 +105,6 @@ function canBoard(job: Job, prs: Prs, train: Snapshot["train"]) {
   );
 }
 
-const TRAIN_STEP: Partial<Record<TrainCar["step"], string>> = {
-  queued: "on the merge train",
-  waiting: "merge train: waiting for checks",
-  rebasing: "merge train: rebasing",
-  merging: "merge train: merging",
-};
-
 /** One row per job that ran, latest first, with its PR to review and merge. */
 export function ResultsView({
   snapshot,
@@ -134,9 +125,6 @@ export function ResultsView({
   const active = snapshot.jobs.filter((job) => job.state !== "removed");
   const reviewed = new Set(
     active.filter((job) => job.item.play === "review").map((job) => itemKey(job.item)),
-  );
-  const queuedTasks = new Set(
-    active.filter((job) => job.item.play === "followup").map((job) => job.item.title),
   );
   const agents = Object.keys(snapshot.settings.agents);
   const jobs = snapshot.jobs
@@ -249,14 +237,20 @@ export function ResultsView({
               {dismissing ? "Dismissing…" : `Dismiss (${selection.length})`}
             </Button>
             {shown.some((job) => canBoard(job, prs, train)) && (
-              <Button
-                size="sm"
-                title="Merges one after another per repo, smallest first"
-                disabled={dismissing || boarding.length === 0}
-                onClick={mergeSelected}
-              >
-                Merge ({boarding.length})
-              </Button>
+              <Tooltip>
+                {/* A disabled button ignores the pointer, so the wrapper shows the hint. */}
+                <TooltipTrigger render={<span />}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={dismissing || boarding.length === 0}
+                    onClick={mergeSelected}
+                  >
+                    Merge ({boarding.length})
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Merges one after another per repo, smallest first</TooltipContent>
+              </Tooltip>
             )}
           </div>
         )}
@@ -277,11 +271,10 @@ export function ResultsView({
                 ? agents.find((agent) => agent !== job.agent)
                 : undefined
             }
-            notes={<JobNotes job={job} act={act} queuedTasks={queuedTasks} />}
             disabled={dismissing && selected.has(job.id)}
             selection={
               canDismiss(job) && (
-                <Checkbox
+                <NeutralCheckbox
                   aria-label={`Select ${itemTitle(job.item)}`}
                   checked={selected.has(job.id)}
                   disabled={dismissing}
@@ -305,7 +298,6 @@ function Result({
   asked,
   unread,
   reviewer,
-  notes,
   disabled: dismissing,
   selection,
 }: {
@@ -320,7 +312,6 @@ function Result({
   unread: boolean;
   /** Another agent to review its PR, unless it has a review already. */
   reviewer?: string;
-  notes: ReactNode;
   disabled: boolean;
   selection: ReactNode;
 }) {
@@ -328,6 +319,7 @@ function Result({
   const last = job.attempts.at(-1)!;
   const url = prUrl(job);
   const pr = url ? snapshot.prs[url] : undefined;
+  const state = taskState(job, snapshot.prs);
   const open = pr?.state === "OPEN";
   const disabled = dismissing || pending !== undefined || onTrain(car);
   const primary = pr && (canRebase(pr) ? "rebase" : canMerge(pr) ? "merge" : undefined);
@@ -347,58 +339,32 @@ function Result({
     }
   }
 
-  const actions = (
-    <>
-      {primary && (
-        <Button size="sm" disabled={disabled} onClick={() => changePr(primary)}>
-          {pending === "rebase"
-            ? "Rebasing…"
-            : pending === "merge"
-              ? "Merging…"
-              : primary === "rebase"
-                ? "Rebase"
-                : "Merge"}
-        </Button>
-      )}
-      {open && (
-        <Button variant="outline" size="sm" disabled={disabled} onClick={() => changePr("close")}>
-          {pending === "close" ? "Closing…" : "Close"}
-        </Button>
-      )}
-      {open && reviewer && (
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={disabled}
-          onClick={() => act(() => api.review(job.id, reviewer))}
-        >
-          Review with {agentName(reviewer)}
-        </Button>
-      )}
-      {job.state === "failed" && (
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={disabled}
-          onClick={() => act(() => api.retry(job.id))}
-        >
-          Retry
-        </Button>
-      )}
-      {question && (
-        <Button variant="outline" size="sm" onClick={() => onAsk(question)}>
-          Ask {agentName(asked)}
-        </Button>
-      )}
-    </>
+  const pendingLabel = { merge: "Merging…", rebase: "Rebasing…", close: "Closing…" };
+  const primaryButton = primary && (
+    <Button variant="outline" size="sm" disabled={disabled} onClick={() => changePr(primary)}>
+      {pending ? pendingLabel[pending] : primary === "rebase" ? "Rebase" : "Merge"}
+    </Button>
   );
+  const retry = job.state === "failed" && (
+    <Button
+      variant="outline"
+      size="sm"
+      disabled={disabled}
+      onClick={() => act(() => api.retry(job.id))}
+    >
+      Retry
+    </Button>
+  );
+  const dismiss = () => act(() => api.remove(job.id));
+  const ask =
+    job.state === "blocked" ? job.notes.findLast((note) => note.kind === "ask") : undefined;
 
   return (
     <Row
       leading={
         <>
           {selection}
-          <StateIcon state={taskState(job, snapshot.prs)} />
+          <StateIcon state={state} />
         </>
       }
       title={
@@ -407,17 +373,9 @@ function Result({
             <span
               role="img"
               aria-label="new"
-              className="mr-1 inline-block size-2 rounded-full bg-(--om-accent) align-middle"
+              className="mr-1 inline-block size-2 rounded-full bg-primary align-middle"
             />
           )}
-          {job.state === "blocked" ? (
-            <Badge variant="accent">waiting for you</Badge>
-          ) : pr ? (
-            <Badge variant={PR_BADGE[pr.state]}>{pr.state.toLowerCase()}</Badge>
-          ) : (
-            <Badge variant={OUTCOME_BADGE[last.outcome]}>{last.outcome}</Badge>
-          )}{" "}
-          <Badge variant="outline">{pr?.level ?? job.item.level}</Badge>{" "}
           <TaskDetails
             item={job.item}
             job={job}
@@ -425,55 +383,69 @@ function Result({
             act={act}
             actions={
               <>
-                {actions}
                 {canDismiss(job) && (
                   <Button
-                    variant="outline"
+                    variant="ghost"
+                    size="sm"
+                    className="sm:mr-auto"
                     disabled={disabled}
-                    onClick={() => act(() => api.remove(job.id))}
+                    onClick={dismiss}
                   >
                     Dismiss
                   </Button>
                 )}
+                {open && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={disabled}
+                    onClick={() => changePr("close")}
+                  >
+                    {pending === "close" ? pendingLabel.close : "Close PR"}
+                  </Button>
+                )}
+                {open && reviewer && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={disabled}
+                    onClick={() => act(() => api.review(job.id, reviewer))}
+                  >
+                    Review with {agentName(reviewer)}
+                  </Button>
+                )}
+                {question && (
+                  <Button variant="outline" size="sm" onClick={() => onAsk(question)}>
+                    Ask {agentName(asked)}
+                  </Button>
+                )}
+                {retry}
+                {primaryButton}
               </>
             }
           />
         </>
       }
       meta={
-        <span className="flex flex-col gap-1">
-          <AttemptLine job={job} attempt={last} />
-          {notes}
-          {url && <PrLine jobId={job.id} url={url} pr={pr} />}
-          {car?.step === "skipped" && (
-            <span className="text-destructive">
-              Merge train skipped it: {car.reason.replaceAll("\n", " ")}
-            </span>
-          )}
-          {car && TRAIN_STEP[car.step] && <span>{TRAIN_STEP[car.step]}</span>}
-          {job.attempts.length > 1 && (
-            <details>
-              <summary className="cursor-pointer">
-                {job.attempts.length - 1} earlier{" "}
-                {job.attempts.length === 2 ? "attempt" : "attempts"}
-              </summary>
-              {job.attempts.slice(0, -1).map((attempt) => (
-                <AttemptLine key={attempt.log} job={job} attempt={attempt} withOutcome />
-              ))}
-            </details>
-          )}
+        <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <StatePill
+            state={state}
+            label={state === "failed" && last.outcome !== "failed" ? last.outcome : undefined}
+          />
+          <Facts job={job} last={last} pr={pr} url={url} car={car} />
         </span>
       }
+      below={ask && <Answer job={job} question={ask} act={act} />}
     >
-      {actions}
+      {primaryButton}
+      {retry}
       {canDismiss(job) && (
         <Button
           variant="ghost"
           size="icon-sm"
           aria-label={`Dismiss ${itemTitle(job.item)}`}
-          title="Dismiss"
           disabled={disabled}
-          onClick={() => act(() => api.remove(job.id))}
+          onClick={dismiss}
         >
           <XIcon aria-hidden="true" />
         </Button>
@@ -482,37 +454,84 @@ function Result({
   );
 }
 
-function AttemptLine({
+/** The one line a result needs to be triaged; everything else waits in its pop-up. */
+function Facts({
   job,
-  attempt,
-  withOutcome,
+  last,
+  pr,
+  url,
+  car,
 }: {
   job: Job;
-  attempt: Attempt;
-  withOutcome?: boolean;
+  last: Attempt;
+  pr?: Pr;
+  url?: string;
+  car?: TrainCar;
 }) {
-  const agent = [attempt.agent, tuning(attempt)].filter(Boolean).join(" ");
+  const result = job.notes.findLast((note) => note.kind === "result");
+  const checks = pr?.state === "OPEN" && CHECKS[pr.checks];
+  const facts: ReactNode[] = url
+    ? [
+        pr?.state === "OPEN" && (pr.level ?? job.item.level),
+        pr && (
+          <>
+            <span className="text-success">+{pr.additions}</span>{" "}
+            <span className="text-destructive">−{pr.deletions}</span>
+          </>
+        ),
+        checks && (
+          <span key="checks" className={checks.className}>
+            {checks.label}
+          </span>
+        ),
+        pr?.state === "OPEN" && pr.conflicts && (
+          <span key="conflicts" className="text-destructive">
+            conflicts
+          </span>
+        ),
+        pr?.draft && "draft",
+        car && <TrainLine key="train" car={car} />,
+        `#${url.split("/").at(-1)}`,
+      ]
+    : job.state === "failed"
+      ? [
+          last.error && (
+            <span key="error" className="text-destructive">
+              {last.error.split("\n")[0]}
+            </span>
+          ),
+          job.attempts.length > 1 && `${job.attempts.length} attempts`,
+        ]
+      : [job.state === "done" && (result?.text ?? "nothing to change")];
   return (
-    <span className="flex flex-col gap-1">
-      <span className="flex flex-wrap items-center gap-x-3">
-        <span>
-          {[
-            withOutcome && attempt.outcome,
-            job.item.play,
-            agent,
-            `${day(attempt.start)}, ${minutes(attempt.start, attempt.end)}`,
-          ]
-            .filter(Boolean)
-            .join(" · ")}
+    <span className="min-w-0 truncate">
+      {[...facts, agentName(last.agent), ago(last.end)].filter(Boolean).map((fact, index) => (
+        <span key={index}>
+          {index > 0 && " · "}
+          {fact}
         </span>
-        <AttemptFile log={attempt.log} agent={agent} kind="log" />
-        {/* An error means the job failed before its prompt was written. */}
-        {!attempt.error && <AttemptFile log={attempt.log} agent={agent} kind="prompt" />}
-      </span>
-      {attempt.error && <span className="text-destructive">{attempt.error.split("\n")[0]}</span>}
-      {attempt.branch && <span>Unpushed work kept on branch {attempt.branch}</span>}
+      ))}
     </span>
   );
+}
+
+const TRAIN_STEP = {
+  queued: "on the merge train",
+  waiting: "merge train: waiting for checks",
+  rebasing: "merge train: rebasing",
+  merging: "merge train: merging",
+  merged: undefined,
+};
+
+/** Where the merge train is with a PR, if it is on one. */
+export function TrainLine({ car }: { car?: TrainCar }) {
+  if (car?.step === "skipped")
+    return (
+      <span className="text-destructive">
+        merge train skipped it: {car.reason.replaceAll("\n", " ")}
+      </span>
+    );
+  return car && TRAIN_STEP[car.step] ? <span>{TRAIN_STEP[car.step]}</span> : null;
 }
 
 export function PrLine({ jobId, url, pr }: { jobId: string; url: string; pr?: Pr }) {

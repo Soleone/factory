@@ -3,7 +3,6 @@ import { api, type Act } from "@/api";
 import { ChevronDownIcon, RefreshCwIcon } from "lucide-react";
 import { AGENT_NAMES } from "@/backend/agents.ts";
 import type { Item, Job, Preset, Snapshot } from "@/backend/types.ts";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
 import {
@@ -37,9 +36,9 @@ import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/tooltip/tooltip";
 import { CloneDialog } from "@/CloneDialog";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { ago, itemTitle, JOB_BADGE, pinName, repoName } from "@/format";
+import { ago, itemTitle, pinName, repoName } from "@/format";
 import { Row, Section } from "@/Row";
-import { StateIcon, TaskDetails, taskState } from "@/TaskDetails";
+import { StateIcon, StatePill, TaskDetails, taskState } from "@/TaskDetails";
 
 const ALL = "";
 const CLONE = { value: "clone-project", label: "Clone project..." };
@@ -128,7 +127,7 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
         </EmptyDescription>
       </EmptyHeader>
       <EmptyContent>
-        <Button disabled={refreshing} onClick={() => act(api.refreshCandidates)}>
+        <Button variant="outline" disabled={refreshing} onClick={() => act(api.refreshCandidates)}>
           {refreshing && <Spinner />} Ask workwork
         </Button>
       </EmptyContent>
@@ -286,13 +285,14 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
                           actions={!job && queueButton}
                         />
                       }
-                      meta={[item.play, item.level, item.id].join(" · ")}
+                      meta={
+                        <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                          <StatePill state={taskState(job, snapshot.prs)} />
+                          {[item.play, item.level, item.id].join(" · ")}
+                        </span>
+                      }
                     >
-                      {job ? (
-                        <Badge variant={JOB_BADGE[job.state]}>{job.state}</Badge>
-                      ) : (
-                        queueButton
-                      )}
+                      {!job && queueButton}
                     </Row>
                   );
                 })}

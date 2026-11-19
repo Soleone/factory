@@ -63,11 +63,6 @@ function Factory({
   const { isMobile, setOpen, setOpenMobile } = useSidebar();
   const { on, status } = snapshot;
   const queued = snapshot.jobs.filter((job) => job.state === "queued").length;
-  const failed = snapshot.jobs.filter((job) => job.state === "failed").length;
-  const blocked = snapshot.jobs.filter((job) => job.state === "blocked").length;
-  const pending = [blocked && `${blocked} waiting`, failed && `${failed} failed`]
-    .filter(Boolean)
-    .join(" · ");
   const run =
     on && status
       ? [
@@ -108,7 +103,7 @@ function Factory({
       <Tabs value={tab} onValueChange={setTab}>
         <div className="flex items-center gap-2">
           {/* Four tabs don't fit a phone; they scroll on their own rather than the page. */}
-          <div className="min-w-0 overflow-x-auto">
+          <div className="min-w-0 overflow-x-auto overflow-y-hidden">
             <TabsList>
               <TabsTrigger value="queue">
                 <ListOrdered />
@@ -120,7 +115,7 @@ function Factory({
               </TabsTrigger>
               <TabsTrigger value="results">
                 <PackageCheck />
-                Results{pending ? ` (${pending})` : ""}
+                Results
               </TabsTrigger>
               <TabsTrigger value="activity">
                 <Activity />

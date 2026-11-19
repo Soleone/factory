@@ -5,6 +5,8 @@ import {
   CircleIcon,
   CircleXIcon,
   GitMergeIcon,
+  GitPullRequestClosedIcon,
+  GitPullRequestIcon,
   LoaderCircleIcon,
 } from "lucide-react";
 import Markdown from "markdown-to-jsx/react";
@@ -22,10 +24,11 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Spinner } from "@/components/ui/spinner";
-import { clock, itemTitle, minutesSince } from "@/format";
-import { Answer } from "@/JobNotes";
-import { MARKDOWN, SCROLL } from "@/PrReview";
-import { PrLine } from "@/ResultsView";
+import { clock, minutesSince, repoName } from "@/format";
+import { AttemptFile } from "@/AttemptFile";
+import { Answer, Outcome } from "@/JobNotes";
+import { MARKDOWN } from "@/PrReview";
+import { PrLine, TrainLine } from "@/ResultsView";
 
 /** From `workwork --help`. */
 const LEVELS: Record<string, string> = {
@@ -35,29 +38,88 @@ const LEVELS: Record<string, string> = {
 };
 
 /** Where a task is in its life, from a workwork candidate to a merged PR. */
-export type TaskState = Job["state"] | "candidate" | "merged";
+export type TaskState = Job["state"] | "candidate" | "review" | "merged" | "closed";
 
-const ICONS = {
-  candidate: { Icon: CircleDashedIcon, className: "text-muted-foreground" },
-  queued: { Icon: CircleIcon, className: "text-muted-foreground" },
-  running: { Icon: LoaderCircleIcon, className: "animate-spin text-primary" },
-  blocked: { Icon: CircleHelpIcon, className: "text-(--om-accent)" },
-  done: { Icon: CircleCheckIcon, className: "text-success" },
-  failed: { Icon: CircleXIcon, className: "text-destructive" },
-  removed: { Icon: CircleXIcon, className: "text-muted-foreground" },
-  merged: { Icon: GitMergeIcon, className: "text-success" },
+const STATES = {
+  candidate: {
+    Icon: CircleDashedIcon,
+    icon: "text-muted-foreground",
+    pill: "bg-muted text-muted-foreground",
+  },
+  queued: {
+    Icon: CircleIcon,
+    icon: "text-muted-foreground",
+    pill: "bg-muted text-muted-foreground",
+  },
+  running: {
+    Icon: LoaderCircleIcon,
+    icon: "animate-spin text-primary",
+    pill: "bg-primary/15 text-primary",
+  },
+  blocked: {
+    Icon: CircleHelpIcon,
+    icon: "text-warning",
+    pill: "bg-warning text-background",
+  },
+  review: { Icon: GitPullRequestIcon, icon: "text-primary", pill: "bg-primary/15 text-primary" },
+  done: { Icon: CircleCheckIcon, icon: "text-success", pill: "bg-success/15 text-success" },
+  merged: { Icon: GitMergeIcon, icon: "text-success", pill: "bg-success/15 text-success" },
+  failed: {
+    Icon: CircleXIcon,
+    icon: "text-destructive",
+    pill: "bg-destructive/15 text-destructive",
+  },
+  closed: {
+    Icon: GitPullRequestClosedIcon,
+    icon: "text-muted-foreground",
+    pill: "bg-muted text-muted-foreground",
+  },
+  removed: {
+    Icon: CircleXIcon,
+    icon: "text-muted-foreground",
+    pill: "bg-muted text-muted-foreground",
+  },
+};
+
+const LABELS: Partial<Record<TaskState, string>> = {
+  blocked: "waiting for you",
+  review: "needs review",
 };
 
 /** The same mark for a task's state on every tab. */
 export function StateIcon({ state }: { state: TaskState }) {
-  const { Icon, className } = ICONS[state];
-  return <Icon role="img" aria-label={state} className={`size-4 shrink-0 ${className}`} />;
+  const { Icon, icon } = STATES[state];
+  return <Icon role="img" aria-label={state} className={`size-4 shrink-0 ${icon}`} />;
 }
 
+/** The state in words, colored like its icon; `label` says more where the row knows more. */
+export function StatePill({ state, label }: { state: TaskState; label?: string }) {
+  return (
+    <span
+      className={`inline-flex h-5 items-center rounded-full px-2 text-xs font-medium whitespace-nowrap ${STATES[state].pill}`}
+    >
+      {label ?? LABELS[state] ?? state}
+    </span>
+  );
+}
+
+/** A PR not fetched yet counts as open, so a finished job reads as waiting for review. */
 export function taskState(job: Job | undefined, prs: Snapshot["prs"]): TaskState {
   if (!job) return "candidate";
   const url = prUrl(job);
-  return url && prs[url]?.state === "MERGED" ? "merged" : job.state;
+  if (!url || job.state !== "done") return job.state;
+  const pr = prs[url]?.state;
+  return pr === "MERGED" ? "merged" : pr === "CLOSED" ? "closed" : "review";
+}
+
+/** A muted repo before the title, as the same name reads in every list. */
+export function TaskTitle({ item }: { item: Item }) {
+  return (
+    <>
+      <span className="font-normal text-muted-foreground">{repoName(item.repo)}:</span>{" "}
+      {item.title || item.id}
+    </>
+  );
 }
 
 /**
@@ -80,6 +142,7 @@ export function TaskDetails({
   act: Act;
   actions?: ReactNode;
 }) {
+  const state = taskState(job, snapshot.prs);
   return (
     <Dialog>
       <DialogTrigger
@@ -90,26 +153,44 @@ export function TaskDetails({
           />
         }
       >
-        {itemTitle(item)}
+        <TaskTitle item={item} />
       </DialogTrigger>
       <DialogContent className={job ? "sm:max-w-5xl" : "sm:max-w-3xl"}>
         <DialogHeader className="mr-8">
-          <div className="flex items-center gap-2">
-            <StateIcon state={taskState(job, snapshot.prs)} />
-            <DialogTitle>{itemTitle(item)}</DialogTitle>
+          <div className="flex items-start gap-3">
+            <span className="mt-0.5">
+              <StateIcon state={state} />
+            </span>
+            <div className="flex min-w-0 flex-col gap-2">
+              <DialogTitle>
+                <TaskTitle item={item} />
+              </DialogTitle>
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground">
+                <StatePill state={state} />
+                <DialogDescription>
+                  {item.label} · {item.play} · {item.level}
+                </DialogDescription>
+              </div>
+            </div>
           </div>
-          <DialogDescription>
-            {item.label} · {item.play} · {item.level}
-            {LEVELS[item.level] && `: ${LEVELS[item.level]}`}
-          </DialogDescription>
         </DialogHeader>
-        <div className={job ? "grid gap-4 md:grid-cols-[3fr_2fr]" : undefined}>
-          <div className="flex min-w-0 flex-col gap-2">
-            {play && <p className="text-sm">{play}</p>}
-            <Task item={item} written={job?.prompt} />
+        {job ? (
+          <div className="-mx-4 -mb-4 grid border-t md:max-h-[65dvh] md:grid-cols-[3fr_2fr]">
+            <div className="flex min-w-0 flex-col gap-3 overflow-auto p-4">
+              <Label>The task</Label>
+              <Task item={item} written={job.prompt} />
+              <About item={item} play={play} />
+            </div>
+            <div className="flex min-w-0 flex-col gap-3 overflow-auto bg-muted/30 p-4 md:border-l">
+              <Story job={job} snapshot={snapshot} act={act} />
+            </div>
           </div>
-          {job && <Story job={job} snapshot={snapshot} act={act} />}
-        </div>
+        ) : (
+          <div className="flex max-h-[65dvh] flex-col gap-3 overflow-auto">
+            <Task item={item} />
+            <About item={item} play={play} />
+          </div>
+        )}
         {actions && <DialogFooter>{actions}</DialogFooter>}
       </DialogContent>
     </Dialog>
@@ -146,16 +227,25 @@ function Task({ item, written }: { item: Item; written?: string }) {
       </p>
     );
   return (
-    <div tabIndex={0} className={`${SCROLL} flex flex-col gap-2 font-sans text-sm wrap-anywhere`}>
-      {/* The coding standard every prompt ends with says nothing about this task. */}
-      <Markdown options={MARKDOWN}>{prompt.split("\n## Standard")[0]}</Markdown>
+    <div className="flex flex-col gap-2 text-sm wrap-anywhere">
+      {/* The title and facts above already say what the prompt's header does, and the coding
+      standard every prompt ends with says nothing about this task. */}
+      <Markdown options={MARKDOWN}>
+        {prompt.split("\n## Standard")[0].replace(/^# [^]*?(?=^## )/m, "")}
+      </Markdown>
     </div>
   );
 }
 
 /** What needs attention now, if anything, over everything that happened, newest first. */
 function Story({ job, snapshot, act }: { job: Job; snapshot: Snapshot; act: Act }) {
-  const { status, prs } = snapshot;
+  const { status, prs, train } = snapshot;
+  const last = job.attempts.at(-1);
+  const queued = new Set(
+    snapshot.jobs
+      .filter((each) => each.state !== "removed" && each.item.play === "followup")
+      .map((each) => each.item.title),
+  );
   const worker = status?.workers.find((each) => each.job === job.id);
   const question =
     job.state === "blocked" ? job.notes.findLast((note) => note.kind === "ask") : undefined;
@@ -168,10 +258,13 @@ function Story({ job, snapshot, act }: { job: Job; snapshot: Snapshot; act: Act 
   }
 
   return (
-    <div className="flex min-w-0 flex-col gap-3 text-sm">
+    <>
       {worker && status && (
-        <Now>
-          {worker.agent} working, {minutesSince(worker.since)} of {status.timeout} min
+        <Now className="border-primary/40">
+          <span className="flex items-center gap-2 font-medium">
+            <StateIcon state="running" />
+            {worker.agent} working, {minutesSince(worker.since)} of {status.timeout} min
+          </span>
           <progress
             className="h-1.5 w-full accent-primary"
             max={status.timeout}
@@ -180,38 +273,82 @@ function Story({ job, snapshot, act }: { job: Job; snapshot: Snapshot; act: Act 
         </Now>
       )}
       {question && <Answer job={job} question={question} act={act} />}
+      {last?.error && (
+        <Now className="border-destructive/40 text-destructive">{last.error.split("\n")[0]}</Now>
+      )}
       {url && (
-        <Now>
+        <Now className={prs[url]?.state === "MERGED" ? "border-success/40" : ""}>
           <PrLine jobId={job.id} url={url} pr={prs[url]} />
+          <TrainLine car={train[job.id]} />
         </Now>
       )}
-      <div className="flex max-h-[50dvh] flex-col gap-3 overflow-auto">
+      <Outcome job={job} act={act} queued={queued} />
+      <Label>Log</Label>
+      <div className="flex flex-col gap-3 text-sm">
         {[...days].map(([day, dayEntries]) => (
           <section key={day} className="flex flex-col gap-1.5">
-            <h3 className="text-xs font-medium text-muted-foreground">{day}</h3>
-            <ol className="flex flex-col gap-1.5">
+            <h4 className="text-xs text-muted-foreground">{day}</h4>
+            <ol className="flex flex-col">
               {dayEntries.map((entry) => (
                 <li
                   key={`${entry.at} ${entry.text}`}
-                  className="grid grid-cols-[4.5rem_1fr] gap-x-2"
+                  className="group grid grid-cols-[4.5rem_0.75rem_1fr] gap-x-2"
                 >
                   <time
                     dateTime={entry.at}
-                    className="whitespace-nowrap text-muted-foreground tabular-nums"
+                    className="text-right whitespace-nowrap text-muted-foreground tabular-nums"
                   >
                     {clock(entry.at)}
                   </time>
-                  <span className={`wrap-anywhere ${entry.tone ?? ""}`}>{entry.text}</span>
+                  {/* The rail runs from the first dot of the day to the last. */}
+                  <span
+                    aria-hidden
+                    className={`relative flex justify-center before:absolute before:inset-y-0 before:w-px before:bg-border group-first:before:top-2 group-last:before:bottom-auto group-last:before:h-2 ${entry.tone ?? "text-muted-foreground"}`}
+                  >
+                    <span className="relative mt-1.5 size-2 rounded-full border-2 border-current bg-popover" />
+                  </span>
+                  <span className={`pb-3 wrap-anywhere ${entry.tone ?? ""}`}>
+                    {entry.text}{" "}
+                    {entry.ended && (
+                      <AttemptFile log={entry.ended.log} agent={entry.ended.agent} kind="log" />
+                    )}
+                  </span>
                 </li>
               ))}
             </ol>
           </section>
         ))}
       </div>
+    </>
+  );
+}
+
+function Now({ className, children }: { className: string; children: ReactNode }) {
+  return (
+    <div className={`flex flex-col gap-2 rounded-md border bg-popover p-2 text-sm ${className}`}>
+      {children}
     </div>
   );
 }
 
-function Now({ children }: { children: ReactNode }) {
-  return <div className="flex flex-col gap-2 rounded-md border p-2">{children}</div>;
+function Label({ children }: { children: ReactNode }) {
+  return <h3 className="text-xs font-medium text-muted-foreground">{children}</h3>;
+}
+
+/** What the play and the review level mean, for whoever decides on the result. */
+function About({ item, play }: { item: Item; play?: string }) {
+  return (
+    <p className="text-xs text-muted-foreground">
+      {play && (
+        <>
+          <span className="font-medium text-foreground">{item.play}</span>: {play}{" "}
+        </>
+      )}
+      {LEVELS[item.level] && (
+        <>
+          <span className="font-medium text-foreground">{item.level}</span>: {LEVELS[item.level]}.
+        </>
+      )}
+    </p>
+  );
 }

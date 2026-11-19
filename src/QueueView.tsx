@@ -15,13 +15,22 @@ import {
 import { ItemGroup } from "@/components/ui/item";
 import { clock, itemTitle, minutesSince, pinName, tuning, WORKER_BADGE } from "@/format";
 import { Row, Section } from "@/Row";
-import { StateIcon, TaskDetails } from "@/TaskDetails";
+import { StateIcon, StatePill, TaskDetails } from "@/TaskDetails";
 
 function jobMeta(job: Job, byId: Map<string, Job>): string {
   const pin = job.agent ? pinName({ ...job, agent: job.agent }) : "";
   const before = job.after && byId.get(job.after);
   const after = before && before.state !== "done" && `after ${itemTitle(before.item)}`;
   return [job.item.play, job.item.level, pin, after].filter(Boolean).join(" · ");
+}
+
+function Meta({ job, byId }: { job: Job; byId: Map<string, Job> }) {
+  return (
+    <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+      <StatePill state={job.state} />
+      {jobMeta(job, byId)}
+    </span>
+  );
 }
 
 /** Glides to its new place when the order changes, and slides out to the right when it leaves the queue. */
@@ -59,7 +68,12 @@ export function QueueView({
       act={act}
       actions={
         removable && (
-          <Button variant="outline" onClick={() => act(() => api.remove(job.id))}>
+          <Button
+            variant="destructive"
+            size="sm"
+            className="sm:mr-auto"
+            onClick={() => act(() => api.remove(job.id))}
+          >
             Remove from queue
           </Button>
         )
@@ -95,6 +109,7 @@ export function QueueView({
               return (
                 <Row
                   key={worker.agent}
+                  progress={job && minutesSince(worker.since) / status.timeout}
                   title={
                     <>
                       {worker.agent}{" "}
@@ -151,7 +166,7 @@ export function QueueView({
                   <Row
                     leading={<StateIcon state={job.state} />}
                     title={details(job, true)}
-                    meta={jobMeta(job, byId)}
+                    meta={<Meta job={job} byId={byId} />}
                   >
                     <Button
                       variant="ghost"
@@ -195,7 +210,7 @@ export function QueueView({
                   <Row
                     leading={<StateIcon state={job.state} />}
                     title={details(job, true)}
-                    meta={jobMeta(job, byId)}
+                    meta={<Meta job={job} byId={byId} />}
                   >
                     {remove(job)}
                   </Row>

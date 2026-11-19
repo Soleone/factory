@@ -1,9 +1,10 @@
-import type { Job } from "@/backend/types.ts";
+import type { Attempt, Job } from "@/backend/types.ts";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { clock, itemTitle } from "@/format";
 import { KIND } from "@/JobNotes";
 
-type Entry = { at: string; job: Job; text: string; tone?: string };
+/** `ended` is the attempt an entry ends. */
+type Entry = { at: string; job: Job; text: string; tone?: string; ended?: Attempt };
 
 const SHOWN = 200;
 
@@ -18,6 +19,7 @@ export function jobEntries(job: Job): Entry[] {
         job,
         text: `${attempt.agent} ${attempt.outcome}${attempt.url ? ` · ${attempt.url.replace("https://github.com/", "")}` : ""}`,
         tone: attempt.outcome === "done" ? undefined : "text-destructive",
+        ended: attempt,
       },
     ]),
     ...job.notes.map((note) => ({

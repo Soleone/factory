@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "@/api";
 import { AGENT_NAMES, EFFORTS } from "@/backend/agents.ts";
 import type { Model, Settings, Tuning } from "@/backend/types.ts";
-import { Checkbox } from "@/components/ui/checkbox";
+import { NeutralCheckbox } from "@/components/variants/checkbox";
 import {
   Combobox,
   ComboboxCollection,
@@ -61,7 +61,7 @@ export function RunFields({ value, onChange }: { value: Run; onChange: (run: Run
           const tuning = value.agents[name];
           return (
             <Field key={name} orientation="horizontal">
-              <Checkbox
+              <NeutralCheckbox
                 id={`agent-${name}`}
                 checked={tuning !== undefined}
                 onCheckedChange={(checked) => setAgent(name, checked ? {} : undefined)}

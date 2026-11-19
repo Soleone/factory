@@ -4,7 +4,6 @@ import type { Job, Note } from "@/backend/types.ts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { clock } from "@/format";
 
 export const KIND = {
   note: "note",
@@ -14,38 +13,36 @@ export const KIND = {
   train: "merge train",
 };
 
-/**
- * What the job's agents said through the factory CLI: the latest result, the question a blocked job
- * waits on, follow-ups worth their own job, and the notes along the way.
- */
-export function JobNotes({
+/** What the agent reported last, and the follow-ups worth their own job. */
+export function Outcome({
   job,
   act,
-  queuedTasks,
+  queued,
 }: {
   job: Job;
   act: Act;
   /** Follow-ups that already have a job. */
-  queuedTasks: Set<string>;
+  queued: Set<string>;
 }) {
   const result = job.notes.findLast((note) => note.kind === "result");
-  const question =
-    job.state === "blocked" ? job.notes.findLast((note) => note.kind === "ask") : undefined;
   const followups = [...new Set(job.notes.flatMap((note) => note.followups ?? []))];
-  const notes = job.notes.filter((note) => note.kind !== "result");
+  const branch = job.attempts.at(-1)?.branch;
+  if (!result && followups.length === 0 && !branch) return null;
   return (
-    <>
+    <div className="flex flex-col gap-2 rounded-md border bg-popover p-2 text-sm">
       {result && (
-        <span className="text-foreground">
+        <span>
           {result.text}{" "}
           {result.confidence && <Badge variant="outline">{result.confidence} confidence</Badge>}
         </span>
       )}
-      {question && <Answer job={job} question={question} act={act} />}
+      {branch && (
+        <span className="text-muted-foreground">Unpushed work kept on branch {branch}</span>
+      )}
       {followups.map((task) => (
-        <span key={task} className="flex flex-wrap items-center gap-x-2">
+        <span key={task} className="flex flex-wrap items-center gap-x-2 text-muted-foreground">
           <span>Follow-up: {task}</span>
-          {queuedTasks.has(task) ? (
+          {queued.has(task) ? (
             <span>queued</span>
           ) : (
             <Button
@@ -58,21 +55,7 @@ export function JobNotes({
           )}
         </span>
       ))}
-      {notes.length > 0 && (
-        <details>
-          <summary className="cursor-pointer">
-            {notes.length} {notes.length === 1 ? "note" : "notes"}
-          </summary>
-          <ul className="flex flex-col gap-1 pt-1">
-            {notes.map((note) => (
-              <li key={`${note.at} ${note.text}`}>
-                {clock(note.at)} · attempt {note.attempt} · {KIND[note.kind]}: {note.text}
-              </li>
-            ))}
-          </ul>
-        </details>
-      )}
-    </>
+    </div>
   );
 }
 
@@ -89,7 +72,7 @@ export function Answer({ job, question, act }: { job: Job; question: Note; act: 
   };
   return (
     <form
-      className="flex flex-col gap-2 rounded-md border border-(--om-accent) p-2"
+      className="flex flex-col gap-2 rounded-md border border-warning/60 p-2"
       onSubmit={(event) => {
         event.preventDefault();
         void send();
@@ -105,7 +88,7 @@ export function Answer({ job, question, act }: { job: Job; question: Note; act: 
           value={text}
           onChange={(event) => setText(event.target.value)}
         />
-        <Button type="submit" size="sm" disabled={sending || !text.trim()}>
+        <Button type="submit" variant="outline" size="sm" disabled={sending || !text.trim()}>
           {sending ? "Sending…" : "Answer"}
         </Button>
       </span>

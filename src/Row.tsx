@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import {
   Item,
   ItemActions,
@@ -13,19 +13,33 @@ export function Row({
   leading,
   title,
   meta,
+  below,
+  progress,
   children,
 }: {
   leading?: ReactNode;
   title: ReactNode;
   meta: ReactNode;
+  /** Blocks that can't sit in the description's paragraph, like a form. */
+  below?: ReactNode;
+  /** How much of its time a running job has used, from 0 to 1, as a bar along the bottom. */
+  progress?: number;
   children?: ReactNode;
 }) {
   return (
-    <Item variant="outline" size="sm">
+    <Item variant="outline" size="sm" className="relative overflow-hidden">
+      {progress !== undefined && (
+        <span
+          aria-hidden
+          className="absolute bottom-0 left-0 h-0.5 w-(--progress) bg-primary transition-all duration-700"
+          style={{ "--progress": `${Math.min(progress, 1) * 100}%` } as CSSProperties}
+        />
+      )}
       {leading && <ItemMedia>{leading}</ItemMedia>}
       <ItemContent>
         <ItemTitle>{title}</ItemTitle>
         <ItemDescription>{meta}</ItemDescription>
+        {below}
       </ItemContent>
       {children && <ItemActions>{children}</ItemActions>}
     </Item>
