@@ -172,7 +172,7 @@ export function demoApi(): Plugin {
     name: "factory-demo",
     apply: "serve",
     transformIndexHtml: (html) =>
-      html.replace("<title>factory</title>", "<title>factory (demo)</title>"),
+      html.replace("<title>Factory</title>", "<title>Factory (demo)</title>"),
     configureServer(server) {
       const snapshot = seed();
       server.middlewares.use(async (request, response, next) => {

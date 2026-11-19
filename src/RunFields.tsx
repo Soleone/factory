@@ -195,6 +195,7 @@ function ModelPicker({
   value: string;
   onChange: (value: string) => void;
 }) {
+  const [query, setQuery] = useState<string | null>(null);
   const top: Model[] = [{ value: DEFAULT, label: "Default model", efforts: [], scoped: true }];
   // A model saved before it left the list stays selectable.
   if (value !== DEFAULT && !offered.some((model) => model.value === value))
@@ -211,6 +212,14 @@ function ModelPicker({
       items={groups}
       disabled={disabled}
       value={selected}
+      // Background refreshes can rebuild the selected item while the user is typing.
+      inputValue={query ?? selected?.label ?? ""}
+      onInputValueChange={(text, { reason }) => {
+        if (reason === "input-change") setQuery(text);
+      }}
+      onOpenChange={(open) => {
+        if (!open) setQuery(null);
+      }}
       onValueChange={(model: Model | null) => model && onChange(model.value)}
       isItemEqualToValue={(item: Model, other: Model) => item.value === other.value}
       autoHighlight
@@ -227,6 +236,7 @@ function ModelPicker({
         className="w-full min-w-0 flex-1"
         disabled={disabled}
         onFocus={(event) => event.target.select()}
+        onBlur={() => setQuery(null)}
       />
       <ComboboxContent className="min-w-72">
         <ComboboxEmpty>No model matches</ComboboxEmpty>
