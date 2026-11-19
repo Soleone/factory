@@ -16,6 +16,7 @@ import {
   retryJob,
 } from "../src/backend/jobs.ts";
 import { run, type RunOptions } from "../src/backend/loop.ts";
+import { agentModels } from "../src/backend/models.ts";
 import { readSettings, writeSettings } from "../src/backend/state.ts";
 import {
   onTrain,
@@ -687,6 +688,44 @@ esac; done`,
       });
     } finally {
       chat.close();
+    }
+  });
+
+  test("Pi offers its scoped models in their order, each with the efforts it supports", async () => {
+    const dir = mkdtempSync(join(scratch, "pi-models-"));
+    writeFileSync(
+      join(dir, "settings.json"),
+      JSON.stringify({ enabledModels: ["openai/sol", "local/*", "luna"] }),
+    );
+    const model = (provider: string, id: string, extra = {}) => ({
+      provider,
+      id,
+      name: id,
+      reasoning: true,
+      ...extra,
+    });
+    const models = [
+      model("openrouter", "openai/sol"),
+      model("openai", "sol", { thinkingLevelMap: { off: null, minimal: null, xhigh: "xhigh" } }),
+      model("local", "qwen", { reasoning: false }),
+      model("codex", "luna"),
+    ];
+    const answer = { type: "response", command: "get_available_models", data: { models } };
+    script(dir, "pi", `read -r line; echo '${JSON.stringify(answer)}'`);
+    process.env.PATH = `${dir}:${process.env.PATH}`;
+    process.env.PI_CODING_AGENT_DIR = dir;
+    try {
+      expect(await agentModels("pi")).toEqual([
+        { value: "openai/sol", label: "sol", efforts: ["low", "medium", "high", "xhigh"] },
+        { value: "local/qwen", label: "qwen", efforts: ["off"] },
+        {
+          value: "codex/luna",
+          label: "luna",
+          efforts: ["off", "minimal", "low", "medium", "high"],
+        },
+      ]);
+    } finally {
+      delete process.env.PI_CODING_AGENT_DIR;
     }
   });
 

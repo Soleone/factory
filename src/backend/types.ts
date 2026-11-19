@@ -3,8 +3,8 @@
 /** Unset means the agent's own default. */
 export type Tuning = { model?: string; effort?: string };
 
-/** A model the settings offer for an agent: what --model takes, and how to show it. */
-export type Model = { value: string; label: string };
+/** A model the settings offer for an agent: what --model takes, how to show it, and its efforts. */
+export type Model = { value: string; label: string; efforts: string[] };
 
 /** stopped: the factory was turned off with --kill while the agent worked. */
 export type Outcome = "done" | "failed" | "limited" | "timeout" | "stopped";

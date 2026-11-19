@@ -202,10 +202,16 @@ function dispatch(snapshot: Snapshot, route: string, body: unknown): unknown {
     case "GET /api/models":
       return {
         claude: [
-          { value: "opus", label: "Opus 5.5" },
-          { value: "sonnet", label: "Sonnet 5.5" },
+          { value: "opus", label: "Opus 5.5", efforts: ["low", "medium", "high", "xhigh", "max"] },
+          { value: "sonnet", label: "Sonnet 5.5", efforts: ["low", "medium", "high"] },
         ],
-        pi: [{ value: "openai/gpt-6.2-sol", label: "openai/gpt-6.2-sol" }],
+        pi: [
+          {
+            value: "openai/gpt-6.2-sol",
+            label: "GPT-6.2 Sol",
+            efforts: ["low", "medium", "high", "xhigh", "max"],
+          },
+        ],
       };
     case "PUT /api/settings":
       snapshot.settings = body as Settings;

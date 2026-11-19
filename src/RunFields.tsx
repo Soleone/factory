@@ -130,16 +130,23 @@ export function TuningFields({
   onChange: (tuning: Tuning) => void;
 }) {
   const offered = useModels()[agent] ?? [];
+  const levels = (model?: string) =>
+    offered.find((each) => each.value === model)?.efforts ?? EFFORTS[agent];
   // A model saved before it left the list stays selectable.
   const listed = !value?.model || offered.some((model) => model.value === value.model);
   const choices = [{ value: DEFAULT, label: "Default model" }]
     .concat(offered)
     .concat(listed ? [] : [{ value: value!.model!, label: value!.model! }]);
   const efforts = [{ value: DEFAULT, label: "Default effort" }].concat(
-    EFFORTS[agent].map((effort) => ({ value: effort, label: effort })),
+    levels(value?.model).map((effort) => ({ value: effort, label: effort })),
   );
-  const pick = (field: keyof Tuning, choice: string | null) =>
-    onChange({ ...value, [field]: choice === DEFAULT ? undefined : (choice ?? undefined) });
+  const unset = (choice: string | null) => (choice === DEFAULT ? undefined : (choice ?? undefined));
+  // An effort the new model doesn't have goes back to the default.
+  const pickModel = (choice: string | null) => {
+    const model = unset(choice);
+    const effort = value?.effort && levels(model).includes(value.effort) ? value.effort : undefined;
+    onChange({ ...value, model, effort });
+  };
 
   return (
     <>
@@ -149,14 +156,14 @@ export function TuningFields({
         items={choices}
         disabled={!value}
         value={value?.model ?? DEFAULT}
-        onChange={(model) => pick("model", model)}
+        onChange={pickModel}
       />
       <Choice
         label={`${agent} effort`}
         items={efforts}
         disabled={!value}
         value={value?.effort ?? DEFAULT}
-        onChange={(effort) => pick("effort", effort)}
+        onChange={(effort) => onChange({ ...value, effort: unset(effort) })}
       />
     </>
   );
