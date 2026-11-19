@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { ago, itemTitle, JOB_BADGE } from "@/format";
+import { ago, itemTitle, JOB_BADGE, repoName } from "@/format";
 import { Row, Section } from "@/Row";
 
 const ALL = "";
@@ -33,6 +33,7 @@ const key = (item: { repo: string; id: string }) => `${item.repo} ${item.id}`;
 /** Everything workwork found, by play, to pick from. */
 export function BrowseView({ snapshot, act }: { snapshot: Snapshot; act: Act }) {
   const [items, setItems] = useState<Item[]>([]);
+  const [repo, setRepo] = useState(ALL);
   const [play, setPlay] = useState(ALL);
   const [levels, setLevels] = useState(["auto", "skim", "decide"]);
   const [search, setSearch] = useState("");
@@ -51,18 +52,29 @@ export function BrowseView({ snapshot, act }: { snapshot: Snapshot; act: Act }) 
     return byItem;
   }, [snapshot.jobs]);
 
-  const plays = useMemo(() => {
+  const repos = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const item of items) counts.set(item.play, (counts.get(item.play) ?? 0) + 1);
-    return [...counts].sort((a, b) => a[1] - b[1]);
+    for (const item of items) counts.set(item.repo, (counts.get(item.repo) ?? 0) + 1);
+    return [{ value: ALL, label: `All repos (${items.length})` }].concat(
+      [...counts]
+        .sort((a, b) => repoName(a[0]).localeCompare(repoName(b[0])))
+        .map(([path, total]) => ({ value: path, label: `${repoName(path)} (${total})` })),
+    );
   }, [items]);
 
+  const inRepo = repo === ALL ? items : items.filter((item) => item.repo === repo);
+  const playCounts = new Map<string, number>();
+  for (const item of inRepo) playCounts.set(item.play, (playCounts.get(item.play) ?? 0) + 1);
+  const plays = [...playCounts].sort((a, b) => a[1] - b[1]);
+
   const words = search.toLowerCase().split(/\s+/).filter(Boolean);
-  const matches = items.filter(
+  const matches = inRepo.filter(
     (item) =>
       (play === ALL || item.play === play) &&
       levels.includes(item.level) &&
-      words.every((word) => `${item.title} ${item.id} ${item.label}`.toLowerCase().includes(word)),
+      words.every((word) =>
+        `${itemTitle(item)} ${item.id} ${item.label}`.toLowerCase().includes(word),
+      ),
   );
   const queue = (wanted: Item[]) =>
     act(() => api.queue(wanted, agent === ANY_AGENT ? undefined : agent));
@@ -108,6 +120,28 @@ export function BrowseView({ snapshot, act }: { snapshot: Snapshot; act: Act }) 
           ))}
         </ToggleGroup>
         <Select
+          items={repos}
+          value={repo}
+          onValueChange={(value) => {
+            const next = value ?? ALL;
+            setRepo(next);
+            setShown(PAGE);
+            if (!items.some((item) => item.play === play && (next === ALL || item.repo === next)))
+              setPlay(ALL);
+          }}
+        >
+          <SelectTrigger aria-label="Repo">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {repos.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select
           items={agents}
           value={agent}
           onValueChange={(value) => setAgent(value ?? ANY_AGENT)}
@@ -138,7 +172,7 @@ export function BrowseView({ snapshot, act }: { snapshot: Snapshot; act: Act }) 
 
       <div className="flex flex-col gap-6 md:flex-row">
         <nav className="flex flex-wrap gap-1 md:w-48 md:flex-none md:flex-col">
-          {[[ALL, items.length] as const, ...plays].map(([name, total]) => (
+          {[[ALL, inRepo.length] as const, ...plays].map(([name, total]) => (
             <Button
               key={name}
               variant={play === name ? "secondary" : "ghost"}
