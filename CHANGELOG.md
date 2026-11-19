@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.1](https://github.com/Soleone/factory/compare/v0.2.0...v0.2.1) (2026-11-19)
+
+### Features
+
+* agents report back, jobs wait on each other, activity feed ([c0ac56b](https://github.com/Soleone/factory/commit/c0ac56b6fc321ed58ed071e51de065f5454de403))
+* **clone:** clone repositories directly into the source root ([7747d4a](https://github.com/Soleone/factory/commit/7747d4aac82d612beb5f1f79892e81c59b951045))
+* drop jobs waiting on failed ones, record merge train results ([5e2b9a7](https://github.com/Soleone/factory/commit/5e2b9a762210d6ce74041b07c0ac288014d3d493))
+
+### Bug Fixes
+
+* **model-picker:** preserve search text during refresh ([c6ef7b8](https://github.com/Soleone/factory/commit/c6ef7b8becdb4c8827fb72fa3efe00fce9875663))
+
 ## [0.2.0](https://github.com/Soleone/factory/compare/v0.1.0...v0.2.0) (2026-11-19)
 
 ### ⚠ BREAKING CHANGES
