@@ -1,5 +1,8 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { appendFileSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import type { ServerResponse } from "node:http";
+import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { AGENT_NAMES, chatAgent } from "./agents.ts";
 import { claudeChat, type PiRecord } from "./claude.ts";
@@ -20,28 +23,59 @@ const pi: Protocol = {
 /**
  * One chat for planning the queue, shared by every open page, with the agent the settings name.
  * The page reads Pi's RPC records (see Pi's docs/rpc.md), whichever agent replies. The conversation
- * lasts until reset or serve stops, and a page that opens later gets it replayed.
+ * lasts until reset, and a page that opens later gets it replayed. It survives a restart of serve:
+ * the agent keeps its session (Pi's in chat-sessions/, Claude Code's in its own folder) and the page's
+ * records are in chat.jsonl.
  */
 export function chat(state: string) {
+  const savedPath = join(state, "chat.jsonl");
+  const conversationPath = join(state, "chat.json");
   let session: { child: ChildProcessWithoutNullStreams; protocol: Protocol } | undefined;
   const pages = new Set<ServerResponse>();
+  /** The agent session this chat continues; `prompted` once the agent has one to resume. */
+  let conversation: { agent: string; id: string; prompted: boolean } | undefined = existsSync(
+    conversationPath,
+  )
+    ? JSON.parse(readFileSync(conversationPath, "utf8"))
+    : undefined;
   /** Every record of this conversation, minus the deltas of replies that have ended. */
-  let log: PiRecord[] = [];
+  let log: PiRecord[] = existsSync(savedPath)
+    ? readFileSync(savedPath, "utf8")
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => JSON.parse(line))
+    : [];
+  // A reply the restart cut off doesn't stay busy.
+  if (log.length > 0) log.push({ type: "exit" });
 
   function emit(record: PiRecord): void {
     if (record.type === "message_end") log = log.filter((each) => each.type !== "message_update");
     log.push(record);
+    // Deltas only matter while a reply streams; its message_end holds the whole of it.
+    if (record.type !== "message_update") appendFileSync(savedPath, `${JSON.stringify(record)}\n`);
     for (const page of pages) page.write(`data: ${JSON.stringify(record)}\n\n`);
+  }
+
+  function save(change: typeof conversation): void {
+    conversation = change;
+    writeFileSync(conversationPath, `${JSON.stringify(conversation)}\n`);
   }
 
   function start() {
     const { agent, ...tuning } = readSettings(state).chat;
-    const { command, args } = chatAgent(agent, tuning, context());
+    // Settings edited by hand while serve was off can name another agent: that's a new chat.
+    if (conversation?.agent !== agent) save({ agent, id: randomUUID(), prompted: false });
+    const { id, prompted } = conversation!;
+    const { command, args } = chatAgent(agent, tuning, context(), {
+      id,
+      resume: prompted,
+      folder: join(state, "chat-sessions"),
+    });
     const protocol = agent === "claude" ? claudeChat(tuning.effort) : pi;
     const child = spawn(command, args, { cwd: state });
     createInterface({ input: child.stdout }).on("line", (line) => {
-      // Only JSON records are for the page.
-      if (line.startsWith("{"))
+      // Only JSON records are for the page, and nothing from an agent New chat let go.
+      if (line.startsWith("{") && session?.child === child)
         for (const record of protocol.record(JSON.parse(line))) emit(record);
     });
     // An agent that failed to start or died breaks the pipe; its error and exit handlers say why.
@@ -83,7 +117,10 @@ export function chat(state: string) {
       pages.add(response);
       response.on("close", () => pages.delete(response));
     },
-    prompt: (message: string) => send({ type: "prompt", message }),
+    prompt(message: string): void {
+      send({ type: "prompt", message });
+      if (!conversation!.prompted) save({ ...conversation!, prompted: true });
+    },
     abort: () => session && send({ type: "abort" }),
     /** Answers a question from one of Pi's extensions, which Pi waits on; every page closes it. */
     answer(reply: { id: string }): void {
@@ -95,8 +132,11 @@ export function chat(state: string) {
       // Closing stdin asks the agent to shut down.
       session?.child.stdin.end();
       session = undefined;
-      emit({ type: "reset" });
+      for (const page of pages) page.write(`data: ${JSON.stringify({ type: "reset" })}\n\n`);
       log = [];
+      rmSync(savedPath, { force: true });
+      rmSync(conversationPath, { force: true });
+      conversation = undefined;
     },
   };
 }

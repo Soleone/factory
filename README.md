@@ -27,7 +27,7 @@ Each result links the PR or issue the agent opened. From the page you can read a
 
 The Plan tab is a chat with an agent about what to queue. It reads the candidates, the queue and past results, proposes a few jobs that won't step on each other, and adds them through the CLI once you agree. It never turns the factory on, merges or closes PRs, or changes your repos. That is an instruction to the agent, not a sandbox: it has a shell, like the agents doing jobs. Results that failed, or that the train skipped, have an **Ask** button that starts the chat with the question already written.
 
-Settings > Plan chat picks the agent (Claude Code or Pi), its model and effort. The same model and effort pickers serve runs. Model choices are short lists: Pi's scoped models (`enabledModels` in Pi's settings, the ones Ctrl+P cycles through), and Claude Code's current models (opus, sonnet, fable, haiku). The efforts on offer are the chosen model's. When one of Pi's extensions asks something mid-chat, the page shows the question. The chat lives in `factory serve`'s memory, so it starts over when serve restarts.
+Settings > Plan chat picks the agent (Claude Code or Pi), its model and effort. The same model and effort pickers serve runs. Model choices are short lists: Pi's scoped models (`enabledModels` in Pi's settings, the ones Ctrl+P cycles through), and Claude Code's current models (opus, sonnet, fable, haiku). The efforts on offer are the chosen model's. When one of Pi's extensions asks something mid-chat, the page shows the question. The chat survives a restart of `factory serve`: the page shows it again and the agent resumes its own session, so it still knows what was said. New chat starts over.
 
 ## Commands
 
@@ -60,6 +60,7 @@ In `$DATA/apps/factory/` when `DATA` is set, otherwise `~/.local/share/factory/`
 - `jobs.jsonl`: append-only events (add, remove, move, start, attempt, requeue, retry), so the CLI, the factory and the page never overwrite each other
 - `candidates.json`: the cached `workwork --all --json`, which takes minutes; refreshed from the page, or by auto mode when older than 6 hours
 - `runs/<run>/<job>-<attempt>/`: `prompt.md` and `agent.log`
+- `chat.json`, `chat.jsonl`, `chat-sessions/`: the Plan chat's agent session, what the page shows, and Pi's session files (Claude Code keeps its own)
 - `worktrees/<agent>/<repo>/`
 - `status.json`, `factory.pid`, `factory.log`: the current run
 

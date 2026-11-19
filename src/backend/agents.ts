@@ -52,11 +52,13 @@ export function agent(name: string, { model, effort }: Tuning = {}): Agent {
  * How the Plan chat starts an agent: Pi in RPC mode, Claude Code streaming JSON both ways (chat.ts
  * reads each). Only tools for looking and running commands; it changes the queue through the
  * factory CLI. Claude Code's are bypassed like a run's, since nobody is there to answer a prompt.
+ * Each keeps the chat as session `id`, continued once `resume`; Pi's session files go in `folder`.
  */
 export function chatAgent(
   name: string,
   { model, effort }: Tuning,
   context: string,
+  session: { id: string; resume: boolean; folder: string },
 ): { command: string; args: string[] } {
   const pick = model ? ["--model", model] : [];
   if (name === "claude")
@@ -71,7 +73,8 @@ export function chatAgent(
         "--verbose",
         "--include-partial-messages",
         "--replay-user-messages",
-        "--no-session-persistence",
+        session.resume ? "--resume" : "--session-id",
+        session.id,
         "--permission-mode",
         "bypassPermissions",
         "--tools",
@@ -88,7 +91,10 @@ export function chatAgent(
       args: [
         "--mode",
         "rpc",
-        "--no-session",
+        "--session-id",
+        session.id,
+        "--session-dir",
+        session.folder,
         "--tools",
         "read,bash,grep,find,ls",
         "--append-system-prompt",

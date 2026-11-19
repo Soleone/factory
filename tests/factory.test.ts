@@ -598,13 +598,17 @@ describe("the factory", () => {
   });
 
   /** Starts serve with a fake agent on PATH; `page` opens the Plan chat's event stream. */
-  async function chatServer(name: string, fake: string, chat: Settings["chat"]) {
-    const base = setup([]);
-    writeSettings(base.state, { ...readSettings(base.state), chat });
+  async function chatServer(
+    name: string,
+    fake: string,
+    chat: Settings["chat"],
+    state = setup([]).state,
+  ) {
+    writeSettings(state, { ...readSettings(state), chat });
     const bin = mkdtempSync(join(scratch, `${name}-`));
     script(bin, name, fake);
     process.env.PATH = `${bin}:${process.env.PATH}`;
-    const server = serve(base.state, 0, "127.0.0.1");
+    const server = serve(state, 0, "127.0.0.1");
     await once(server, "listening");
     const { port } = server.address() as AddressInfo;
     const url = `http://127.0.0.1:${port}/api/chat`;
@@ -627,7 +631,7 @@ describe("the factory", () => {
       server.closeAllConnections();
       server.close();
     };
-    return { url, page, prompt, close };
+    return { state, url, page, prompt, close };
   }
 
   test("the Plan chat streams Pi's records to every page and replays them to a page that opens later", async () => {
@@ -655,6 +659,45 @@ esac; done`,
       expect(readFileSync(args, "utf8")).toMatch(/--model openai\/gpt-6.2-sol --thinking low/);
     } finally {
       chat.close();
+    }
+  });
+
+  test("the Plan chat survives a restart of serve: the page gets it back and the agent resumes its session", async () => {
+    const args = join(scratch, "claude-resume-args");
+    const reply = { type: "user", message: { content: "hello" } };
+    const fake = `echo "$@" >> ${args}; while read -r line; do case "$line" in
+*'"user"'*) echo '${JSON.stringify(reply)}'; echo '{"type":"result","is_error":false}' ;;
+esac; done`;
+    const settings = { agent: "claude" };
+    const first = await chatServer("claude", fake, settings);
+    try {
+      const page = await first.page();
+      await first.prompt("hello");
+      await page("agent_settled");
+    } finally {
+      first.close();
+    }
+    const second = await chatServer("claude", fake, settings, first.state);
+    try {
+      const replay = await (await second.page())("exit");
+      expect(replay.map((record) => record.type)).toEqual([
+        "agent_start",
+        "message_start",
+        "message_end",
+        "agent_settled",
+        "exit",
+      ]);
+      await second.prompt("again");
+      await (
+        await second.page()
+      )("agent_settled");
+      const launches = readFileSync(args, "utf8");
+      const id = /--session-id (\S+)/.exec(launches)![1];
+      expect(launches).toContain(`--resume ${id}`);
+      await fetch(`${second.url}/reset`, { method: "POST" });
+      expect(existsSync(join(first.state, "chat.jsonl"))).toBe(false);
+    } finally {
+      second.close();
     }
   });
 
