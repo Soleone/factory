@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Inbox, ListOrdered, PackageCheck } from "lucide-react";
+import { Activity, Inbox, ListOrdered, PackageCheck } from "lucide-react";
+import { ActivityView } from "@/ActivityView";
 import { useFactory, type Act } from "@/api";
 import type { Snapshot } from "@/backend/types.ts";
 import { AgentSidebar } from "@/components/soleone/agent";
@@ -17,6 +18,7 @@ import { QueueView } from "@/QueueView";
 import { ResultsView } from "@/ResultsView";
 import { SettingsDialog } from "@/SettingsDialog";
 import { clock, runStart } from "@/format";
+import { setQueryParam, useQueryParam } from "@/hooks/use-query-param";
 
 export function App() {
   const { snapshot, error, act } = useFactory();
@@ -58,11 +60,15 @@ function Factory({
   act: Act;
   onAsk: (question: string) => void;
 }) {
-  const [tab, setTab] = useState("queue");
+  const [tab, setTab] = useQueryParam("tab", "queue");
   const { isMobile, setOpen, setOpenMobile } = useSidebar();
   const { on, status } = snapshot;
   const queued = snapshot.jobs.filter((job) => job.state === "queued").length;
   const failed = snapshot.jobs.filter((job) => job.state === "failed").length;
+  const blocked = snapshot.jobs.filter((job) => job.state === "blocked").length;
+  const pending = [blocked && `${blocked} waiting`, failed && `${failed} failed`]
+    .filter(Boolean)
+    .join(" · ");
   const run =
     on && status
       ? [
@@ -102,20 +108,27 @@ function Factory({
       )}
       <Tabs value={tab} onValueChange={setTab}>
         <div className="flex items-center gap-2">
-          <TabsList>
-            <TabsTrigger value="queue">
-              <ListOrdered />
-              Queue{queued ? ` (${queued})` : ""}
-            </TabsTrigger>
-            <TabsTrigger value="candidates">
-              <Inbox />
-              Candidates
-            </TabsTrigger>
-            <TabsTrigger value="results">
-              <PackageCheck />
-              Results{failed ? ` (${failed} failed)` : ""}
-            </TabsTrigger>
-          </TabsList>
+          {/* Four tabs don't fit a phone; they scroll on their own rather than the page. */}
+          <div className="min-w-0 overflow-x-auto">
+            <TabsList>
+              <TabsTrigger value="queue">
+                <ListOrdered />
+                Queue{queued ? ` (${queued})` : ""}
+              </TabsTrigger>
+              <TabsTrigger value="candidates">
+                <Inbox />
+                Candidates
+              </TabsTrigger>
+              <TabsTrigger value="results">
+                <PackageCheck />
+                Results{pending ? ` (${pending})` : ""}
+              </TabsTrigger>
+              <TabsTrigger value="activity">
+                <Activity />
+                Activity
+              </TabsTrigger>
+            </TabsList>
+          </div>
           <div className="ml-auto">
             <CloneDialog act={act} />
           </div>
@@ -125,6 +138,15 @@ function Factory({
         </TabsContent>
         <TabsContent value="candidates">
           <CandidatesView snapshot={snapshot} act={act} />
+        </TabsContent>
+        <TabsContent value="activity">
+          <ActivityView
+            jobs={snapshot.jobs}
+            onOpen={(id) => {
+              setQueryParam("job", id);
+              setTab("results");
+            }}
+          />
         </TabsContent>
         <TabsContent value="results">
           <ResultsView

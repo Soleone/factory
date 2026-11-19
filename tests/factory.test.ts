@@ -8,12 +8,18 @@ import { afterEach, beforeAll, describe, expect, test } from "vite-plus/test";
 import { agent, classify, resetTime } from "../src/backend/agents.ts";
 import {
   addJobs,
+  addNote,
   autoPicks,
+  endJob,
   moveJob,
+  nextJob,
+  queueFollowup,
+  queueReview,
   order,
   readJobs,
   removeJob,
   retryJob,
+  startJob,
 } from "../src/backend/jobs.ts";
 import { run, type RunOptions } from "../src/backend/loop.ts";
 import { agentModels } from "../src/backend/models.ts";
@@ -169,6 +175,42 @@ describe("queue", () => {
   });
 });
 
+describe("jobs that wait on others", () => {
+  test("a job waits for the one it comes after; the same play is queued once", () => {
+    const state = mkdtempSync(join(scratch, "state-"));
+    const [fix] = addJobs(state, [item("r", "a")], "pick", { agent: "claude" });
+    expect(addJobs(state, [item("r", "a")], "pick")).toEqual([]);
+    expect(() => queueReview(state, fix.id, "claude")).toThrow("claude's own");
+    const review = queueReview(state, fix.id, "pi")!;
+    expect(review).toMatchObject({ after: fix.id, agent: "pi", item: { id: "a", play: "review" } });
+    expect(review.prompt).toContain("gh pr diff workwork/a");
+    expect(queueReview(state, fix.id, "pi")).toBeUndefined();
+    expect(nextJob(readJobs(state), "pi")).toBeUndefined();
+    startJob(state, fix.id, "claude");
+    endJob(state, fix.id, {
+      run: "r",
+      agent: "claude",
+      start: "",
+      end: "",
+      outcome: "done",
+      log: "",
+    });
+    expect(nextJob(readJobs(state), "pi")?.id).toBe(review.id);
+  });
+
+  test("a follow-up an agent reported becomes its own job, once", () => {
+    const state = mkdtempSync(join(scratch, "state-"));
+    const [job] = addJobs(state, [item("r", "a")], "pick");
+    startJob(state, job.id, "claude");
+    addNote(state, job.id, { kind: "result", text: "done", followups: ["also b"] });
+    expect(() => queueFollowup(state, job.id, "not reported")).toThrow("no follow-up");
+    const followup = queueFollowup(state, job.id, "also b")!;
+    expect(followup.item).toMatchObject({ id: "a+followup", play: "followup", title: "also b" });
+    expect(followup.prompt).toMatch(/^also b\n/);
+    expect(queueFollowup(state, job.id, "also b")).toBeUndefined();
+  });
+});
+
 describe("the factory", () => {
   const path = process.env.PATH;
   afterEach(() => {
@@ -294,7 +336,9 @@ describe("the factory", () => {
       ["c", "done", "https://github.com/o/r/pull/7"],
     ]);
     expect(jobs.map((job) => job.source)).toEqual(["pick", "auto", "auto"]);
-    expect(readFileSync(join(attempts[0].log, "..", "prompt.md"), "utf8")).toBe("do b\n");
+    expect(readFileSync(join(attempts[0].log, "..", "prompt.md"), "utf8")).toMatch(
+      /^do b\n\n---\n/,
+    );
     expect(sh(base.repo, "git", "worktree", "list").trim().split("\n")).toHaveLength(2);
   });
 
@@ -337,6 +381,41 @@ describe("the factory", () => {
     const [job] = await work(options(base));
     expect(job.attempts[0].url).toBe("https://github.com/o/r/pull/8");
     expect(github.calls()).toContain("pr list --head workwork/a --state all");
+  });
+
+  /** A shell line that reports on the job the way `factory note|ask|result` does. */
+  const report = (state: string, note: Record<string, unknown>) =>
+    `echo '{"at":"2026-11-16T04:00:00Z","type":"note","id":"'$FACTORY_JOB'","note":${JSON.stringify(note)}}' >> ${state}/jobs.jsonl`;
+
+  test("a question blocks the job until answered; the next attempt gets the notes, the answer and the kept work", async () => {
+    const base = setup(["a"]);
+    const asked = join(mkdtempSync(join(scratch, "marker-")), "asked");
+    agents({
+      claude: `if [ -e ${asked} ]; then ${report(base.state, { kind: "result", text: "did A", url: "https://github.com/o/r/pull/9" })}; exit 0; fi
+touch ${asked}; echo x > half.txt
+${report(base.state, { kind: "note", text: "B breaks the API" })}
+${report(base.state, { kind: "ask", text: "A or B?" })}`,
+    });
+    const job = base.pick("a");
+    const [blocked] = await work(options(base));
+    expect(blocked.state).toBe("blocked");
+    expect(() => addNote(base.state, job.id, { kind: "note", text: "late" })).toThrow("is blocked");
+
+    addNote(base.state, job.id, { kind: "answer", text: "A" });
+    const [done] = await work(options(base));
+    expect(done.state).toBe("done");
+    expect(done.attempts[1].url).toBe("https://github.com/o/r/pull/9");
+    expect(done.notes.map((note) => [note.attempt, note.kind, note.text])).toEqual([
+      [1, "note", "B breaks the API"],
+      [1, "ask", "A or B?"],
+      [1, "answer", "A"],
+      [2, "result", "did A"],
+    ]);
+    const prompt = readFileSync(join(dirname(done.attempts[1].log), "prompt.md"), "utf8");
+    expect(prompt).toContain(`its work is kept on branch factory/${job.id}-1`);
+    expect(prompt).toContain(
+      "- note: B breaks the API\n- it asked: A or B?\n- the user answered: A",
+    );
   });
 
   test("a job keeps its agent: one retry after a failure, then only by hand", async () => {
@@ -960,7 +1039,7 @@ esac; done`,
             jobs.filter((other) => other.id === fixes[0].id),
           );
           const prompt = readFileSync(join(dirname(fix.attempts[0].log), "prompt.md"), "utf8");
-          expect(prompt).toBe(fixes[0].prompt);
+          expect(prompt.startsWith(fixes[0].prompt!)).toBe(true);
           expect(prompt).toContain(`gh pr checkout ${pr}`);
           expect(prompt).toContain("- shared.txt");
           expect(fix.attempts[0].url).toBe(pr);

@@ -74,8 +74,6 @@ export function checkSettings(raw: Partial<Settings>): Settings {
   return settings;
 }
 
-export const itemKey = (item: Pick<Item, "repo" | "id">) => `${item.repo} ${item.id}`;
-
 const candidatesPath = (state: string) => join(state, "candidates.json");
 const refreshLock = (state: string) => join(state, "candidates.lock");
 

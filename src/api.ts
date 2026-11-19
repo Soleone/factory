@@ -27,6 +27,10 @@ export const api = {
     call("POST", "/api/jobs", { items, pin }),
   remove: (id: string) => call("POST", `/api/jobs/${id}/remove`),
   retry: (id: string) => call("POST", `/api/jobs/${id}/retry`),
+  /** Answers the question a blocked job's agent asked; the job goes back in the queue. */
+  answer: (id: string, text: string) => call("POST", `/api/jobs/${id}/answer`, { text }),
+  followup: (id: string, task: string) => call("POST", `/api/jobs/${id}/followup`, { task }),
+  review: (id: string, agent: string) => call("POST", `/api/jobs/${id}/review`, { agent }),
   prDetails: (id: string) => call<{ body: string; diff: string }>("GET", `/api/jobs/${id}/pr`),
   merge: (id: string) => call("POST", `/api/jobs/${id}/merge`),
   rebase: (id: string) => call("POST", `/api/jobs/${id}/rebase`),

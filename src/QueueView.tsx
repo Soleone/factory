@@ -13,12 +13,14 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { ItemGroup } from "@/components/ui/item";
-import { clock, itemTitle, pinName, tuning, WORKER_BADGE } from "@/format";
+import { clock, itemTitle, minutesSince, pinName, tuning, WORKER_BADGE } from "@/format";
 import { Row, Section } from "@/Row";
 
-function jobMeta(job: Job): string {
+function jobMeta(job: Job, byId: Map<string, Job>): string {
   const pin = job.agent ? pinName({ ...job, agent: job.agent }) : "";
-  return [job.item.play, job.item.level, pin].filter(Boolean).join(" · ");
+  const before = job.after && byId.get(job.after);
+  const after = before && before.state !== "done" && `after ${itemTitle(before.item)}`;
+  return [job.item.play, job.item.level, pin, after].filter(Boolean).join(" · ");
 }
 
 /** Glides to its new place when the order changes, and slides out to the right when it leaves the queue. */
@@ -72,6 +74,8 @@ export function QueueView({
                   ? `until ${clock(worker.until)}`
                   : (worker.reason ?? "waiting for work");
               const limits = `limits hit ${worker.limits} of ${status.limit ?? "∞"}`;
+              const budget = job && `${minutesSince(worker.since)} of ${status.timeout} min`;
+              const said = job?.notes.at(-1);
               return (
                 <Row
                   key={worker.agent}
@@ -81,9 +85,20 @@ export function QueueView({
                       <Badge variant={WORKER_BADGE[worker.state]}>{worker.state}</Badge>
                     </>
                   }
-                  meta={[what, tuning(worker), `since ${clock(worker.since)}`, limits]
-                    .filter(Boolean)
-                    .join(" · ")}
+                  meta={
+                    <span className="flex flex-col gap-1">
+                      <span>
+                        {[what, tuning(worker), budget || `since ${clock(worker.since)}`, limits]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </span>
+                      {said && (
+                        <span>
+                          {clock(said.at)} {said.kind}: {said.text}
+                        </span>
+                      )}
+                    </span>
+                  }
                 />
               );
             })}
@@ -111,7 +126,7 @@ export function QueueView({
             <AnimatePresence mode="popLayout" initial={false}>
               {picks.map((job, index) => (
                 <Glide key={job.id}>
-                  <Row title={itemTitle(job.item)} meta={jobMeta(job)}>
+                  <Row title={itemTitle(job.item)} meta={jobMeta(job, byId)}>
                     <Button
                       variant="ghost"
                       size="icon-sm"
@@ -151,7 +166,7 @@ export function QueueView({
             <AnimatePresence mode="popLayout" initial={false}>
               {auto.map((job) => (
                 <Glide key={job.id}>
-                  <Row title={itemTitle(job.item)} meta={jobMeta(job)}>
+                  <Row title={itemTitle(job.item)} meta={jobMeta(job, byId)}>
                     {remove(job)}
                   </Row>
                 </Glide>

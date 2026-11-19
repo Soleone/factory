@@ -72,7 +72,15 @@ export async function run(options: RunOptions): Promise<string> {
 
   function writeStatus(): void {
     const until = options.until ? new Date(options.until).toISOString() : undefined;
-    const status: Status = { pid: process.pid, run: id, until, limit: options.limit, workers };
+    const timeout = options.timeoutMs / MINUTE;
+    const status: Status = {
+      pid: process.pid,
+      run: id,
+      until,
+      limit: options.limit,
+      timeout,
+      workers,
+    };
     writeFileSync(join(state, "status.json"), `${JSON.stringify(status, null, 2)}\n`);
   }
 
@@ -229,9 +237,9 @@ export async function run(options: RunOptions): Promise<string> {
       writeFileSync(logPath, `${message}\n`);
       return attempt(begun, "failed", { error: message.slice(0, 2000) });
     }
-    writeFileSync(join(dir, "prompt.md"), prompt);
+    writeFileSync(join(dir, "prompt.md"), prompt + earlier(job) + reporting(job, begun));
     if (stopping) return undefined;
-    const live: Live = { begun, pid: startAgent(agent, worktree, dir), worktree };
+    const live: Live = { begun, pid: startAgent(agent, worktree, dir, job.id), worktree };
     writeFileSync(livePath(state, job.id), JSON.stringify(live));
     return finish(job, live);
   }
@@ -265,8 +273,14 @@ export async function run(options: RunOptions): Promise<string> {
     const code = existsSync(exit) ? Number(readFileSync(exit, "utf8")) : 1;
     const agent = makeAgent(begun.agent, begun);
     const outcome = timedOut ? "timeout" : classify(agent, code, text);
+    const result = readJobs(state)
+      .find((other) => other.id === job.id)!
+      .notes.findLast((note) => note.kind === "result" && note.attempt === job.attempts.length + 1);
     return attempt(begun, outcome, {
-      url: (outcome === "done" && (await delivered(job.item))) || text.match(URL)?.at(-1),
+      url:
+        (outcome === "done" && (await delivered(job.item))) ||
+        result?.url ||
+        text.match(URL)?.at(-1),
       branch,
     });
   }
@@ -319,7 +333,7 @@ const attempt = (begun: Begun, outcome: Outcome, rest: Partial<Attempt> = {}): A
  * detached, so it outlives a run that hands it off. The shell in between reads the prompt from a file
  * and writes the exit code to one, both of which outlast this process. Returns the group's pid.
  */
-function startAgent(agent: Agent, cwd: string, dir: string): number {
+function startAgent(agent: Agent, cwd: string, dir: string, job: string): number {
   const log = openSync(join(dir, "agent.log"), "w");
   const child = spawn(
     "sh",
@@ -331,11 +345,41 @@ function startAgent(agent: Agent, cwd: string, dir: string): number {
       agent.command,
       ...agent.args,
     ],
-    { cwd, detached: true, stdio: ["ignore", log, log] },
+    { cwd, detached: true, stdio: ["ignore", log, log], env: { ...process.env, FACTORY_JOB: job } },
   );
   closeSync(log);
   child.unref();
   return child.pid!;
+}
+
+const NOTE_LABEL = { note: "note", ask: "it asked", answer: "the user answered", result: "result" };
+
+/** What earlier attempts said and kept, so a retry or an answered question picks up where they left off. */
+function earlier(job: Job): string {
+  if (job.attempts.length === 0) return "";
+  const lines = job.attempts.flatMap((attempt, i) => [
+    `\nAttempt ${i + 1} (${attempt.agent}, ${attempt.outcome})${attempt.branch ? `: its work is kept on branch ${attempt.branch}; start from it with \`git checkout -B ${attempt.branch}\`` : ""}`,
+    ...job.notes
+      .filter((note) => note.attempt === i + 1)
+      .map((note) => `- ${NOTE_LABEL[note.kind]}: ${note.text}`),
+  ]);
+  return `\n\n## Earlier attempts at this job\n${lines.join("\n")}\n`;
+}
+
+/** How the agent reports back. Nobody watches a run, so this is all the user learns besides the PR. */
+function reporting(job: Job, { agent, model, effort }: Begun): string {
+  // argv[1] is this CLI, whether it runs from dist or, under pn dev, from source.
+  const factory = `"${process.execPath}" "${process.argv[1]}"`;
+  const signature = [agent, model, effort].filter(Boolean).join(" · ");
+  return `
+---
+You run headless for factory as job ${job.id}, and nobody watches live. Report through its CLI:
+
+- \`${factory} note "<text>"\` records something worth knowing later: what you found, tried, or what's in the way. A few per job, not a play-by-play.
+- When you reach a decision only the user can make, run \`${factory} ask "<question, with the options and your recommendation>"\` and end there. Your work in this folder is kept. The user answers later, and the job goes on with your notes, the answer and your work.
+- Before you end, run \`${factory} result "<what changed and why, in a sentence or two>" --confidence low|medium|high\`, adding \`--url <link>\` for the PR or issue you opened and \`--followup "<task>"\` for each task you saw that deserves its own job.
+- In a PR description you write, add the line \`Agent: ${signature}\`.
+`;
 }
 
 /** The PR the agent opened, as GitHub knows it; undefined when gh can't tell, and the log's last link stands in. */

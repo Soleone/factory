@@ -6,13 +6,22 @@ import { AGENT_NAMES } from "./agents.ts";
 import { chat } from "./chat.ts";
 import { clonableRepos, cloneRepo } from "./repos.ts";
 import { agentModels } from "./models.ts";
-import { addJobs, moveJob, queueConflicts, readJobs, removeJob, retryJob } from "./jobs.ts";
+import {
+  addJobs,
+  addNote,
+  moveJob,
+  queueConflicts,
+  queueFollowup,
+  queueReview,
+  readJobs,
+  removeJob,
+  retryJob,
+} from "./jobs.ts";
 import { turnOff, turnOn } from "./power.ts";
 import { closePr, mergePr, prCache, readPrDetails, rebasePr } from "./review.ts";
 import { mergeTrain } from "./train.ts";
 import {
   checkSettings,
-  itemKey,
   output,
   readCandidates,
   readSettings,
@@ -24,6 +33,7 @@ import {
 import {
   canMerge,
   canRebase,
+  itemKey,
   prUrl,
   type Model,
   type Play,
@@ -112,6 +122,10 @@ export function serve(state: string, port: number, host: string): Server {
       addJobs(state, candidates(body.items), "pick", body.pin),
     "POST /api/jobs/remove": (_, id) => removeJob(state, id),
     "POST /api/jobs/retry": (_, id) => retryJob(state, id),
+    "POST /api/jobs/answer": (body: { text: string }, id) =>
+      addNote(state, id, { kind: "answer", text: body.text }),
+    "POST /api/jobs/followup": (body: { task: string }, id) => queueFollowup(state, id, body.task),
+    "POST /api/jobs/review": (body: { agent: string }, id) => queueReview(state, id, body.agent),
     "POST /api/jobs/move": (body: { index: number }, id) => moveJob(state, id, body.index),
     "GET /api/jobs/pr": (_, id) => readPrDetails(jobPr(id)),
     "POST /api/jobs/merge": async (_, id) => {

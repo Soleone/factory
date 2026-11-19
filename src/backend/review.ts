@@ -6,9 +6,12 @@ import type { Item, Pr } from "./types.ts";
 
 const MINUTE = 60_000;
 
+/** The branch workwork has the agent push a candidate's work to. */
+export const workworkBranch = (item: Item) => `workwork/${item.id.replace(/[^\w./@-]+/g, "-")}`;
+
 /** The PR workwork had the agent open, found by the branch workwork names; scans name theirs per area, so they find none. */
 export async function findPr(item: Item): Promise<string | undefined> {
-  const branch = `workwork/${item.id.replace(/[^\w./@-]+/g, "-")}`;
+  const branch = workworkBranch(item);
   const found: { url: string }[] = JSON.parse(
     await output(
       "gh",

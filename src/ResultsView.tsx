@@ -6,13 +6,16 @@ import {
   GitPullRequestIcon,
   XIcon,
 } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { api, type Act } from "@/api";
 import { AttemptFile } from "@/AttemptFile";
+import { JobNotes } from "@/JobNotes";
+import { useQueryParam } from "@/hooks/use-query-param";
 import { PrReview } from "@/PrReview";
 import {
   canMerge,
   canRebase,
+  itemKey,
   onTrain,
   prUrl,
   type Attempt,
@@ -34,6 +37,7 @@ type Prs = Snapshot["prs"];
 
 /** A PR not fetched yet counts as open, so it doesn't vanish from review while gh answers. */
 const FILTERS: Record<string, { label: string; shows: (job: Job, prs: Prs) => boolean }> = {
+  blocked: { label: "Waiting for you", shows: (job) => job.state === "blocked" },
   review: {
     label: "Needs review",
     shows: (job, prs) => {
@@ -61,7 +65,32 @@ const CHECKS = {
 };
 
 function canDismiss(job: Job) {
-  return job.state === "done" || job.state === "failed";
+  return job.state === "done" || job.state === "failed" || job.state === "blocked";
+}
+
+const SEEN = "factory.results.seen";
+
+/** When the user last looked at the results, in this browser; empty the first time. */
+function useLastSeen(): string {
+  const [seen] = useState(() => {
+    try {
+      return localStorage.getItem(SEEN) ?? "";
+    } catch {
+      return "";
+    }
+  });
+  useEffect(() => {
+    const save = () => {
+      try {
+        localStorage.setItem(SEEN, new Date().toISOString());
+      } catch {
+        // Private windows may refuse storage; every result then just looks seen.
+      }
+    };
+    save();
+    return save;
+  }, []);
+  return seen;
 }
 
 /** What the train can try: it waits for running checks and rebases conflicts, but can't fix the rest. */
@@ -94,10 +123,21 @@ export function ResultsView({
   act: Act;
   onAsk: (question: string) => void;
 }) {
-  const [filter, setFilter] = useState("all");
+  const [filter, setFilter] = useQueryParam("filter", "all");
+  /** One job alone, as a link to it opens it. */
+  const [only, setOnly] = useQueryParam("job", "");
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [dismissing, setDismissing] = useState(false);
+  const seen = useLastSeen();
   const { prs, train } = snapshot;
+  const active = snapshot.jobs.filter((job) => job.state !== "removed");
+  const reviewed = new Set(
+    active.filter((job) => job.item.play === "review").map((job) => itemKey(job.item)),
+  );
+  const queuedTasks = new Set(
+    active.filter((job) => job.item.play === "followup").map((job) => job.item.title),
+  );
+  const agents = Object.keys(snapshot.settings.agents);
   const jobs = snapshot.jobs
     .filter((job) => job.state !== "removed" && job.attempts.length > 0)
     .sort((a, b) => b.attempts.at(-1)!.start.localeCompare(a.attempts.at(-1)!.start));
@@ -113,7 +153,9 @@ export function ResultsView({
       </Empty>
     );
 
-  const shown = jobs.filter((job) => FILTERS[filter].shows(job, prs));
+  const shown = jobs.filter((job) =>
+    only ? job.id === only : (FILTERS[filter] ?? FILTERS.all).shows(job, prs),
+  );
   const dismissible = shown.filter(canDismiss);
   const selection = dismissible.filter((job) => selected.has(job.id));
   const allSelected = selection.length === dismissible.length;
@@ -165,11 +207,12 @@ export function ResultsView({
         <ToggleGroup
           variant="outline"
           className="flex-wrap"
-          value={[filter]}
+          value={only ? [] : [filter]}
           disabled={dismissing}
           onValueChange={([chosen]) => {
-            if (!chosen || chosen === filter) return;
+            if (!chosen || (chosen === filter && !only)) return;
             setFilter(chosen);
+            setOnly("");
             setSelected(new Set());
           }}
         >
@@ -227,6 +270,13 @@ export function ResultsView({
             car={train[job.id]}
             onAsk={onAsk}
             asked={snapshot.settings.chat.agent}
+            unread={seen !== "" && job.attempts.at(-1)!.end > seen}
+            reviewer={
+              job.item.play !== "review" && !reviewed.has(itemKey(job.item))
+                ? agents.find((agent) => agent !== job.agent)
+                : undefined
+            }
+            notes={<JobNotes job={job} act={act} queuedTasks={queuedTasks} />}
             disabled={dismissing && selected.has(job.id)}
             selection={
               canDismiss(job) && (
@@ -252,6 +302,9 @@ function Result({
   car,
   onAsk,
   asked,
+  unread,
+  reviewer,
+  notes,
   disabled: dismissing,
   selection,
 }: {
@@ -262,6 +315,11 @@ function Result({
   onAsk: (question: string) => void;
   /** The agent the Plan chat talks to. */
   asked: string;
+  /** It ended since the user last looked. */
+  unread: boolean;
+  /** Another agent to review its PR, unless it has a review already. */
+  reviewer?: string;
+  notes: ReactNode;
   disabled: boolean;
   selection: ReactNode;
 }) {
@@ -293,7 +351,16 @@ function Result({
       leading={selection}
       title={
         <>
-          {pr ? (
+          {unread && (
+            <span
+              role="img"
+              aria-label="new"
+              className="mr-1 inline-block size-2 rounded-full bg-(--om-accent) align-middle"
+            />
+          )}
+          {job.state === "blocked" ? (
+            <Badge variant="accent">waiting for you</Badge>
+          ) : pr ? (
             <Badge variant={PR_BADGE[pr.state]}>{pr.state.toLowerCase()}</Badge>
           ) : (
             <Badge variant={OUTCOME_BADGE[last.outcome]}>{last.outcome}</Badge>
@@ -304,6 +371,7 @@ function Result({
       meta={
         <span className="flex flex-col gap-1">
           <AttemptLine job={job} attempt={last} />
+          {notes}
           {url && <PrLine jobId={job.id} url={url} pr={pr} />}
           {car?.step === "skipped" && (
             <span className="text-destructive">
@@ -339,6 +407,16 @@ function Result({
       {open && (
         <Button variant="outline" size="sm" disabled={disabled} onClick={() => changePr("close")}>
           {pending === "close" ? "Closing…" : "Close"}
+        </Button>
+      )}
+      {open && reviewer && (
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={disabled}
+          onClick={() => act(() => api.review(job.id, reviewer))}
+        >
+          Review with {agentName(reviewer)}
         </Button>
       )}
       {job.state === "failed" && (

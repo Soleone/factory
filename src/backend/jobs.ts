@@ -1,23 +1,35 @@
 import { randomBytes } from "node:crypto";
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { itemKey, LEVELS, output } from "./state.ts";
-import type { Attempt, Item, Job, Settings } from "./types.ts";
+import { workworkBranch } from "./review.ts";
+import { LEVELS, output } from "./state.ts";
+import {
+  itemKey,
+  prUrl,
+  type Attempt,
+  type Item,
+  type Job,
+  type Note,
+  type Settings,
+} from "./types.ts";
 
 /**
  * jobs.jsonl is append-only, so the CLI, the factory and serve can all write to it without overwriting
  * each other; the queue is whatever replaying it gives.
  */
-type Event = { at: string } & (
+export type Event = { at: string } & (
   | {
       type: "add";
-      job: Pick<Job, "id" | "item" | "source" | "agent" | "model" | "effort" | "prompt">;
+      job: Pick<Job, "id" | "item" | "source" | "agent" | "model" | "effort" | "prompt" | "after">;
     }
   | { type: "remove" | "requeue" | "retry"; id: string }
   | { type: "move"; id: string; index: number }
   | { type: "start"; id: string; agent: string }
   | { type: "attempt"; id: string; attempt: Attempt }
+  | { type: "note"; id: string; note: NoteBody }
 );
+
+export type NoteBody = Omit<Note, "at" | "attempt">;
 
 /** An unexpected failure gets one more try by the same agent. */
 const TRIES = 2;
@@ -40,7 +52,13 @@ export function readJobs(state: string): Job[] {
     if (!line) continue;
     const event: Event = JSON.parse(line);
     if (event.type === "add") {
-      const job: Job = { ...event.job, added: event.at, state: "queued", attempts: [] };
+      const job: Job = {
+        ...event.job,
+        added: event.at,
+        state: "queued",
+        attempts: [],
+        notes: [],
+      };
       jobs.set(job.id, job);
       (job.source === "pick" ? picks : autos).push(job);
       continue;
@@ -61,10 +79,21 @@ export function readJobs(state: string): Job[] {
       job.state = "running";
       job.agent = event.agent;
     }
+    if (event.type === "note") {
+      const answer = event.note.kind === "answer";
+      // A note comes during the attempt that isn't recorded yet; an answer after the one that asked.
+      const attempt = job.attempts.length + (answer ? 0 : 1);
+      job.notes.push({ ...event.note, at: event.at, attempt });
+      if (answer) job.state = "queued";
+    }
     if (event.type === "attempt") {
       job.attempts.push(event.attempt);
       const { outcome } = event.attempt;
-      if (outcome === "done") job.state = "done";
+      const asked = job.notes.some(
+        (note) => note.kind === "ask" && note.attempt === job.attempts.length,
+      );
+      if (asked) job.state = "blocked";
+      else if (outcome === "done") job.state = "done";
       else if (outcome === "limited" || outcome === "stopped") job.state = "queued";
       else {
         const count = (failures.get(job.id) ?? 0) + 1;
@@ -76,22 +105,35 @@ export function readJobs(state: string): Job[] {
   return [...picks, ...autos];
 }
 
-/** The next job this agent may take. */
+/** The next job this agent may take: queued for it, with the job it comes after done. */
 export function nextJob(jobs: Job[], agent: string): Job | undefined {
-  return jobs.find((job) => job.state === "queued" && (job.agent ?? agent) === agent);
+  const done = (id?: string) => !id || jobs.find((job) => job.id === id)?.state === "done";
+  return jobs.find(
+    (job) => job.state === "queued" && (job.agent ?? agent) === agent && done(job.after),
+  );
 }
 
+const ACTIVE: Job["state"][] = ["queued", "running", "blocked"];
+const sameWork = (item: Item) => `${itemKey(item)} ${item.play} ${item.title}`;
+
+/** Queues the items, skipping those already in the queue; returns the jobs it added. */
 export function addJobs(
   state: string,
   items: Item[],
   source: Job["source"],
-  pin: Pick<Job, "agent" | "model" | "effort" | "prompt"> = {},
+  pin: Pick<Job, "agent" | "model" | "effort" | "prompt" | "after"> = {},
 ): Job[] {
   const at = new Date().toISOString();
-  return items.map((item) => {
+  const active = new Set(
+    readJobs(state)
+      .filter((job) => ACTIVE.includes(job.state))
+      .map((job) => sameWork(job.item)),
+  );
+  const fresh = items.filter((item) => !active.has(sameWork(item)));
+  return fresh.map((item) => {
     const job = { id: randomBytes(4).toString("hex"), item, source, ...pin };
     append(state, { at, type: "add", job });
-    return { ...job, added: at, state: "queued", attempts: [] };
+    return { ...job, added: at, state: "queued", attempts: [], notes: [] };
   });
 }
 
@@ -100,15 +142,7 @@ export function addJobs(
  * keeps the job's workwork id, so the attempt links the same PR.
  */
 export function queueConflicts(state: string, id: string, url: string, files: string[]): void {
-  const jobs = readJobs(state);
-  const job = jobs.find((job) => job.id === id)!;
-  const waiting = jobs.some(
-    (other) =>
-      other.item.play === "conflicts" &&
-      itemKey(other.item) === itemKey(job.item) &&
-      (other.state === "queued" || other.state === "running"),
-  );
-  if (waiting) return;
+  const job = readJobs(state).find((job) => job.id === id)!;
   const item = { ...job.item, play: "conflicts", title: `Resolve conflicts: ${job.item.title}` };
   addJobs(state, [item], "pick", { prompt: conflictsPrompt(url, files) });
 }
@@ -129,6 +163,51 @@ If a conflict can't be resolved without guessing what someone meant, don't push.
 End your reply with the pull request's URL.
 `;
 
+/**
+ * Queues a review of the job's PR by another agent, once the job is done. Like a conflicts job it
+ * keeps the job's workwork id, so it finds and links the same PR.
+ */
+export function queueReview(state: string, id: string, agent: string): Job | undefined {
+  const job = find(state, id, ...ACTIVE, "done");
+  if (job.agent === agent)
+    throw new Error(`job ${id} is ${agent}'s own; pick another agent to review it`);
+  const branch = workworkBranch(job.item);
+  const item = { ...job.item, play: "review", title: `Review: ${job.item.title}` };
+  const prompt = reviewPrompt(branch, job.agent);
+  return addJobs(state, [item], "pick", { agent, prompt, after: id })[0];
+}
+
+const reviewPrompt = (
+  branch: string,
+  author = "another agent",
+) => `Review the pull request ${author} opened from branch \`${branch}\`: \`gh pr view ${branch}\` and \`gh pr diff ${branch}\`.
+
+1. Check it out with \`gh pr checkout ${branch}\`, run the repo's checks and tests, and read the change against what its description says it does.
+2. Look for bugs, missed cases and changes nobody asked for. Skip style the linters already cover.
+3. Post what you found as one comment with \`gh pr comment ${branch} --body-file -\`: each finding with file, line and why it matters, or that you found nothing. Don't push, approve or merge.
+
+If there's no such pull request, say so and end.
+
+End your reply with the pull request's URL.
+`;
+
+/**
+ * Queues a task an agent reported as a follow-up of its job. Its own id, so the PR of the job it
+ * came from isn't taken for its own.
+ */
+export function queueFollowup(state: string, id: string, task: string): Job | undefined {
+  const job = find(state, id, ...ACTIVE, "done", "failed");
+  if (!job.notes.some((note) => note.followups?.includes(task)))
+    throw new Error(`job ${id} reported no follow-up "${task}"`);
+  const item = { ...job.item, id: `${job.item.id}+followup`, play: "followup", title: task };
+  const url = prUrl(job);
+  const prompt = `${task}
+
+This came up while an agent worked on "${job.item.title}"${url ? ` (${url})` : ""}. Make it its own change on a new branch, and open a pull request for it.
+`;
+  return addJobs(state, [item], "pick", { prompt })[0];
+}
+
 function find(state: string, id: string, ...states: Job["state"][]): Job {
   const job = readJobs(state).find((job) => job.id === id);
   if (!job) throw new Error(`no job ${id}`);
@@ -138,7 +217,7 @@ function find(state: string, id: string, ...states: Job["state"][]): Job {
 
 /** Takes a job out of the queue or the results, and deletes the branches its attempts kept. */
 export async function removeJob(state: string, id: string): Promise<void> {
-  const job = find(state, id, "queued", "done", "failed");
+  const job = find(state, id, "queued", "blocked", "done", "failed");
   append(state, { at: new Date().toISOString(), type: "remove", id });
   const kept = job.attempts.flatMap((attempt) => attempt.branch ?? []);
   if (kept.length === 0) return;
@@ -160,6 +239,12 @@ export function retryJob(state: string, id: string): void {
 export function moveJob(state: string, id: string, index: number): void {
   if (find(state, id, "queued").source !== "pick") throw new Error(`job ${id} is not a pick`);
   append(state, { at: new Date().toISOString(), type: "move", id, index });
+}
+
+/** An agent's note on the job it works, or the user's answer to a blocked job, which queues it again. */
+export function addNote(state: string, id: string, note: NoteBody): void {
+  find(state, id, note.kind === "answer" ? "blocked" : "running");
+  append(state, { at: new Date().toISOString(), type: "note", id, note });
 }
 
 export function startJob(state: string, id: string, agent: string): void {

@@ -43,6 +43,9 @@ export type Item = {
   title: string;
 };
 
+/** A candidate's identity across workwork runs. */
+export const itemKey = (item: Pick<Item, "repo" | "id">) => `${item.repo} ${item.id}`;
+
 /** `workwork --all --json` takes minutes, so its answer is kept here for browsing and auto mode. */
 export type Candidates = { at: string; items: Item[] };
 
@@ -64,6 +67,22 @@ export type Attempt = {
   error?: string;
 };
 
+export type Confidence = "low" | "medium" | "high";
+
+/**
+ * What an agent says about its job through the CLI while working it (a note, a question for the user,
+ * its result), and the user's answers. `attempt` counts from 1; an answer belongs to the attempt that asked.
+ */
+export type Note = {
+  at: string;
+  attempt: number;
+  kind: "note" | "ask" | "answer" | "result";
+  text: string;
+  confidence?: Confidence;
+  followups?: string[];
+  url?: string;
+};
+
 /** A workwork candidate in the queue. Once it has an agent, by choice or by its first start, it keeps it. */
 export type Job = Tuning & {
   id: string;
@@ -71,10 +90,14 @@ export type Job = Tuning & {
   source: "pick" | "auto";
   added: string;
   agent?: string;
-  state: "queued" | "running" | "done" | "failed" | "removed";
+  /** blocked: its agent asked the user something, and it waits for the answer. */
+  state: "queued" | "running" | "blocked" | "done" | "failed" | "removed";
   attempts: Attempt[];
+  notes: Note[];
   /** For jobs factory writes itself, like resolving a PR's conflicts; the rest ask workwork. */
   prompt?: string;
+  /** A job that has to be done before this one starts, like the fix a review is of. */
+  after?: string;
 };
 
 export type Worker = Tuning & {
@@ -93,6 +116,8 @@ export type Status = {
   run: string;
   until?: string;
   limit: number | null;
+  /** Minutes before an agent is killed. */
+  timeout: number;
   workers: Worker[];
 };
 

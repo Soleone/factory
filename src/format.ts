@@ -20,6 +20,8 @@ export function ago(iso: string): string {
   return hours < 48 ? `${hours} h ago` : `${Math.round(hours / 24)} days ago`;
 }
 
+export const minutesSince = (iso: string) => Math.round((Date.now() - Date.parse(iso)) / 60_000);
+
 export const minutes = (start: string, end: string) =>
   `${Math.max(1, Math.round((Date.parse(end) - Date.parse(start)) / 60_000))} min`;
 
@@ -32,7 +34,7 @@ export const itemTitle = (item: { repo: string; title: string; id: string }) =>
 /** Run ids are ISO times without colons: 2026-11-16T013000. */
 export const runStart = (run: string) => run.replace(/T(\d\d)(\d\d)(\d\d)$/, "T$1:$2:$3Z");
 
-type BadgeVariant = "default" | "secondary" | "destructive" | "outline";
+type BadgeVariant = "default" | "secondary" | "destructive" | "outline" | "accent";
 
 export const OUTCOME_BADGE: Record<Outcome, BadgeVariant> = {
   done: "secondary",
@@ -52,6 +54,7 @@ export const WORKER_BADGE: Record<Worker["state"], BadgeVariant> = {
 export const JOB_BADGE: Record<Job["state"], BadgeVariant> = {
   queued: "outline",
   running: "default",
+  blocked: "accent",
   done: "secondary",
   failed: "destructive",
   removed: "outline",

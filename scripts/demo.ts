@@ -11,13 +11,56 @@ import {
   type Snapshot,
 } from "../src/backend/types.ts";
 
+const DEMO_NOTES: Record<number, Omit<Job["notes"][number], "at" | "attempt">[]> = {
+  0: [
+    { kind: "note", text: "The CSV writer had no test for quoted commas." },
+    {
+      kind: "result",
+      text: "Added tests for quoting and empty rows; both caught a real bug, fixed in the same PR.",
+      confidence: "high",
+      followups: ["The JSON export has the same quoting gap"],
+    },
+  ],
+  3: [
+    { kind: "note", text: "Logging goes through three wrappers; two only rename fields." },
+    {
+      kind: "ask",
+      text: "Drop the request-id field from logs (simpler, but dashboards use it) or keep it? I'd keep it.",
+    },
+  ],
+};
+
 function seed(): Snapshot {
   const at = new Date().toISOString();
   const run = at.slice(0, 19).replaceAll(":", "");
   const jobs: Job[] = [
-    { id: "job1", item: items[0], source: "pick", added: at, state: "queued", attempts: [] },
-    { id: "job2", item: items[1], source: "pick", added: at, state: "queued", attempts: [] },
-    { id: "job3", item: items[2], source: "auto", added: at, state: "queued", attempts: [] },
+    {
+      id: "job1",
+      item: items[0],
+      source: "pick",
+      added: at,
+      state: "queued",
+      attempts: [],
+      notes: [],
+    },
+    {
+      id: "job2",
+      item: items[1],
+      source: "pick",
+      added: at,
+      state: "queued",
+      attempts: [],
+      notes: [],
+    },
+    {
+      id: "job3",
+      item: items[2],
+      source: "auto",
+      added: at,
+      state: "queued",
+      attempts: [],
+      notes: [],
+    },
     ...items.slice(3, 7).map((item, index): Job => {
       const id = `result${index + 1}`;
       const failed = index === 2;
@@ -27,7 +70,7 @@ function seed(): Snapshot {
         source: "pick",
         agent: "pi",
         added: at,
-        state: failed ? "failed" : "done",
+        state: failed ? "failed" : index === 3 ? "blocked" : "done",
         attempts: [
           {
             run,
@@ -40,6 +83,7 @@ function seed(): Snapshot {
             error: failed ? "Demo setup failed: dependency install exited with code 1" : undefined,
           },
         ],
+        notes: DEMO_NOTES[index]?.map((note) => ({ at, attempt: 1, ...note })) ?? [],
       };
     }),
   ];
@@ -208,6 +252,7 @@ function dispatch(snapshot: Snapshot, route: string, body: unknown): unknown {
           added: new Date().toISOString(),
           ...selection.pin,
           attempts: [],
+          notes: [],
         });
       }
       return null;
@@ -261,6 +306,7 @@ function dispatch(snapshot: Snapshot, route: string, body: unknown): unknown {
         run: since.slice(0, 19).replaceAll(":", ""),
         until,
         limit,
+        timeout: snapshot.settings.timeout,
         workers: Object.entries(agents).map(([agent, tuning]) => ({
           agent,
           ...tuning,
@@ -277,7 +323,9 @@ function dispatch(snapshot: Snapshot, route: string, body: unknown): unknown {
       return null;
   }
   if (/^GET \/api\/jobs\/\w+\/pr$/.test(route)) return DEMO_PR;
-  const match = /^POST \/api\/jobs\/(\w+)\/(remove|retry|move|merge|rebase|close)$/.exec(route);
+  const match = /^POST \/api\/jobs\/(\w+)\/(remove|retry|move|merge|rebase|close|answer)$/.exec(
+    route,
+  );
   if (!match) return undefined;
   const [, id, action] = match;
   const job = jobs.find((entry) => entry.id === id && entry.state !== "removed");
@@ -289,6 +337,12 @@ function dispatch(snapshot: Snapshot, route: string, body: unknown): unknown {
     case "retry":
       job.state = "queued";
       break;
+    case "answer": {
+      const { text } = body as { text: string };
+      job.notes.push({ at: new Date().toISOString(), attempt: 1, kind: "answer", text });
+      job.state = "queued";
+      break;
+    }
     case "move": {
       const { index } = body as { index: number };
       const target = jobs.filter((entry) => entry.state === "queued" && entry.source === "pick")[
