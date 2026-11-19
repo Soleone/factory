@@ -86,10 +86,7 @@ function Factory({
             <Logo working={on} />
             Factory
           </h1>
-          <Badge
-            variant={on ? "default" : "outline"}
-            className={on ? "bg-(--om-accent) text-(--om-dark-background)" : undefined}
-          >{on ? "on" : "off"}</Badge>
+          <Badge variant={on ? "accent" : "outline"}>{on ? "on" : "off"}</Badge>
           <span className="text-sm text-muted-foreground">{run}</span>
         </div>
         <Controls snapshot={snapshot} act={act} />
