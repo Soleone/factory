@@ -3,6 +3,9 @@
 /** Unset means the agent's own default. */
 export type Tuning = { model?: string; effort?: string };
 
+/** A model the settings offer for an agent: what --model takes, and how to show it. */
+export type Model = { value: string; label: string };
+
 /** stopped: the factory was turned off with --kill while the agent worked. */
 export type Outcome = "done" | "failed" | "limited" | "timeout" | "stopped";
 
@@ -10,6 +13,8 @@ export type Outcome = "done" | "failed" | "limited" | "timeout" | "stopped";
 export type Settings = {
   /** The registered agents, each with its model and effort (unset: the agent's default). */
   agents: Record<string, Tuning>;
+  /** The agent the Plan chat talks to, with its model and effort; a change starts a new chat. */
+  chat: Tuning & { agent: string };
   /** Usage-limit hits per agent per run before that agent stops; null: never stop, wait for the reset. */
   limit: number | null;
   /** HH:MM local time after which a run starts nothing new. */

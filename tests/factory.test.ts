@@ -21,6 +21,7 @@ import {
   onTrain,
   type Item,
   type Job,
+  type Settings,
   type Snapshot,
   type Status,
   type TrainCar,
@@ -595,52 +596,153 @@ describe("the factory", () => {
     }
   });
 
-  test("the Plan chat streams Pi's records to every page and replays them to a page that opens later", async () => {
+  /** Starts serve with a fake agent on PATH; `page` opens the Plan chat's event stream. */
+  async function chatServer(name: string, fake: string, chat: Settings["chat"]) {
     const base = setup([]);
-    const bin = mkdtempSync(join(scratch, "pi-"));
-    // Pi in RPC mode: one JSON record per line each way.
-    const reply = '{"role":"assistant","content":[{"type":"text","text":"Queue a"}]}';
-    script(
-      bin,
-      "pi",
-      `while read -r line; do case "$line" in
-*'"prompt"'*) echo '{"type":"agent_start"}'; echo '{"type":"message_end","message":${reply}}'; echo '{"type":"agent_settled"}' ;;
-*get_messages*) echo '{"type":"response","command":"get_messages","success":true,"data":{"messages":[${reply}]}}' ;;
-esac; done`,
-    );
+    writeSettings(base.state, { ...readSettings(base.state), chat });
+    const bin = mkdtempSync(join(scratch, `${name}-`));
+    script(bin, name, fake);
     process.env.PATH = `${bin}:${process.env.PATH}`;
     const server = serve(base.state, 0, "127.0.0.1");
     await once(server, "listening");
     const { port } = server.address() as AddressInfo;
     const url = `http://127.0.0.1:${port}/api/chat`;
-    /** Opens the page's event stream; `until` resolves with the records up to one of that type. */
+    /** `until` resolves with the records up to the first of that type. */
     async function page() {
       const reader = (await fetch(url)).body!.pipeThrough(new TextDecoderStream()).getReader();
       let text = "";
       return async (type: string) => {
         for (;;) {
           const records = [...text.matchAll(/^data: (.*)$/gm)].map(([, json]) => JSON.parse(json));
-          if (records.some((record) => record.type === type)) return records;
+          const end = records.findIndex((record) => record.type === type);
+          if (end >= 0) return records.slice(0, end + 1);
           text += (await reader.read()).value;
         }
       };
     }
+    const prompt = (message: string) =>
+      fetch(url, { method: "POST", body: JSON.stringify({ message }) });
+    const close = () => {
+      server.closeAllConnections();
+      server.close();
+    };
+    return { url, page, prompt, close };
+  }
+
+  test("the Plan chat streams Pi's records to every page and replays them to a page that opens later", async () => {
+    // Pi in RPC mode: one JSON record per line each way.
+    const reply = '{"role":"assistant","content":[{"type":"text","text":"Queue a"}]}';
+    const args = join(scratch, "pi-args");
+    const chat = await chatServer(
+      "pi",
+      `echo "$@" > ${args}; while read -r line; do case "$line" in
+*'"prompt"'*) echo '{"type":"agent_start"}'; echo '{"type":"message_end","message":${reply}}'; echo '{"type":"agent_settled"}' ;;
+esac; done`,
+      { agent: "pi", model: "openai/gpt-6.2-sol", effort: "low" },
+    );
     try {
-      const first = await page();
-      await fetch(url, { method: "POST", body: JSON.stringify({ message: "what next?" }) });
-      expect((await first("agent_settled")).map((record) => record.type)).toEqual([
+      const first = await chat.page();
+      await chat.prompt("what next?");
+      const types = ["agent_start", "message_end", "agent_settled"];
+      expect((await first("agent_settled")).map((record) => record.type)).toEqual(types);
+      const later = await chat.page();
+      const replay = await later("agent_settled");
+      expect(replay.map((record) => record.type)).toEqual(types);
+      expect(replay[1].message.content[0].text).toBe("Queue a");
+      await fetch(`${chat.url}/reset`, { method: "POST" });
+      expect((await first("reset")).at(-1).type).toBe("reset");
+      expect(readFileSync(args, "utf8")).toMatch(/--model openai\/gpt-6.2-sol --thinking low/);
+    } finally {
+      chat.close();
+    }
+  });
+
+  test("the Plan chat speaks to Claude Code in stream-json and gives the page Pi's records", async () => {
+    const out = (...records: object[]) =>
+      records.map((record) => `echo '${JSON.stringify(record)}'`).join("; ");
+    const event = (record: object) => ({ type: "stream_event", event: record });
+    const args = join(scratch, "claude-args");
+    const chat = await chatServer(
+      "claude",
+      `echo "$@" > ${args}; while read -r line; do case "$line" in
+*'"user"'*) ${out(
+        { type: "system", subtype: "init", model: "claude-opus-5-5" },
+        { type: "user", message: { content: "what next?" } },
+        event({ type: "message_start" }),
+        event({ type: "content_block_start", index: 0, content_block: { type: "text" } }),
+        event({
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "text_delta", text: "Queue a" },
+        }),
+        { type: "assistant", message: { content: [{ type: "text", text: "Queue a" }] } },
+        event({
+          type: "content_block_start",
+          index: 1,
+          content_block: { type: "tool_use", id: "t", name: "Read" },
+        }),
+        {
+          type: "assistant",
+          message: {
+            content: [
+              { type: "tool_use", id: "t", name: "Read", input: { file_path: "jobs.jsonl" } },
+            ],
+          },
+        },
+        event({ type: "message_stop" }),
+        {
+          type: "user",
+          message: { content: [{ type: "tool_result", tool_use_id: "t", content: "ok" }] },
+        },
+        { type: "result", is_error: false },
+      )} ;;
+esac; done`,
+      { agent: "claude", model: "opus", effort: "high" },
+    );
+    try {
+      const first = await chat.page();
+      await chat.prompt("what next?");
+      const records = await first("agent_settled");
+      expect(records.map((record) => record.type)).toEqual([
         "agent_start",
+        "response",
+        "message_start",
+        "message_end",
+        "message_start",
+        "message_update",
+        "message_update",
+        "message_update",
+        "message_update",
+        "message_end",
+        "message_start",
         "message_end",
         "agent_settled",
       ]);
-      const later = await page();
-      const [replay] = await later("response");
-      expect(replay.data.messages[0].content[0].text).toBe("Queue a");
-      await fetch(`${url}/reset`, { method: "POST" });
-      expect((await first("reset")).at(-1).type).toBe("reset");
+      expect(records[1].data).toEqual({
+        model: { name: "claude-opus-5-5" },
+        thinkingLevel: "high",
+      });
+      expect(records[3].message).toEqual({ role: "user", content: "what next?" });
+      expect(records[9].message.content).toEqual([
+        { type: "text", text: "Queue a" },
+        {
+          type: "toolCall",
+          id: "t",
+          name: "read",
+          arguments: { file_path: "jobs.jsonl", path: "jobs.jsonl" },
+        },
+      ]);
+      expect(records[11].message).toMatchObject({
+        role: "toolResult",
+        toolCallId: "t",
+        isError: false,
+      });
+      expect(readFileSync(args, "utf8")).toMatch(/--model opus --effort high/);
+      // The streamed deltas are dropped once the reply ended.
+      const replay = await (await chat.page())("agent_settled");
+      expect(replay.filter((record) => record.type === "message_update")).toEqual([]);
     } finally {
-      server.closeAllConnections();
-      server.close();
+      chat.close();
     }
   });
 

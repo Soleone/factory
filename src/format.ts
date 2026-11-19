@@ -60,3 +60,6 @@ export const JOB_BADGE: Record<Job["state"], BadgeVariant> = {
 /** Model and effort as one short line, e.g. "opus, high"; empty when both are the agent's default. */
 export const tuning = ({ model, effort }: { model?: string; effort?: string }) =>
   [model, effort].filter(Boolean).join(", ");
+
+/** How the page names an agent: claude as Claude, pi as Pi. */
+export const agentName = (name: string) => name.charAt(0).toUpperCase() + name.slice(1);

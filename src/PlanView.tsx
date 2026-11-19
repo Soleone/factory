@@ -3,13 +3,16 @@ import { RotateCcw } from "lucide-react";
 import { api } from "@/api";
 import { AgentPanel } from "@/components/soleone/agent";
 import { Button } from "@/components/ui/button";
+import { agentName } from "@/format";
 import { agentMessages, applyRecord, emptyTranscript } from "@/pi";
 
-/** A chat with Pi about what to queue; Pi adds jobs through the factory CLI once you agree. */
+/** A chat about what to queue; the agent adds jobs through the factory CLI once you agree. */
 export function PlanView({
+  agent,
   prompt,
   onPromptChange,
 }: {
+  agent: string;
   prompt: string;
   onPromptChange: Dispatch<SetStateAction<string>>;
 }) {
@@ -18,7 +21,7 @@ export function PlanView({
 
   useEffect(() => {
     const events = new EventSource("/api/chat");
-    // On every (re)connect the server replays the conversation, if Pi is still running.
+    // On every (re)connect the server replays the conversation so far.
     events.onopen = () => setTranscript(emptyTranscript);
     events.onmessage = (event) =>
       setTranscript((current) => applyRecord(current, JSON.parse(event.data)));
@@ -40,8 +43,8 @@ export function PlanView({
     <div className="flex h-[calc(100svh-11rem)] min-h-96 flex-col gap-3">
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm text-muted-foreground">
-          Pi looks through the candidates and queues jobs once you agree. It never turns the factory
-          on.
+          {agentName(agent)} looks through the candidates and queues jobs once you agree. It never
+          turns the factory on.
         </p>
         <Button
           variant="outline"

@@ -32,6 +32,7 @@ export const LEVELS = ["auto", "skim", "decide"];
 
 const DEFAULTS: Settings = {
   agents: { claude: {}, pi: {} },
+  chat: { agent: "pi" },
   limit: 1,
   timeout: 60,
   auto: { on: false, levels: LEVELS, plays: [], repos: [] },
@@ -54,6 +55,8 @@ export function checkSettings(raw: Partial<Settings>): Settings {
   for (const name of Object.keys(settings.agents))
     if (!AGENT_NAMES.includes(name))
       throw new Error(`unknown agent ${name} (known: ${AGENT_NAMES.join(", ")})`);
+  if (!AGENT_NAMES.includes(settings.chat.agent))
+    throw new Error(`unknown chat agent ${settings.chat.agent} (known: ${AGENT_NAMES.join(", ")})`);
   if (Object.keys(settings.agents).length === 0)
     throw new Error("settings need at least one agent");
   if (settings.limit !== null && !(Number.isInteger(settings.limit) && settings.limit > 0))

@@ -48,6 +48,7 @@ function seed(): Snapshot {
     jobs,
     settings: {
       agents: { claude: {}, pi: {} },
+      chat: { agent: "pi" },
       limit: 2,
       timeout: 60,
       auto: { on: true, levels: ["auto"], plays: [], repos: [] },
@@ -198,6 +199,14 @@ function dispatch(snapshot: Snapshot, route: string, body: unknown): unknown {
       }
       return null;
     }
+    case "GET /api/models":
+      return {
+        claude: [
+          { value: "opus", label: "Opus 5.5" },
+          { value: "sonnet", label: "Sonnet 5.5" },
+        ],
+        pi: [{ value: "openai/gpt-6.2-sol", label: "openai/gpt-6.2-sol" }],
+      };
     case "PUT /api/settings":
       snapshot.settings = body as Settings;
       return null;

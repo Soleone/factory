@@ -1,5 +1,7 @@
+import { useEffect, useState } from "react";
+import { api } from "@/api";
 import { AGENT_NAMES, EFFORTS } from "@/backend/agents.ts";
-import type { Settings } from "@/backend/types.ts";
+import type { Model, Settings, Tuning } from "@/backend/types.ts";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Field,
@@ -44,9 +46,6 @@ export function RunFields({ value, onChange }: { value: Run; onChange: (run: Run
         <FieldLegend variant="label">Agents</FieldLegend>
         {AGENT_NAMES.map((name) => {
           const tuning = value.agents[name];
-          const efforts = [{ value: DEFAULT, label: "Default effort" }].concat(
-            EFFORTS[name].map((effort) => ({ value: effort, label: effort })),
-          );
           return (
             <Field key={name} orientation="horizontal">
               <Checkbox
@@ -54,40 +53,14 @@ export function RunFields({ value, onChange }: { value: Run; onChange: (run: Run
                 checked={tuning !== undefined}
                 onCheckedChange={(checked) => setAgent(name, checked ? {} : undefined)}
               />
-              <FieldLabel htmlFor={`agent-${name}`} className="w-14 flex-none">
+              <FieldLabel htmlFor={`agent-${name}`} className="w-14 flex-none!">
                 {name}
               </FieldLabel>
-              <Input
-                aria-label={`${name} model`}
-                placeholder="default model"
-                disabled={!tuning}
-                value={tuning?.model ?? ""}
-                onChange={(event) =>
-                  setAgent(name, { ...tuning, model: event.target.value || undefined })
-                }
+              <TuningFields
+                agent={name}
+                value={tuning}
+                onChange={(change) => setAgent(name, change)}
               />
-              <Select
-                items={efforts}
-                disabled={!tuning}
-                value={tuning?.effort ?? DEFAULT}
-                onValueChange={(effort) =>
-                  setAgent(name, {
-                    ...tuning,
-                    effort: effort === DEFAULT ? undefined : (effort ?? undefined),
-                  })
-                }
-              >
-                <SelectTrigger aria-label={`${name} effort`}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {efforts.map((effort) => (
-                    <SelectItem key={effort.value} value={effort.value}>
-                      {effort.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
             </Field>
           );
         })}
@@ -130,5 +103,92 @@ export function RunFields({ value, onChange }: { value: Run; onChange: (run: Run
         />
       </Field>
     </FieldGroup>
+  );
+}
+
+let models: Promise<Record<string, Model[]>> | undefined;
+
+/** The short list of models each agent offers, asked once per page; empty until it arrives. */
+function useModels(): Record<string, Model[]> {
+  const [loaded, setLoaded] = useState<Record<string, Model[]>>({});
+  useEffect(() => {
+    models ??= api.models();
+    // Ask again next time the settings open.
+    models.then(setLoaded, () => (models = undefined));
+  }, []);
+  return loaded;
+}
+
+/** An agent's model and effort; unset (or no value at all, for an agent not picked) means its default. */
+export function TuningFields({
+  agent,
+  value,
+  onChange,
+}: {
+  agent: string;
+  value: Tuning | undefined;
+  onChange: (tuning: Tuning) => void;
+}) {
+  const offered = useModels()[agent] ?? [];
+  // A model saved before it left the list stays selectable.
+  const listed = !value?.model || offered.some((model) => model.value === value.model);
+  const choices = [{ value: DEFAULT, label: "Default model" }]
+    .concat(offered)
+    .concat(listed ? [] : [{ value: value!.model!, label: value!.model! }]);
+  const efforts = [{ value: DEFAULT, label: "Default effort" }].concat(
+    EFFORTS[agent].map((effort) => ({ value: effort, label: effort })),
+  );
+  const pick = (field: keyof Tuning, choice: string | null) =>
+    onChange({ ...value, [field]: choice === DEFAULT ? undefined : (choice ?? undefined) });
+
+  return (
+    <>
+      <Choice
+        label={`${agent} model`}
+        className="w-full min-w-0 flex-1"
+        items={choices}
+        disabled={!value}
+        value={value?.model ?? DEFAULT}
+        onChange={(model) => pick("model", model)}
+      />
+      <Choice
+        label={`${agent} effort`}
+        items={efforts}
+        disabled={!value}
+        value={value?.effort ?? DEFAULT}
+        onChange={(effort) => pick("effort", effort)}
+      />
+    </>
+  );
+}
+
+export function Choice({
+  label,
+  className,
+  items,
+  disabled,
+  value,
+  onChange,
+}: {
+  label: string;
+  className?: string;
+  items: { value: string; label: string }[];
+  disabled?: boolean;
+  value: string;
+  onChange: (value: string | null) => void;
+}) {
+  return (
+    <Select items={items} disabled={disabled} value={value} onValueChange={onChange}>
+      <SelectTrigger aria-label={label} className={className}>
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {items.map((item) => (
+          <SelectItem key={item.value} value={item.value}>
+            {item.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }

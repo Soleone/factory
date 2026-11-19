@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type { Candidates, Snapshot } from "./backend/types.ts";
+import type { Candidates, Model, Snapshot } from "./backend/types.ts";
 
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
   const response = await fetch(path, {
@@ -24,6 +24,7 @@ export const api = {
   mergeTrain: (ids: string[]) => call("POST", "/api/train", { ids }),
   close: (id: string) => call("POST", `/api/jobs/${id}/close`),
   move: (id: string, index: number) => call("POST", `/api/jobs/${id}/move`, { index }),
+  models: () => call<Record<string, Model[]>>("GET", "/api/models"),
   saveSettings: (settings: Snapshot["settings"]) => call("PUT", "/api/settings", settings),
   turnOn: (run: Pick<Snapshot["settings"], "agents" | "limit" | "until">) =>
     call("POST", "/api/on", run),

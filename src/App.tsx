@@ -103,7 +103,7 @@ export function App() {
         </TabsContent>
         {/* Kept mounted so a reply keeps streaming in while another tab is open. */}
         <TabsContent value="plan" keepMounted>
-          <PlanView prompt={plan} onPromptChange={setPlan} />
+          <PlanView agent={snapshot.settings.chat.agent} prompt={plan} onPromptChange={setPlan} />
         </TabsContent>
       </Tabs>
     </div>

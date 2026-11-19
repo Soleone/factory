@@ -27,7 +27,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { ItemGroup } from "@/components/ui/item";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { day, itemTitle, minutes, OUTCOME_BADGE, tuning } from "@/format";
+import { agentName, day, itemTitle, minutes, OUTCOME_BADGE, tuning } from "@/format";
 import { Row } from "@/Row";
 
 type Prs = Snapshot["prs"];
@@ -226,6 +226,7 @@ export function ResultsView({
             act={act}
             car={train[job.id]}
             onAsk={onAsk}
+            asked={snapshot.settings.chat.agent}
             disabled={dismissing && selected.has(job.id)}
             selection={
               canDismiss(job) && (
@@ -250,6 +251,7 @@ function Result({
   act,
   car,
   onAsk,
+  asked,
   disabled: dismissing,
   selection,
 }: {
@@ -258,6 +260,8 @@ function Result({
   act: Act;
   car?: TrainCar;
   onAsk: (question: string) => void;
+  /** The agent the Plan chat talks to. */
+  asked: string;
   disabled: boolean;
   selection: ReactNode;
 }) {
@@ -349,7 +353,7 @@ function Result({
       )}
       {question && (
         <Button variant="outline" size="sm" onClick={() => onAsk(question)}>
-          Ask Pi
+          Ask {agentName(asked)}
         </Button>
       )}
       {canDismiss(job) && (

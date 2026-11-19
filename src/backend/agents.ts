@@ -48,6 +48,58 @@ export function agent(name: string, { model, effort }: Tuning = {}): Agent {
   throw new Error(`unknown agent ${name} (known: ${AGENT_NAMES.join(", ")})`);
 }
 
+/**
+ * How the Plan chat starts an agent: Pi in RPC mode, Claude Code streaming JSON both ways (chat.ts
+ * reads each). Only tools for looking and running commands; it changes the queue through the
+ * factory CLI. Claude Code's are bypassed like a run's, since nobody is there to answer a prompt.
+ */
+export function chatAgent(
+  name: string,
+  { model, effort }: Tuning,
+  context: string,
+): { command: string; args: string[] } {
+  const pick = model ? ["--model", model] : [];
+  if (name === "claude")
+    return {
+      command: "claude",
+      args: [
+        "-p",
+        "--input-format",
+        "stream-json",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--include-partial-messages",
+        "--replay-user-messages",
+        "--no-session-persistence",
+        "--permission-mode",
+        "bypassPermissions",
+        "--tools",
+        "Read,Bash,Grep,Glob",
+        "--append-system-prompt",
+        context,
+        ...pick,
+        ...(effort ? ["--effort", effort] : []),
+      ],
+    };
+  if (name === "pi")
+    return {
+      command: "pi",
+      args: [
+        "--mode",
+        "rpc",
+        "--no-session",
+        "--tools",
+        "read,bash,grep,find,ls",
+        "--append-system-prompt",
+        context,
+        ...pick,
+        ...(effort ? ["--thinking", effort] : []),
+      ],
+    };
+  throw new Error(`unknown agent ${name} (known: ${AGENT_NAMES.join(", ")})`);
+}
+
 /** Only the end of the log decides: the agent's own work earlier on may mention limits too. */
 export function classify(agent: Agent, code: number, log: string): Exclude<Outcome, "timeout"> {
   const tail = log.slice(-8000);

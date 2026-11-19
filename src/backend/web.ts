@@ -2,7 +2,9 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { AGENT_NAMES } from "./agents.ts";
 import { chat } from "./chat.ts";
+import { agentModels } from "./models.ts";
 import { addJobs, moveJob, queueConflicts, readJobs, removeJob, retryJob } from "./jobs.ts";
 import { turnOff, turnOn } from "./power.ts";
 import { closePr, mergePr, prCache, readPrDetails, rebasePr } from "./review.ts";
@@ -17,7 +19,15 @@ import {
   runningPid,
   writeSettings,
 } from "./state.ts";
-import { canMerge, canRebase, prUrl, type Settings, type Snapshot, type Status } from "./types.ts";
+import {
+  canMerge,
+  canRebase,
+  prUrl,
+  type Model,
+  type Settings,
+  type Snapshot,
+  type Status,
+} from "./types.ts";
 
 /** The built page; under pn dev, Vite serves it instead and proxies /api and /runs here. */
 const WEB = fileURLToPath(new URL("./web", import.meta.url));
@@ -35,6 +45,21 @@ export function serve(state: string, port: number, host: string): Server {
   const prs = prCache();
   const train = mergeTrain(prs, (id, url, files) => queueConflicts(state, id, url, files));
   const planner = chat(state);
+  // Listing takes a second or two per agent, and the lists rarely change while serve runs.
+  const models = new Map<string, Promise<Model[]>>();
+  function modelsOf(name: string): Promise<Model[]> {
+    if (!models.has(name))
+      models.set(
+        name,
+        agentModels(name).catch((error: Error) => {
+          // Not installed, say: the page offers the default model only, and asks again next time.
+          console.error(`factory: can't list ${name}'s models: ${error.message}`);
+          models.delete(name);
+          return [];
+        }),
+      );
+    return models.get(name)!;
+  }
   function jobPr(id: string) {
     const job = readJobs(state).find((job) => job.id === id);
     const url = job && prUrl(job);
@@ -91,7 +116,15 @@ export function serve(state: string, port: number, host: string): Server {
       await closePr(url);
       await prs.fresh(url);
     },
-    "PUT /api/settings": (body: Settings) => writeSettings(state, checkSettings(body)),
+    "GET /api/models": async () =>
+      Object.fromEntries(
+        await Promise.all(AGENT_NAMES.map(async (name) => [name, await modelsOf(name)])),
+      ),
+    "PUT /api/settings": (body: Settings) => {
+      const before = JSON.stringify(readSettings(state).chat);
+      writeSettings(state, checkSettings(body));
+      if (JSON.stringify(body.chat) !== before) planner.reset();
+    },
     "POST /api/on": (body: Pick<Settings, "agents" | "limit" | "until">) => {
       checkSettings({ ...readSettings(state), ...body });
       return turnOn(state, runArgs(body));

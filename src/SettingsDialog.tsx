@@ -16,8 +16,9 @@ import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { repoName } from "@/format";
-import { RunFields } from "@/RunFields";
+import { AGENT_NAMES } from "@/backend/agents.ts";
+import { agentName, repoName } from "@/format";
+import { Choice, RunFields, TuningFields } from "@/RunFields";
 
 /** A gear button that opens the defaults every run starts from, and what auto mode may queue. */
 export function SettingsDialog({ snapshot, act }: { snapshot: Snapshot; act: Act }) {
@@ -84,6 +85,7 @@ function SettingsForm({
         <TabsList>
           <TabsTrigger value="runs">Runs</TabsTrigger>
           <TabsTrigger value="auto">Auto mode</TabsTrigger>
+          <TabsTrigger value="chat">Plan chat</TabsTrigger>
         </TabsList>
         <div className="mt-2 grid">
           <StackedTabsContent value="runs">
@@ -155,6 +157,29 @@ function SettingsForm({
                     </ToggleGroupItem>
                   ))}
                 </ToggleGroup>
+              </Field>
+            </FieldGroup>
+          </StackedTabsContent>
+          <StackedTabsContent value="chat">
+            <FieldGroup>
+              <FieldDescription>
+                The agent you plan the queue with. Changing it starts a new chat.
+              </FieldDescription>
+              <Field orientation="horizontal">
+                <Choice
+                  label="Chat agent"
+                  className="w-24 flex-none"
+                  items={AGENT_NAMES.map((name) => ({ value: name, label: agentName(name) }))}
+                  value={draft.chat.agent}
+                  onChange={(agent) => agent && setDraft({ ...draft, chat: { agent } })}
+                />
+                <TuningFields
+                  agent={draft.chat.agent}
+                  value={draft.chat}
+                  onChange={(tuning) =>
+                    setDraft({ ...draft, chat: { ...tuning, agent: draft.chat.agent } })
+                  }
+                />
               </Field>
             </FieldGroup>
           </StackedTabsContent>
