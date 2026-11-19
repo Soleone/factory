@@ -34,33 +34,15 @@ function seed(): Snapshot {
   const at = new Date().toISOString();
   const run = at.slice(0, 19).replaceAll(":", "");
   const jobs: Job[] = [
-    {
-      id: "job1",
-      item: items[0],
-      source: "pick",
+    ...items.slice(0, 3).map((item, index): Job => ({
+      id: `job${index + 1}`,
+      item,
+      source: index === 2 ? "auto" : "pick",
       added: at,
       state: "queued",
       attempts: [],
       notes: [],
-    },
-    {
-      id: "job2",
-      item: items[1],
-      source: "pick",
-      added: at,
-      state: "queued",
-      attempts: [],
-      notes: [],
-    },
-    {
-      id: "job3",
-      item: items[2],
-      source: "auto",
-      added: at,
-      state: "queued",
-      attempts: [],
-      notes: [],
-    },
+    })),
     ...items.slice(3, 7).map((item, index): Job => {
       const id = `result${index + 1}`;
       const failed = index === 2;
