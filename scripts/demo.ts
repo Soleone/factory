@@ -55,24 +55,23 @@ function seed(): Snapshot {
     prs: Object.fromEntries(
       jobs.flatMap((job, index) => {
         const url = prUrl(job);
-        return url
-          ? [
-              [
-                url,
-                {
-                  state: "OPEN",
-                  draft: false,
-                  title: job.item.title,
-                  summary: "Sample changes and tests for review. This PR is not real.",
-                  additions: 28,
-                  deletions: 5,
-                  files: ["src/index.ts", "tests/index.test.ts"],
-                  checks: index === 3 ? "passing" : "failing",
-                  conflicts: false,
-                },
-              ],
-            ]
-          : [];
+        if (!url) return [];
+        return [
+          [
+            url,
+            {
+              state: "OPEN",
+              draft: false,
+              title: job.item.title,
+              summary: "Sample changes and tests for review. This PR is not real.",
+              additions: 28,
+              deletions: 5,
+              files: ["src/index.ts", "tests/index.test.ts"],
+              checks: index === 3 ? "passing" : "failing",
+              conflicts: false,
+            },
+          ],
+        ];
       }),
     ),
   };
