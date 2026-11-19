@@ -1,10 +1,12 @@
 import { useState } from "react";
-import { Compass, ListOrdered, MessageSquare, PackageCheck } from "lucide-react";
+import { Bot, Compass, ListOrdered, PackageCheck } from "lucide-react";
 import { useFactory } from "@/api";
 import { ThemePicker } from "@/components/soleone/theme-picker";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/tooltip/tooltip";
 import { BrowseView } from "@/BrowseView";
 import { Controls } from "@/Controls";
 import { Logo } from "@/Logo";
@@ -17,7 +19,7 @@ import { clock, runStart } from "@/format";
 export function App() {
   const { snapshot, error, act } = useFactory();
   const [tab, setTab] = useState("queue");
-  /** The Plan tab's draft, here so other tabs can fill it with a question. */
+  /** The Live Agent draft, here so other tabs can fill it with a question. */
   const [plan, setPlan] = useState("");
 
   if (!snapshot)
@@ -68,24 +70,40 @@ export function App() {
         </p>
       )}
       <Tabs value={tab} onValueChange={setTab}>
-        <TabsList>
-          <TabsTrigger value="queue">
-            <ListOrdered />
-            Queue{queued ? ` (${queued})` : ""}
-          </TabsTrigger>
-          <TabsTrigger value="browse">
-            <Compass />
-            Browse
-          </TabsTrigger>
-          <TabsTrigger value="results">
-            <PackageCheck />
-            Results{failed ? ` (${failed} failed)` : ""}
-          </TabsTrigger>
-          <TabsTrigger value="plan">
-            <MessageSquare />
-            Plan
-          </TabsTrigger>
-        </TabsList>
+        <div className="flex items-center gap-2">
+          <TabsList>
+            <TabsTrigger value="queue">
+              <ListOrdered />
+              Queue{queued ? ` (${queued})` : ""}
+            </TabsTrigger>
+            <TabsTrigger value="browse">
+              <Compass />
+              Browse
+            </TabsTrigger>
+            <TabsTrigger value="results">
+              <PackageCheck />
+              Results{failed ? ` (${failed} failed)` : ""}
+            </TabsTrigger>
+          </TabsList>
+          <div className="ml-auto flex items-center gap-1">
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant={tab === "plan" ? "secondary" : "ghost"}
+                    size="icon"
+                    aria-label="Live Agent"
+                    aria-pressed={tab === "plan"}
+                    onClick={() => setTab("plan")}
+                  />
+                }
+              >
+                <Bot />
+              </TooltipTrigger>
+              <TooltipContent>Live Agent</TooltipContent>
+            </Tooltip>
+          </div>
+        </div>
         <TabsContent value="queue">
           <QueueView snapshot={snapshot} act={act} onBrowse={() => setTab("browse")} />
         </TabsContent>

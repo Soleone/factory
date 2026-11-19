@@ -23,11 +23,11 @@ Each result links the PR or issue the agent opened. From the page you can read a
 
 **Merge train:** select several results and merge them in one go. PRs merge one after another per repo, since each merge moves the base under the next one; repos go in parallel. The train waits for checks, rebases a PR that conflicts, and skips one it can't merge, with the reason. When a rebase stops on real conflicts, a job to resolve them goes to the front of the queue, so an agent picks it up on the next run.
 
-## Plan chat
+## Live Agent
 
-The Plan tab is a chat with an agent about what to queue. It reads the candidates, the queue and past results, proposes a few jobs that won't step on each other, and adds them through the CLI once you agree. It never turns the factory on, merges or closes PRs, or changes your repos. That is an instruction to the agent, not a sandbox: it has a shell, like the agents doing jobs. Results that failed, or that the train skipped, have an **Ask** button that starts the chat with the question already written.
+Live Agent, the robot button right of the tabs, is a chat with an agent about what to queue. It reads the candidates, the queue and past results, proposes a few jobs that won't step on each other, and adds them through the CLI once you agree. It never turns the factory on, merges or closes PRs, or changes your repos. That is an instruction to the agent, not a sandbox: it has a shell, like the agents doing jobs. Results that failed, or that the train skipped, have an **Ask** button that starts the chat with the question already written.
 
-Settings > Plan chat picks the agent (Claude Code or Pi), its model and effort. The same model and effort pickers serve runs. Model choices are short lists: Pi's scoped models (`enabledModels` in Pi's settings, the ones Ctrl+P cycles through), and Claude Code's current models (opus, sonnet, fable, haiku). The efforts on offer are the chosen model's. When one of Pi's extensions asks something mid-chat, the page shows the question. The chat survives a restart of `factory serve`: the page shows it again and the agent resumes its own session, so it still knows what was said. New chat starts over.
+Settings > Live Agent picks the agent (Claude Code or Pi), its model and effort. The same model and effort pickers serve runs. Model choices are short lists: Pi's scoped models (`enabledModels` in Pi's settings, the ones Ctrl+P cycles through), and Claude Code's current models (opus, sonnet, fable, haiku). The efforts on offer are the chosen model's. When one of Pi's extensions asks something mid-chat, the page shows the question. The chat survives a restart of `factory serve`: the page shows it again and the agent resumes its own session, so it still knows what was said. New chat starts over.
 
 ## Commands
 
@@ -56,11 +56,11 @@ Each agent gets one worktree per repo, under the state folder, reused from job t
 
 In `$DATA/apps/factory/` when `DATA` is set, otherwise `~/.local/share/factory/`:
 
-- `settings.json`: registered agents with their model and effort, the Plan chat's agent, limit, until, timeout, auto mode (on, levels, plays, repos)
+- `settings.json`: registered agents with their model and effort, the agent Live Agent uses, limit, until, timeout, auto mode (on, levels, plays, repos)
 - `jobs.jsonl`: append-only events (add, remove, move, start, attempt, requeue, retry), so the CLI, the factory and the page never overwrite each other
 - `candidates.json`: the cached `workwork --all --json`, which takes minutes; refreshed from the page, or by auto mode when older than 6 hours
 - `runs/<run>/<job>-<attempt>/`: `prompt.md` and `agent.log`
-- `chat.json`, `chat.jsonl`, `chat-sessions/`: the Plan chat's agent session, what the page shows, and Pi's session files (Claude Code keeps its own)
+- `chat.json`, `chat.jsonl`, `chat-sessions/`: the Live Agent session, what the page shows, and Pi's session files (Claude Code keeps its own)
 - `worktrees/<agent>/<repo>/`
 - `status.json`, `factory.pid`, `factory.log`: the current run
 

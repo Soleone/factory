@@ -85,7 +85,7 @@ function SettingsForm({
         <TabsList>
           <TabsTrigger value="runs">Runs</TabsTrigger>
           <TabsTrigger value="auto">Auto mode</TabsTrigger>
-          <TabsTrigger value="chat">Plan chat</TabsTrigger>
+          <TabsTrigger value="chat">Live Agent</TabsTrigger>
         </TabsList>
         <div className="mt-2 grid">
           <StackedTabsContent value="runs">

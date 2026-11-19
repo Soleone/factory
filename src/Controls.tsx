@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Switch } from "@/components/ui/switch";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/tooltip/tooltip";
 import { RunFields, type Run } from "@/RunFields";
 
 /** Auto mode (fills the queue) and the factory's power switch (works it). */
@@ -22,16 +23,21 @@ export function Controls({ snapshot, act }: { snapshot: Snapshot; act: Act }) {
 
   return (
     <div className="flex items-center gap-4">
-      <Field orientation="horizontal">
-        <Checkbox
-          id="auto"
-          checked={settings.auto.on}
-          onCheckedChange={(checked) =>
-            act(() => api.saveSettings({ ...settings, auto: { ...settings.auto, on: checked } }))
-          }
-        />
-        <FieldLabel htmlFor="auto">Auto</FieldLabel>
-      </Field>
+      <Tooltip>
+        <TooltipTrigger render={<Field orientation="horizontal" />}>
+          <Checkbox
+            id="auto"
+            checked={settings.auto.on}
+            onCheckedChange={(checked) =>
+              act(() => api.saveSettings({ ...settings, auto: { ...settings.auto, on: checked } }))
+            }
+          />
+          <FieldLabel htmlFor="auto">Auto</FieldLabel>
+        </TooltipTrigger>
+        <TooltipContent>
+          Keep the queue topped up from candidates while the factory is on
+        </TooltipContent>
+      </Tooltip>
       <Field orientation="horizontal">
         <Switch
           id="power"
