@@ -105,8 +105,8 @@ export function serve(state: string, port: number, host: string): Server {
       );
     },
     "GET /api/repos": () => clonableRepos(),
-    "POST /api/repos/clone": async (body: { name: string; folder: string }) => {
-      await cloneRepo(body.name, body.folder);
+    "POST /api/repos/clone": async (body: { name: string }) => {
+      await cloneRepo(body.name);
       void refreshCandidates(state, "workwork").catch((error: Error) =>
         console.error(`factory: workwork failed: ${error.message}`),
       );
