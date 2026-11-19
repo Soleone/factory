@@ -113,7 +113,7 @@ export function taskState(job: Job | undefined, prs: Snapshot["prs"]): TaskState
 }
 
 /** A muted repo before the title, as the same name reads in every list. */
-export function TaskTitle({ item }: { item: Item }) {
+function TaskTitle({ item }: { item: Item }) {
   return (
     <>
       <span className="font-normal text-muted-foreground">{repoName(item.repo)}:</span>{" "}

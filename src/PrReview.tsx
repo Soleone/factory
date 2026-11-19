@@ -15,7 +15,7 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-export const SCROLL =
+const SCROLL =
   "max-h-[60dvh] overflow-auto rounded-md border bg-muted/50 p-3 font-mono text-xs leading-relaxed";
 
 /** GitHub-flavored PR bodies, styled with the theme since the page has no prose styles. */

@@ -3,15 +3,6 @@ import type { Worker } from "./backend/types.ts";
 export const clock = (iso: string) =>
   new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
-export const day = (iso: string) =>
-  new Date(iso).toLocaleString([], {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-
 export function ago(iso: string): string {
   const minutes = Math.round((Date.now() - Date.parse(iso)) / 60_000);
   if (minutes < 1) return "just now";
@@ -21,9 +12,6 @@ export function ago(iso: string): string {
 }
 
 export const minutesSince = (iso: string) => Math.round((Date.now() - Date.parse(iso)) / 60_000);
-
-export const minutes = (start: string, end: string) =>
-  `${Math.max(1, Math.round((Date.parse(end) - Date.parse(start)) / 60_000))} min`;
 
 export const repoName = (path: string) => path.split("/").filter(Boolean).at(-1) ?? path;
 
