@@ -272,15 +272,21 @@ describe("the factory", () => {
     return { calls: () => readFileSync(join(bin, "calls"), "utf8"), answer, viewPath };
   }
 
-  /** A clone with a remote, and a fake workwork offering the given ids in it. */
-  function setup(ids: string[]) {
-    gh();
+  function repoWithOrigin() {
     const origin = mkdtempSync(join(scratch, "origin-"));
     sh(origin, "git", "init", "-q", "--bare");
     const repo = mkdtempSync(join(scratch, "repo-"));
-    sh(repo, "git", "clone", "-q", origin, ".");
+    sh(repo, "git", "init", "-q");
     sh(repo, "git", "commit", "-q", "--allow-empty", "-m", "start");
-    sh(repo, "git", "push", "-q", "origin", "main");
+    sh(repo, "git", "remote", "add", "origin", origin);
+    sh(repo, "git", "push", "-q", "-u", "origin", "main");
+    return { repo, origin };
+  }
+
+  /** A repo with a remote, and a fake workwork offering the given ids in it. */
+  function setup(ids: string[]) {
+    gh();
+    const { repo } = repoWithOrigin();
     const items = ids.map((id) => ({ ...item(repo, id), label: "repo" }));
     const bin = mkdtempSync(join(scratch, "bin-"));
     script(
@@ -594,8 +600,7 @@ ${report(base.state, { kind: "ask", text: "A or B?" })}`,
   test("serve lists a newly cloned repo even when workwork finds no candidates", async () => {
     const source = mkdtempSync(join(scratch, "src-"));
     const state = mkdtempSync(join(scratch, "state-"));
-    const origin = mkdtempSync(join(scratch, "origin-"));
-    sh(origin, "git", "init", "-q", "--bare");
+    const { origin } = repoWithOrigin();
     const bin = mkdtempSync(join(scratch, "bin-"));
     script(bin, "gh", `git clone -q '${origin}' "$4"`);
     script(bin, "workwork", "echo '[]'");
