@@ -1,5 +1,6 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "entry": ["src/backend/cli.ts"],
-  "ignore": ["src/components/ui/**", "src/components/soleone/**"]
+  "ignore": ["src/components/ui/**", "src/components/soleone/**"],
+  "ignoreBinaries": ["pi"]
 }

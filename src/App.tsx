@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Compass, ListOrdered, PackageCheck } from "lucide-react";
+import { Compass, ListOrdered, MessageSquare, PackageCheck } from "lucide-react";
 import { useFactory } from "@/api";
 import { ThemePicker } from "@/components/soleone/theme-picker";
 import { Badge } from "@/components/ui/badge";
@@ -7,6 +7,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { BrowseView } from "@/BrowseView";
 import { Controls } from "@/Controls";
+import { PlanView } from "@/PlanView";
 import { QueueView } from "@/QueueView";
 import { ResultsView } from "@/ResultsView";
 import { SettingsDialog } from "@/SettingsDialog";
@@ -77,6 +78,10 @@ export function App() {
             <PackageCheck />
             Results{failed ? ` (${failed} failed)` : ""}
           </TabsTrigger>
+          <TabsTrigger value="plan">
+            <MessageSquare />
+            Plan
+          </TabsTrigger>
         </TabsList>
         <TabsContent value="queue">
           <QueueView snapshot={snapshot} act={act} onBrowse={() => setTab("browse")} />
@@ -86,6 +91,10 @@ export function App() {
         </TabsContent>
         <TabsContent value="results">
           <ResultsView snapshot={snapshot} act={act} />
+        </TabsContent>
+        {/* Kept mounted so a reply keeps streaming in while another tab is open. */}
+        <TabsContent value="plan" keepMounted>
+          <PlanView />
         </TabsContent>
       </Tabs>
     </div>

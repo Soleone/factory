@@ -2,6 +2,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { chat } from "./chat.ts";
 import { addJobs, moveJob, queueConflicts, readJobs, removeJob, retryJob } from "./jobs.ts";
 import { turnOff, turnOn } from "./power.ts";
 import { closePr, mergePr, prCache, readPrDetails, rebasePr } from "./review.ts";
@@ -33,6 +34,7 @@ const TYPES: Record<string, string> = {
 export function serve(state: string, port: number, host: string): Server {
   const prs = prCache();
   const train = mergeTrain(prs, (id, url, files) => queueConflicts(state, id, url, files));
+  const planner = chat(state);
   function jobPr(id: string) {
     const job = readJobs(state).find((job) => job.id === id);
     const url = job && prUrl(job);
@@ -81,6 +83,9 @@ export function serve(state: string, port: number, host: string): Server {
     },
     "POST /api/train": (body: { ids: string[] }) =>
       train.start(body.ids.map((id) => ({ id, url: jobPr(id) }))),
+    "POST /api/chat": (body: { message: string }) => planner.prompt(body.message),
+    "POST /api/chat/abort": () => planner.abort(),
+    "POST /api/chat/reset": () => planner.reset(),
     "POST /api/jobs/close": async (_, id) => {
       const { url } = await openPr(id);
       await closePr(url);
@@ -101,6 +106,7 @@ export function serve(state: string, port: number, host: string): Server {
     const [, jobId, action] = /^\/api\/jobs\/(\w+)\/(\w+)$/.exec(path) ?? [];
     const route = routes[`${request.method} ${jobId ? `/api/jobs/${action}` : path}`];
     try {
+      if (`${request.method} ${path}` === "GET /api/chat") return planner.listen(response);
       if (route) {
         // Each route says what body it takes; JSON from the page is trusted to match it, the commands check the rest.
         const result = await route((await body(request)) as never, jobId);

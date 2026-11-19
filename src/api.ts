@@ -28,6 +28,9 @@ export const api = {
   turnOn: (run: Pick<Snapshot["settings"], "agents" | "limit" | "until">) =>
     call("POST", "/api/on", run),
   turnOff: () => call("POST", "/api/off"),
+  chat: (message: string) => call("POST", "/api/chat", { message }),
+  abortChat: () => call("POST", "/api/chat/abort"),
+  resetChat: () => call("POST", "/api/chat/reset"),
 };
 
 /** Runs a change against the factory; the page reloads after it and shows what went wrong, if anything. */

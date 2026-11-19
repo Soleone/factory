@@ -595,6 +595,55 @@ describe("the factory", () => {
     }
   });
 
+  test("the Plan chat streams Pi's records to every page and replays them to a page that opens later", async () => {
+    const base = setup([]);
+    const bin = mkdtempSync(join(scratch, "pi-"));
+    // Pi in RPC mode: one JSON record per line each way.
+    const reply = '{"role":"assistant","content":[{"type":"text","text":"Queue a"}]}';
+    script(
+      bin,
+      "pi",
+      `while read -r line; do case "$line" in
+*'"prompt"'*) echo '{"type":"agent_start"}'; echo '{"type":"message_end","message":${reply}}'; echo '{"type":"agent_settled"}' ;;
+*get_messages*) echo '{"type":"response","command":"get_messages","success":true,"data":{"messages":[${reply}]}}' ;;
+esac; done`,
+    );
+    process.env.PATH = `${bin}:${process.env.PATH}`;
+    const server = serve(base.state, 0, "127.0.0.1");
+    await once(server, "listening");
+    const { port } = server.address() as AddressInfo;
+    const url = `http://127.0.0.1:${port}/api/chat`;
+    /** Opens the page's event stream; `until` resolves with the records up to one of that type. */
+    async function page() {
+      const reader = (await fetch(url)).body!.pipeThrough(new TextDecoderStream()).getReader();
+      let text = "";
+      return async (type: string) => {
+        for (;;) {
+          const records = [...text.matchAll(/^data: (.*)$/gm)].map(([, json]) => JSON.parse(json));
+          if (records.some((record) => record.type === type)) return records;
+          text += (await reader.read()).value;
+        }
+      };
+    }
+    try {
+      const first = await page();
+      await fetch(url, { method: "POST", body: JSON.stringify({ message: "what next?" }) });
+      expect((await first("agent_settled")).map((record) => record.type)).toEqual([
+        "agent_start",
+        "message_end",
+        "agent_settled",
+      ]);
+      const later = await page();
+      const [replay] = await later("response");
+      expect(replay.data.messages[0].content[0].text).toBe("Queue a");
+      await fetch(`${url}/reset`, { method: "POST" });
+      expect((await first("reset")).at(-1).type).toBe("reset");
+    } finally {
+      server.closeAllConnections();
+      server.close();
+    }
+  });
+
   test.each([false, true])(
     "serve rebases a PR without guessing conflict resolutions (conflict: %s)",
     async (conflict) => {

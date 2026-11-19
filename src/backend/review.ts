@@ -81,10 +81,13 @@ export const closePr = (url: string) => gh(["pr", "close", url, "--delete-branch
 
 /** A rebase that stopped on conflicts git can't resolve; nothing was pushed. */
 export class Conflicts extends Error {
-  constructor(readonly files: string[]) {
+  // A plain field: `pn dev` runs this file under Node's type stripping, which rejects parameter properties.
+  readonly files: string[];
+  constructor(files: string[]) {
     super(
       `Rebase stopped. Resolve these conflicts manually; no changes were pushed:\n${files.join("\n")}`,
     );
+    this.files = files;
   }
 }
 

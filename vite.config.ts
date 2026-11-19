@@ -9,7 +9,12 @@ import { DEFAULT_THEME, THEME_STORAGE_KEY } from "./src/theme/config";
 
 // Vendored code: shadcn primitives and @soleone registry items. They stay byte-for-byte upstream so
 // `shadcn add --overwrite` can update them; `kit check` verifies that.
-const vendored = ["src/components/ui/**", "src/components/soleone/**", "src/components/live/**"];
+const vendored = [
+  "src/components/ui/**",
+  "src/components/soleone/**",
+  "src/components/live/**",
+  "src/hooks/**",
+];
 
 const noBaseUi = {
   group: ["@base-ui/react", "@base-ui/react/*"],
