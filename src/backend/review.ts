@@ -1,4 +1,6 @@
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { output } from "./state.ts";
 import type { Item, Pr } from "./types.ts";
 
@@ -28,7 +30,8 @@ async function readPr(url: string): Promise<Pr> {
     additions: number;
     deletions: number;
     files: { path: string }[];
-    mergeable: string;
+    mergeable: "UNKNOWN" | "CONFLICTING" | "MERGEABLE";
+    isCrossRepository: boolean;
     statusCheckRollup: Check[];
   } = JSON.parse(
     await gh([
@@ -36,7 +39,7 @@ async function readPr(url: string): Promise<Pr> {
       "view",
       url,
       "--json",
-      "state,isDraft,title,body,additions,deletions,files,mergeable,statusCheckRollup",
+      "state,isDraft,title,body,additions,deletions,files,mergeable,isCrossRepository,statusCheckRollup",
     ]),
   );
   return {
@@ -54,7 +57,8 @@ async function readPr(url: string): Promise<Pr> {
     deletions: raw.deletions,
     files: raw.files.map((file) => file.path),
     checks: checks(raw.statusCheckRollup),
-    conflicts: raw.mergeable === "CONFLICTING",
+    conflicts: raw.mergeable === "UNKNOWN" ? null : raw.mergeable === "CONFLICTING",
+    fork: raw.isCrossRepository,
   };
 }
 
@@ -72,13 +76,58 @@ function checks(rollup: Check[]): Pr["checks"] {
 export const mergePr = (url: string) => gh(["pr", "merge", url, "--squash", "--delete-branch"]);
 export const closePr = (url: string) => gh(["pr", "close", url, "--delete-branch"]);
 
+export async function rebasePr(url: string): Promise<void> {
+  const pull = /^(https:\/\/github\.com\/[\w.-]+\/[\w.-]+)\/pull\/(\d+)$/.exec(url);
+  if (!pull) throw new Error("Rebase requires a github.com pull request URL");
+  const [, repo, number] = pull;
+  const pr: { baseRefName: string; headRefName: string; isCrossRepository: boolean } = JSON.parse(
+    await gh(["pr", "view", url, "--json", "baseRefName,headRefName,isCrossRepository"]),
+  );
+  if (pr.isCrossRepository || pr.baseRefName === pr.headRefName)
+    throw new Error("Rebase requires a separate PR branch in the same repository");
+
+  const dir = await mkdtemp(join(tmpdir(), "factory-rebase-"));
+  const git = (...args: string[]) => output("git", args, dir);
+  const remote = `${repo}.git`;
+  const base = "refs/factory/base";
+  const head = "refs/factory/head";
+  const branch = `refs/heads/${pr.headRefName}`;
+  try {
+    await git("init", "--quiet");
+    await git("config", "--add", "credential.https://github.com.helper", "");
+    await git("config", "--add", "credential.https://github.com.helper", "!gh auth git-credential");
+    await git(
+      "fetch",
+      "--no-tags",
+      remote,
+      `refs/heads/${pr.baseRefName}:${base}`,
+      `refs/pull/${number}/head:${head}`,
+    );
+    const before = (await git("rev-parse", head)).trim();
+    await git("checkout", "--quiet", "--detach", head);
+    try {
+      await git("rebase", "--rebase-merges", base);
+    } catch (error) {
+      const conflicts = (await git("diff", "--name-only", "--diff-filter=U")).trim();
+      if (!conflicts) throw error;
+      throw new Error(
+        `Rebase stopped. Resolve these conflicts manually; no changes were pushed:\n${conflicts}`,
+      );
+    }
+    // Only update the branch if it still points at the PR head we rebased.
+    await git("push", `--force-with-lease=${branch}:${before}`, remote, `HEAD:${branch}`);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
 /** Run outside any repo, so --delete-branch only touches GitHub, never a local checkout. */
 const gh = (args: string[]) => output("gh", args, tmpdir());
 
 /**
  * PR status for the page. gh takes a second or more per PR, so this answers from what it last
- * fetched and refreshes open PRs in the background at most once a minute; merged and closed ones
- * don't change.
+ * fetched and refreshes open PRs in the background. While GitHub calculates mergeability, retry
+ * sooner so the page doesn't wait a minute after a rebase.
  */
 export function prCache() {
   const cache = new Map<string, { at: number; pr?: Pr }>();
@@ -97,7 +146,8 @@ export function prCache() {
       const prs: Record<string, Pr> = {};
       for (const url of urls) {
         const entry = cache.get(url);
-        if (!entry || ((entry.pr?.state ?? "OPEN") === "OPEN" && Date.now() - entry.at > MINUTE))
+        const interval = entry?.pr?.conflicts === null ? 5_000 : MINUTE;
+        if (!entry || ((entry.pr?.state ?? "OPEN") === "OPEN" && Date.now() - entry.at > interval))
           refresh(url);
         const pr = cache.get(url)!.pr;
         if (pr) prs[url] = pr;

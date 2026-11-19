@@ -104,7 +104,9 @@ export type Pr = {
   deletions: number;
   files: string[];
   checks: "passing" | "failing" | "pending" | "none";
-  conflicts: boolean;
+  /** Null while GitHub is calculating mergeability. */
+  conflicts: boolean | null;
+  fork: boolean;
 };
 
 /** The PR of the job's latest attempt that linked one. */
@@ -115,5 +117,7 @@ export const prUrl = (job: Job) =>
 export const canMerge = (pr: Pr) =>
   pr.state === "OPEN" &&
   !pr.draft &&
-  !pr.conflicts &&
+  pr.conflicts === false &&
   (pr.checks === "passing" || pr.checks === "none");
+
+export const canRebase = (pr: Pr) => pr.state === "OPEN" && pr.conflicts === true && !pr.fork;

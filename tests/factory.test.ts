@@ -188,14 +188,15 @@ describe("the factory", () => {
     writeFileSync(join(bin, "list.json"), JSON.stringify(list));
     const answer = (view: Record<string, unknown>) =>
       writeFileSync(join(bin, "view.json"), JSON.stringify({ ...OPEN_PR, ...view }));
+    const viewPath = join(bin, "view.json");
     answer(view);
     script(
       bin,
       "gh",
-      `echo "$*" >> ${bin}/calls\ncase "$1 $2" in\n"pr list") cat ${bin}/list.json ;;\n"pr view") cat ${bin}/view.json ;;\nesac`,
+      `echo "$*" >> ${bin}/calls\ncase "$1 $2" in\n"pr list") cat ${bin}/list.json ;;\n"pr view") cat ${viewPath} ;;\n"pr merge") sed 's/"state":"OPEN"/"state":"MERGED"/' ${viewPath} > ${viewPath}.new && mv ${viewPath}.new ${viewPath} ;;\nesac`,
     );
     process.env.PATH = `${bin}:${process.env.PATH}`;
-    return { calls: () => readFileSync(join(bin, "calls"), "utf8"), answer };
+    return { calls: () => readFileSync(join(bin, "calls"), "utf8"), answer, viewPath };
   }
 
   /** A clone with a remote, and a fake workwork offering the given ids in it. */
@@ -257,6 +258,9 @@ describe("the factory", () => {
     deletions: 9,
     files: [{ path: "a.ts" }],
     mergeable: "MERGEABLE",
+    baseRefName: "main",
+    headRefName: "workwork/a",
+    isCrossRepository: false,
     statusCheckRollup: [{ conclusion: "SUCCESS" }, { state: "SUCCESS" }],
   };
 
@@ -534,11 +538,92 @@ describe("the factory", () => {
       expect(await (await merge()).json()).toEqual({
         error: `${pr} isn't ready to merge: see it on GitHub`,
       });
+      github.answer({ mergeable: "UNKNOWN" });
+      expect((await merge()).status).toBe(400);
       github.answer({});
       expect((await merge()).status).toBe(200);
       expect(github.calls()).toContain(`pr merge ${pr} --squash --delete-branch`);
+      const after = (await (await fetch(url("/api/state"))).json()) as Snapshot;
+      expect(after.prs[pr].state).toBe("MERGED");
     } finally {
       server.close();
     }
   });
+
+  test.each([false, true])(
+    "serve rebases a PR without guessing conflict resolutions (conflict: %s)",
+    async (conflict) => {
+      const base = setup(["a"]);
+      const { repo } = base;
+      const origin = sh(repo, "git", "remote", "get-url", "origin").trim();
+      const name = conflict ? "rebase-conflict" : "rebase-clear";
+      const pr = `https://github.com/o/${name}/pull/7`;
+      sh(
+        repo,
+        "git",
+        "config",
+        "--global",
+        `url.file://${origin}.insteadOf`,
+        `https://github.com/o/${name}.git`,
+      );
+      const github = gh({ mergeable: "CONFLICTING" });
+      agents({ claude: `echo 'opened ${pr}'` });
+      const job = base.pick("a");
+
+      writeFileSync(join(repo, "shared.txt"), "original\n");
+      sh(repo, "git", "add", ".");
+      sh(repo, "git", "commit", "-qm", "common base");
+      sh(repo, "git", "checkout", "-qb", "workwork/a");
+      writeFileSync(join(repo, "shared.txt"), "PR edit\n");
+      sh(repo, "git", "commit", "-qam", "PR edit");
+      sh(
+        repo,
+        "git",
+        "push",
+        "-q",
+        "origin",
+        "HEAD:refs/heads/workwork/a",
+        "HEAD:refs/pull/7/head",
+      );
+      const before = sh(repo, "git", "rev-parse", "HEAD");
+      sh(repo, "git", "checkout", "-q", "main");
+      writeFileSync(join(repo, conflict ? "shared.txt" : "other.txt"), "base edit\n");
+      sh(repo, "git", "add", ".");
+      sh(repo, "git", "commit", "-qm", "base edit");
+      sh(repo, "git", "push", "-q", "origin", "main");
+      await work(options(base));
+
+      script(
+        join(origin, "hooks"),
+        "post-receive",
+        `printf '%s\\n' '${JSON.stringify(OPEN_PR)}' > ${github.viewPath}`,
+      );
+      const server = serve(base.state, 0, "127.0.0.1");
+      await once(server, "listening");
+      const { port } = server.address() as AddressInfo;
+      const url = `http://127.0.0.1:${port}`;
+      try {
+        const response = await fetch(`${url}/api/jobs/${job.id}/rebase`, { method: "POST" });
+        const after = sh(origin, "git", "rev-parse", "refs/heads/workwork/a");
+        if (conflict) {
+          expect(response.status).toBe(400);
+          expect(await response.json()).toEqual({
+            error:
+              "Rebase stopped. Resolve these conflicts manually; no changes were pushed:\nshared.txt",
+          });
+          expect(after).toBe(before);
+        } else {
+          expect(response.status, await response.text()).toBe(200);
+          expect(after).not.toBe(before);
+          sh(origin, "git", "merge-base", "--is-ancestor", "main", after.trim());
+          expect(sh(origin, "git", "show", `${after.trim()}:shared.txt`)).toBe("PR edit\n");
+          expect(sh(repo, "git", "branch", "--show-current").trim()).toBe("main");
+          const snapshot = (await (await fetch(`${url}/api/state`)).json()) as Snapshot;
+          expect(snapshot.prs[pr]).toMatchObject({ state: "OPEN", conflicts: false });
+        }
+      } finally {
+        server.close();
+      }
+    },
+  );
 });

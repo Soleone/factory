@@ -1,8 +1,10 @@
 import { XIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { api, type Act } from "@/api";
+import { AttemptLog } from "@/AttemptLog";
 import {
   canMerge,
+  canRebase,
   prUrl,
   type Attempt,
   type Job,
@@ -183,7 +185,7 @@ function Result({
   job,
   prs,
   act,
-  disabled,
+  disabled: dismissing,
   selection,
 }: {
   job: Job;
@@ -192,10 +194,23 @@ function Result({
   disabled: boolean;
   selection: ReactNode;
 }) {
+  const [pending, setPending] = useState<"merge" | "rebase" | "close">();
   const last = job.attempts.at(-1)!;
   const url = prUrl(job);
   const pr = url ? prs[url] : undefined;
   const open = pr?.state === "OPEN";
+  const disabled = dismissing || pending !== undefined;
+  const primary = pr && (canRebase(pr) ? "rebase" : canMerge(pr) ? "merge" : undefined);
+
+  async function changePr(action: NonNullable<typeof pending>) {
+    setPending(action);
+    try {
+      await act(() => api[action](job.id));
+    } finally {
+      setPending(undefined);
+    }
+  }
+
   return (
     <Row
       leading={selection}
@@ -228,19 +243,20 @@ function Result({
         </span>
       }
     >
-      {pr && canMerge(pr) && (
-        <Button size="sm" disabled={disabled} onClick={() => act(() => api.merge(job.id))}>
-          Merge
+      {primary && (
+        <Button size="sm" disabled={disabled} onClick={() => changePr(primary)}>
+          {pending === "rebase"
+            ? "Rebasing…"
+            : pending === "merge"
+              ? "Merging…"
+              : primary === "rebase"
+                ? "Rebase"
+                : "Merge"}
         </Button>
       )}
       {open && (
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={disabled}
-          onClick={() => act(() => api.close(job.id))}
-        >
-          Close
+        <Button variant="outline" size="sm" disabled={disabled} onClick={() => changePr("close")}>
+          {pending === "close" ? "Closing…" : "Close"}
         </Button>
       )}
       {job.state === "failed" && (
@@ -281,7 +297,7 @@ function AttemptLine({
   const agent = [attempt.agent, tuning(attempt)].filter(Boolean).join(" ");
   return (
     <span className="flex flex-col gap-1">
-      <span className="flex flex-wrap gap-x-3">
+      <span className="flex flex-wrap items-center gap-x-3">
         <span>
           {[
             withOutcome && attempt.outcome,
@@ -292,9 +308,7 @@ function AttemptLine({
             .filter(Boolean)
             .join(" · ")}
         </span>
-        <a href={`/${attempt.log}`} target="_blank" rel="noreferrer">
-          log
-        </a>
+        <AttemptLog path={attempt.log} agent={agent} />
         {/* An error means the job failed before its prompt was written. */}
         {!attempt.error && (
           <a
@@ -326,7 +340,12 @@ function PrLine({ url, pr }: { url: string; pr?: Pr }) {
             </span>
           )}
           {pr.draft && <span>draft</span>}
-          {pr.conflicts && <span className="text-destructive">conflicts</span>}
+          {pr.state === "OPEN" && pr.conflicts === null && <span>checking mergeability…</span>}
+          {pr.state === "OPEN" && pr.conflicts && (
+            <span className="text-destructive">
+              {pr.fork ? "conflicts · resolve in fork" : "conflicts"}
+            </span>
+          )}
           <span>
             +{pr.additions} −{pr.deletions} in {pr.files.length}{" "}
             {pr.files.length === 1 ? "file" : "files"}

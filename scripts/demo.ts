@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Plugin } from "vite-plus";
 import {
   canMerge,
+  canRebase,
   prUrl,
   type Item,
   type Job,
@@ -68,7 +69,8 @@ function seed(): Snapshot {
               deletions: 5,
               files: ["src/index.ts", "tests/index.test.ts"],
               checks: index === 3 ? "passing" : "failing",
-              conflicts: false,
+              conflicts: index === 4,
+              fork: false,
             },
           ],
         ];
@@ -118,7 +120,7 @@ export function demoApi(): Plugin {
             attempt
               ? path.endsWith("prompt.md")
                 ? "Demo prompt: review the sample task and run tests.\n"
-                : `${attempt.error ?? `Demo agent finished: ${attempt.outcome}`}\n`
+                : `${attempt.error ?? "Reviewed the sample task.\n\nChanges\n  Added coverage for empty exports and quoted values.\n\nVerification\n  ✓ All 12 tests passed.\n  Opened a demo PR for review."}\n`
               : "not found",
           );
         }
@@ -201,7 +203,7 @@ function dispatch(snapshot: Snapshot, route: string, body: unknown): unknown {
       snapshot.on = false;
       return null;
   }
-  const match = /^POST \/api\/jobs\/(\w+)\/(remove|retry|move|merge|close)$/.exec(route);
+  const match = /^POST \/api\/jobs\/(\w+)\/(remove|retry|move|merge|rebase|close)$/.exec(route);
   if (!match) return undefined;
   const [, id, action] = match;
   const job = jobs.find((entry) => entry.id === id && entry.state !== "removed");
@@ -226,13 +228,24 @@ function dispatch(snapshot: Snapshot, route: string, body: unknown): unknown {
       break;
     }
     case "merge":
+    case "rebase":
     case "close": {
       const url = prUrl(job);
       const pr = url && snapshot.prs[url];
-      if (!pr || pr.state !== "OPEN" || (action === "merge" && !canMerge(pr))) {
+      if (
+        !pr ||
+        pr.state !== "OPEN" ||
+        (action === "merge" && !canMerge(pr)) ||
+        (action === "rebase" && !canRebase(pr))
+      ) {
         throw new Error(`Demo PR is not ready to ${action}`);
       }
-      pr.state = action === "merge" ? "MERGED" : "CLOSED";
+      if (action === "rebase") {
+        pr.conflicts = false;
+        pr.checks = "passing";
+      } else {
+        pr.state = action === "merge" ? "MERGED" : "CLOSED";
+      }
       break;
     }
   }

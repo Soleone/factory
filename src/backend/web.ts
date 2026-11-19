@@ -4,7 +4,7 @@ import { extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { addJobs, moveJob, readJobs, removeJob, retryJob } from "./jobs.ts";
 import { turnOff, turnOn } from "./power.ts";
-import { closePr, mergePr, prCache } from "./review.ts";
+import { closePr, mergePr, prCache, rebasePr } from "./review.ts";
 import {
   checkSettings,
   itemKey,
@@ -15,7 +15,7 @@ import {
   runningPid,
   writeSettings,
 } from "./state.ts";
-import { canMerge, prUrl, type Settings, type Snapshot, type Status } from "./types.ts";
+import { canMerge, canRebase, prUrl, type Settings, type Snapshot, type Status } from "./types.ts";
 
 /** The built page; under pn dev, Vite serves it instead and proxies /api and /runs here. */
 const WEB = fileURLToPath(new URL("./web", import.meta.url));
@@ -64,6 +64,12 @@ export function serve(state: string, port: number, host: string): Server {
       const { url, pr } = await openPr(id);
       if (!canMerge(pr)) throw new Error(`${url} isn't ready to merge: see it on GitHub`);
       await mergePr(url);
+      await prs.fresh(url);
+    },
+    "POST /api/jobs/rebase": async (_, id) => {
+      const { url, pr } = await openPr(id);
+      if (!canRebase(pr)) throw new Error(`${url} isn't ready to rebase: see it on GitHub`);
+      await rebasePr(url);
       await prs.fresh(url);
     },
     "POST /api/jobs/close": async (_, id) => {

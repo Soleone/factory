@@ -54,7 +54,11 @@ export function App() {
         <Controls snapshot={snapshot} act={act} />
         <ThemePicker />
       </header>
-      {error && <p className="text-sm text-destructive">{error}</p>}
+      {error && (
+        <p role="alert" className="text-sm wrap-anywhere whitespace-pre-line text-destructive">
+          {error}
+        </p>
+      )}
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="queue">Queue{queued ? ` (${queued})` : ""}</TabsTrigger>
