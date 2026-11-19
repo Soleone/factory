@@ -3,6 +3,7 @@ import type { Settings } from "@/backend/types.ts";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Field,
+  FieldContent,
   FieldDescription,
   FieldGroup,
   FieldLabel,
@@ -22,10 +23,10 @@ export type Run = Pick<Settings, "agents" | "limit" | "until">;
 
 const DEFAULT = "default";
 const LIMITS = [
-  { value: "1", label: "1: stop at the first limit hit" },
-  { value: "2", label: "2: continue after one reset" },
-  { value: "3", label: "3: continue after two resets" },
-  { value: "none", label: "None: wait for every reset" },
+  { value: "1", label: "1, stop at the first" },
+  { value: "2", label: "2, one reset" },
+  { value: "3", label: "3, two resets" },
+  { value: "none", label: "No limit" },
 ];
 
 /** Which agents work, with which model and effort, and when they stop: for a run or as the defaults. */
@@ -91,8 +92,11 @@ export function RunFields({ value, onChange }: { value: Run; onChange: (run: Run
           );
         })}
       </FieldSet>
-      <Field>
-        <FieldLabel>Usage limit hits per agent</FieldLabel>
+      <Field orientation="horizontal">
+        <FieldContent>
+          <FieldLabel>Usage limit hits per agent</FieldLabel>
+          <FieldDescription>Once every agent is out, the factory turns off.</FieldDescription>
+        </FieldContent>
         <Select
           items={LIMITS}
           value={value.limit === null ? "none" : String(value.limit)}
@@ -100,7 +104,7 @@ export function RunFields({ value, onChange }: { value: Run; onChange: (run: Run
             onChange({ ...value, limit: limit === "none" ? null : Number(limit) })
           }
         >
-          <SelectTrigger>
+          <SelectTrigger className="w-40">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -111,19 +115,19 @@ export function RunFields({ value, onChange }: { value: Run; onChange: (run: Run
             ))}
           </SelectContent>
         </Select>
-        <FieldDescription>
-          An agent out of limits stops; once every agent has stopped, the factory turns off.
-        </FieldDescription>
       </Field>
-      <Field>
-        <FieldLabel htmlFor="until">Start nothing new after</FieldLabel>
+      <Field orientation="horizontal">
+        <FieldContent>
+          <FieldLabel htmlFor="until">Start nothing new after</FieldLabel>
+          <FieldDescription>Leave empty to keep going.</FieldDescription>
+        </FieldContent>
         <Input
           id="until"
           type="time"
+          className="w-28"
           value={value.until ?? ""}
           onChange={(event) => onChange({ ...value, until: event.target.value || undefined })}
         />
-        <FieldDescription>Leave empty to keep going.</FieldDescription>
       </Field>
     </FieldGroup>
   );

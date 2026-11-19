@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Compass, ListOrdered, PackageCheck } from "lucide-react";
 import { useFactory } from "@/api";
 import { ThemePicker } from "@/components/soleone/theme-picker";
 import { Badge } from "@/components/ui/badge";
@@ -8,7 +9,7 @@ import { BrowseView } from "@/BrowseView";
 import { Controls } from "@/Controls";
 import { QueueView } from "@/QueueView";
 import { ResultsView } from "@/ResultsView";
-import { SettingsView } from "@/SettingsView";
+import { SettingsDialog } from "@/SettingsDialog";
 import { clock, runStart } from "@/format";
 
 export function App() {
@@ -52,7 +53,10 @@ export function App() {
           <span className="text-sm text-muted-foreground">{run}</span>
         </div>
         <Controls snapshot={snapshot} act={act} />
-        <ThemePicker />
+        <div className="flex items-center gap-1">
+          <SettingsDialog snapshot={snapshot} act={act} />
+          <ThemePicker />
+        </div>
       </header>
       {error && (
         <p role="alert" className="text-sm wrap-anywhere whitespace-pre-line text-destructive">
@@ -61,10 +65,18 @@ export function App() {
       )}
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
-          <TabsTrigger value="queue">Queue{queued ? ` (${queued})` : ""}</TabsTrigger>
-          <TabsTrigger value="browse">Browse</TabsTrigger>
-          <TabsTrigger value="results">Results{failed ? ` (${failed} failed)` : ""}</TabsTrigger>
-          <TabsTrigger value="settings">Settings</TabsTrigger>
+          <TabsTrigger value="queue">
+            <ListOrdered />
+            Queue{queued ? ` (${queued})` : ""}
+          </TabsTrigger>
+          <TabsTrigger value="browse">
+            <Compass />
+            Browse
+          </TabsTrigger>
+          <TabsTrigger value="results">
+            <PackageCheck />
+            Results{failed ? ` (${failed} failed)` : ""}
+          </TabsTrigger>
         </TabsList>
         <TabsContent value="queue">
           <QueueView snapshot={snapshot} act={act} onBrowse={() => setTab("browse")} />
@@ -74,9 +86,6 @@ export function App() {
         </TabsContent>
         <TabsContent value="results">
           <ResultsView snapshot={snapshot} act={act} />
-        </TabsContent>
-        <TabsContent value="settings">
-          <SettingsView snapshot={snapshot} act={act} />
         </TabsContent>
       </Tabs>
     </div>

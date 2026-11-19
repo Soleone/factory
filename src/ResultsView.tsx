@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { api, type Act } from "@/api";
-import { AttemptLog } from "@/AttemptLog";
+import { AttemptFile } from "@/AttemptFile";
 import { PrReview } from "@/PrReview";
 import {
   canMerge,
@@ -315,24 +315,9 @@ function AttemptLine({
             .filter(Boolean)
             .join(" · ")}
         </span>
-        <AttemptLog path={attempt.log} agent={agent} />
+        <AttemptFile log={attempt.log} agent={agent} kind="log" />
         {/* An error means the job failed before its prompt was written. */}
-        {!attempt.error && (
-          <Button
-            variant="link"
-            size="xs"
-            nativeButton={false}
-            render={
-              <a
-                href={`/${attempt.log.replace(/agent\.log$/, "prompt.md")}`}
-                target="_blank"
-                rel="noreferrer"
-              />
-            }
-          >
-            Prompt
-          </Button>
-        )}
+        {!attempt.error && <AttemptFile log={attempt.log} agent={agent} kind="prompt" />}
       </span>
       {attempt.error && <span className="text-destructive">{attempt.error.split("\n")[0]}</span>}
       {attempt.branch && <span>Unpushed work kept on branch {attempt.branch}</span>}

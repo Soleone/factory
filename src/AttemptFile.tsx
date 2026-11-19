@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
+import { XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
+  PopoverClose,
   PopoverContent,
   PopoverDescription,
   PopoverHeader,
@@ -10,33 +12,53 @@ import {
 } from "@/components/ui/popover";
 import { Spinner } from "@/components/ui/spinner";
 
-export function AttemptLog({ path, agent }: { path: string; agent: string }) {
-  const url = `/${path}`;
+const FILES = {
+  log: { label: "Log", title: "Agent log", name: "agent.log", noun: "log" },
+  prompt: { label: "Prompt", title: "Prompt", name: "prompt.md", noun: "prompt" },
+};
+
+/** A popover showing one file an attempt wrote: what the agent was told, or what it printed. */
+export function AttemptFile({
+  log,
+  agent,
+  kind,
+}: {
+  log: string;
+  agent: string;
+  kind: keyof typeof FILES;
+}) {
+  const file = FILES[kind];
+  const url = `/${log.replace(/agent\.log$/, file.name)}`;
   return (
     <Popover>
-      <PopoverTrigger render={<Button variant="link" size="xs" />}>Log</PopoverTrigger>
+      <PopoverTrigger render={<Button variant="link" size="xs" />}>{file.label}</PopoverTrigger>
       <PopoverContent className="w-xl max-w-[calc(100vw-2rem)]">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <PopoverHeader>
-            <PopoverTitle>Agent log</PopoverTitle>
+            <PopoverTitle>{file.title}</PopoverTitle>
             <PopoverDescription>{agent}</PopoverDescription>
           </PopoverHeader>
-          <a
-            className="text-xs underline underline-offset-4"
-            href={url}
-            target="_blank"
-            rel="noreferrer"
-          >
-            Open raw log
-          </a>
+          <div className="flex items-center gap-2">
+            <a
+              className="text-xs underline underline-offset-4"
+              href={url}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Open raw {file.noun}
+            </a>
+            <PopoverClose render={<Button variant="ghost" size="icon-sm" aria-label="Close" />}>
+              <XIcon />
+            </PopoverClose>
+          </div>
         </div>
-        <LogBody url={url} />
+        <FileBody url={url} noun={file.noun} />
       </PopoverContent>
     </Popover>
   );
 }
 
-function LogBody({ url }: { url: string }) {
+function FileBody({ url, noun }: { url: string; noun: string }) {
   const [text, setText] = useState<string>();
   const [failed, setFailed] = useState(false);
 
@@ -45,7 +67,7 @@ function LogBody({ url }: { url: string }) {
     void (async () => {
       try {
         const response = await fetch(url, { signal: controller.signal });
-        if (!response.ok) throw new Error(`Log request failed: ${response.status}`);
+        if (!response.ok) throw new Error(`Request failed: ${response.status}`);
         const raw = await response.text();
         if (!controller.signal.aborted) setText(readableLog(raw));
       } catch {
@@ -58,17 +80,16 @@ function LogBody({ url }: { url: string }) {
   if (failed)
     return (
       <p role="status" className="text-destructive">
-        Could not load the log. Reopen it to try again.
+        Could not load the {noun}. Reopen it to try again.
       </p>
     );
   if (text === undefined)
     return (
       <p role="status" className="flex items-center gap-2 text-muted-foreground">
-        <Spinner /> Loading log…
+        <Spinner /> Loading {noun}…
       </p>
     );
-  if (!text.trim())
-    return <p className="text-muted-foreground">This attempt did not write any log output.</p>;
+  if (!text.trim()) return <p className="text-muted-foreground">The {noun} is empty.</p>;
   return (
     <pre
       tabIndex={0}
