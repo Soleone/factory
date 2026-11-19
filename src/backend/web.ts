@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { addJobs, moveJob, readJobs, removeJob, retryJob } from "./jobs.ts";
 import { turnOff, turnOn } from "./power.ts";
 import { closePr, mergePr, prCache, readPrDetails, rebasePr } from "./review.ts";
+import { mergeTrain } from "./train.ts";
 import {
   checkSettings,
   itemKey,
@@ -31,6 +32,7 @@ const TYPES: Record<string, string> = {
 /** The page and the API it uses: the same state and commands as the CLI, nothing more. */
 export function serve(state: string, port: number, host: string): Server {
   const prs = prCache();
+  const train = mergeTrain(prs);
   function jobPr(id: string) {
     const job = readJobs(state).find((job) => job.id === id);
     const url = job && prUrl(job);
@@ -45,7 +47,7 @@ export function serve(state: string, port: number, host: string): Server {
     return { url, pr };
   }
   const routes: Record<string, (body: never, id: string) => unknown> = {
-    "GET /api/state": () => snapshot(state, (urls) => prs.get(urls)),
+    "GET /api/state": () => snapshot(state, (urls) => prs.get(urls), train.cars()),
     "GET /api/candidates": () => readCandidates(state) ?? { at: null, items: [] },
     "POST /api/candidates/refresh": () => {
       void refreshCandidates(state, "workwork").catch((error: Error) =>
@@ -77,6 +79,8 @@ export function serve(state: string, port: number, host: string): Server {
       await rebasePr(url);
       await prs.fresh(url);
     },
+    "POST /api/train": (body: { ids: string[] }) =>
+      train.start(body.ids.map((id) => ({ id, url: jobPr(id) }))),
     "POST /api/jobs/close": async (_, id) => {
       const { url } = await openPr(id);
       await closePr(url);
@@ -136,7 +140,11 @@ export function serve(state: string, port: number, host: string): Server {
   });
 }
 
-function snapshot(state: string, prs: (urls: string[]) => Snapshot["prs"]): Snapshot {
+function snapshot(
+  state: string,
+  prs: (urls: string[]) => Snapshot["prs"],
+  train: Snapshot["train"],
+): Snapshot {
   const statusPath = join(state, "status.json");
   const candidates = readCandidates(state);
   const jobs = readJobs(state);
@@ -157,6 +165,7 @@ function snapshot(state: string, prs: (urls: string[]) => Snapshot["prs"]): Snap
       refreshing: refreshingCandidates(state),
     },
     prs: prs(jobs.flatMap((job) => (job.state === "removed" ? [] : (prUrl(job) ?? [])))),
+    train,
   };
 }
 

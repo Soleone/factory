@@ -13,11 +13,13 @@ import { PrReview } from "@/PrReview";
 import {
   canMerge,
   canRebase,
+  onTrain,
   prUrl,
   type Attempt,
   type Job,
   type Pr,
   type Snapshot,
+  type TrainCar,
 } from "@/backend/types.ts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -62,12 +64,32 @@ function canDismiss(job: Job) {
   return job.state === "done" || job.state === "failed";
 }
 
+/** What the train can try: it waits for running checks and rebases conflicts, but can't fix the rest. */
+function canBoard(job: Job, prs: Prs, train: Snapshot["train"]) {
+  const url = prUrl(job);
+  const pr = url ? prs[url] : undefined;
+  return (
+    pr?.state === "OPEN" &&
+    !pr.draft &&
+    pr.checks !== "failing" &&
+    !(pr.conflicts && pr.fork) &&
+    !onTrain(train[job.id])
+  );
+}
+
+const TRAIN_STEP: Partial<Record<TrainCar["step"], string>> = {
+  queued: "on the merge train",
+  waiting: "merge train: waiting for checks",
+  rebasing: "merge train: rebasing",
+  merging: "merge train: merging",
+};
+
 /** One row per job that ran, latest first, with its PR to review and merge. */
 export function ResultsView({ snapshot, act }: { snapshot: Snapshot; act: Act }) {
   const [filter, setFilter] = useState("all");
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [dismissing, setDismissing] = useState(false);
-  const { prs } = snapshot;
+  const { prs, train } = snapshot;
   const jobs = snapshot.jobs
     .filter((job) => job.state !== "removed" && job.attempts.length > 0)
     .sort((a, b) => b.attempts.at(-1)!.start.localeCompare(a.attempts.at(-1)!.start));
@@ -87,6 +109,7 @@ export function ResultsView({ snapshot, act }: { snapshot: Snapshot; act: Act })
   const dismissible = shown.filter(canDismiss);
   const selection = dismissible.filter((job) => selected.has(job.id));
   const allSelected = selection.length === dismissible.length;
+  const boarding = selection.filter((job) => canBoard(job, prs, train));
 
   const select = (id: string, checked: boolean) => {
     setSelected((current) => {
@@ -114,6 +137,18 @@ export function ResultsView({ snapshot, act }: { snapshot: Snapshot; act: Act })
     } finally {
       setDismissing(false);
     }
+  };
+
+  const mergeSelected = () => {
+    const count = boarding.length === 1 ? "1 PR" : `${boarding.length} PRs`;
+    if (
+      !window.confirm(
+        `Merge ${count} one after another? Conflicting ones get rebased; ones that still conflict are skipped.`,
+      )
+    )
+      return;
+    void act(() => api.mergeTrain(boarding.map((job) => job.id)));
+    setSelected(new Set());
   };
 
   return (
@@ -161,6 +196,16 @@ export function ResultsView({ snapshot, act }: { snapshot: Snapshot; act: Act })
             >
               {dismissing ? "Dismissing…" : `Dismiss (${selection.length})`}
             </Button>
+            {shown.some((job) => canBoard(job, prs, train)) && (
+              <Button
+                size="sm"
+                title="Merges one after another per repo, smallest first"
+                disabled={dismissing || boarding.length === 0}
+                onClick={mergeSelected}
+              >
+                Merge ({boarding.length})
+              </Button>
+            )}
           </div>
         )}
       </div>
@@ -171,6 +216,7 @@ export function ResultsView({ snapshot, act }: { snapshot: Snapshot; act: Act })
             job={job}
             prs={prs}
             act={act}
+            car={train[job.id]}
             disabled={dismissing && selected.has(job.id)}
             selection={
               canDismiss(job) && (
@@ -193,12 +239,14 @@ function Result({
   job,
   prs,
   act,
+  car,
   disabled: dismissing,
   selection,
 }: {
   job: Job;
   prs: Prs;
   act: Act;
+  car?: TrainCar;
   disabled: boolean;
   selection: ReactNode;
 }) {
@@ -207,7 +255,7 @@ function Result({
   const url = prUrl(job);
   const pr = url ? prs[url] : undefined;
   const open = pr?.state === "OPEN";
-  const disabled = dismissing || pending !== undefined;
+  const disabled = dismissing || pending !== undefined || onTrain(car);
   const primary = pr && (canRebase(pr) ? "rebase" : canMerge(pr) ? "merge" : undefined);
 
   async function changePr(action: NonNullable<typeof pending>) {
@@ -236,6 +284,12 @@ function Result({
         <span className="flex flex-col gap-1">
           <AttemptLine job={job} attempt={last} />
           {url && <PrLine jobId={job.id} url={url} pr={pr} />}
+          {car?.step === "skipped" && (
+            <span className="text-destructive">
+              Merge train skipped it: {car.reason.replaceAll("\n", " ")}
+            </span>
+          )}
+          {car && TRAIN_STEP[car.step] && <span>{TRAIN_STEP[car.step]}</span>}
           {job.attempts.length > 1 && (
             <details>
               <summary className="cursor-pointer">

@@ -75,6 +75,7 @@ function seed(): Snapshot {
         ];
       }),
     ),
+    train: {},
   };
 }
 

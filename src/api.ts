@@ -21,6 +21,7 @@ export const api = {
   prDetails: (id: string) => call<{ body: string; diff: string }>("GET", `/api/jobs/${id}/pr`),
   merge: (id: string) => call("POST", `/api/jobs/${id}/merge`),
   rebase: (id: string) => call("POST", `/api/jobs/${id}/rebase`),
+  mergeTrain: (ids: string[]) => call("POST", "/api/train", { ids }),
   close: (id: string) => call("POST", `/api/jobs/${id}/close`),
   move: (id: string, index: number) => call("POST", `/api/jobs/${id}/move`, { index }),
   saveSettings: (settings: Snapshot["settings"]) => call("PUT", "/api/settings", settings),

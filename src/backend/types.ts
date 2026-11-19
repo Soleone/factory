@@ -89,7 +89,16 @@ export type Snapshot = {
   candidates: { at: string | null; count: number; refreshing: boolean };
   /** What GitHub last said about each job's PR, by URL; a PR not fetched yet is missing. */
   prs: Record<string, Pr>;
+  /** Where each job on the merge train is, by job id; gone when serve restarts. */
+  train: Record<string, TrainCar>;
 };
+
+export type TrainCar =
+  | { step: "queued" | "waiting" | "rebasing" | "merging" | "merged" }
+  | { step: "skipped"; reason: string };
+
+export const onTrain = (car?: TrainCar) =>
+  car !== undefined && car.step !== "merged" && car.step !== "skipped";
 
 /** A job's PR as `gh pr view` describes it, trimmed to what a quick review needs. */
 export type Pr = {

@@ -17,7 +17,7 @@ import {
 } from "../src/backend/jobs.ts";
 import { run, type RunOptions } from "../src/backend/loop.ts";
 import { readSettings, writeSettings } from "../src/backend/state.ts";
-import type { Item, Job, Snapshot, Status } from "../src/backend/types.ts";
+import { onTrain, type Item, type Job, type Snapshot, type Status } from "../src/backend/types.ts";
 import { serve } from "../src/backend/web.ts";
 
 const scratch = mkdtempSync(join(tmpdir(), "factory-test-"));
@@ -548,6 +548,41 @@ describe("the factory", () => {
       expect(github.calls()).toContain(`pr merge ${pr} --squash --delete-branch`);
       const after = (await (await fetch(url("/api/state"))).json()) as Snapshot;
       expect(after.prs[pr].state).toBe("MERGED");
+    } finally {
+      server.close();
+    }
+  });
+
+  test("the merge train merges one PR at a time and skips one that's no longer open", async () => {
+    const base = setup(["a", "b"]);
+    const github = gh();
+    const count = join(mkdtempSync(join(scratch, "count-")), "n");
+    agents({
+      claude: `n=$(($(cat ${count} 2>/dev/null || echo 0) + 1)); echo $n > ${count}; echo "opened https://github.com/o/r/pull/$n"`,
+    });
+    const jobs = [base.pick("a"), base.pick("b")];
+    await work(options(base));
+    const server = serve(base.state, 0, "127.0.0.1");
+    await once(server, "listening");
+    const { port } = server.address() as AddressInfo;
+    const url = (path: string) => `http://127.0.0.1:${port}${path}`;
+    try {
+      const start = await fetch(url("/api/train"), {
+        method: "POST",
+        body: JSON.stringify({ ids: jobs.map((job) => job.id) }),
+      });
+      expect(start.status, await start.text()).toBe(200);
+      let train: Snapshot["train"] = {};
+      while (Object.keys(train).length < 2 || Object.values(train).some(onTrain)) {
+        train = ((await (await fetch(url("/api/state"))).json()) as Snapshot).train;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      // The fake gh answers the same for every PR, so the first merge closes the second.
+      expect(train).toEqual({
+        [jobs[0].id]: { step: "merged" },
+        [jobs[1].id]: { step: "skipped", reason: "already merged" },
+      });
+      expect(github.calls().match(/pr merge/g)).toHaveLength(1);
     } finally {
       server.close();
     }
