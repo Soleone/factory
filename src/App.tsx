@@ -8,6 +8,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/tooltip/tooltip";
 import { BrowseView } from "@/BrowseView";
+import { CloneDialog } from "@/CloneDialog";
 import { Controls } from "@/Controls";
 import { Logo } from "@/Logo";
 import { PlanView } from "@/PlanView";
@@ -86,6 +87,7 @@ export function App() {
             </TabsTrigger>
           </TabsList>
           <div className="ml-auto flex items-center gap-1">
+            <CloneDialog act={act} />
             <Tooltip>
               <TooltipTrigger
                 render={

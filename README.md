@@ -11,6 +11,7 @@ Needs node 22+, git, [workwork](https://github.com/Soleone/workwork) with `--jso
 
 ## How it works
 
+- **Repos** are yours on GitHub, cloned under `$SRC`, which is where workwork looks. The folder button right of the tabs lists the ones you haven't cloned yet, newest first, and clones one into a folder of `$SRC` you pick.
 - **Jobs** are workwork candidates in the queue. Your picks always go first, in the order you give them; auto jobs follow. A job can name its agent, model and effort. Once an agent has started a job, the job stays with that agent.
 - **Auto mode** only fills the queue: while the factory is on, it keeps up to 5 of its jobs per agent queued, cheapest attention first, with repos taking turns. It never re-queues a candidate that already had a job. You can limit it to some levels and plays.
 - **The factory** is what works the queue, one worker per agent. With nothing to do it waits, and it picks up new jobs within seconds. Turning it on starts a **run** with its own agents, models, efforts, limit and end time, defaulting to the settings.

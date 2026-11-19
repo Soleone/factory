@@ -4,6 +4,7 @@ import { extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AGENT_NAMES } from "./agents.ts";
 import { chat } from "./chat.ts";
+import { clonableRepos, cloneRepo } from "./repos.ts";
 import { agentModels } from "./models.ts";
 import { addJobs, moveJob, queueConflicts, readJobs, removeJob, retryJob } from "./jobs.ts";
 import { turnOff, turnOn } from "./power.ts";
@@ -77,6 +78,13 @@ export function serve(state: string, port: number, host: string): Server {
     "GET /api/state": () => snapshot(state, (urls) => prs.get(urls), train.cars()),
     "GET /api/candidates": () => readCandidates(state) ?? { at: null, items: [] },
     "POST /api/candidates/refresh": () => {
+      void refreshCandidates(state, "workwork").catch((error: Error) =>
+        console.error(`factory: workwork failed: ${error.message}`),
+      );
+    },
+    "GET /api/repos": () => clonableRepos(),
+    "POST /api/repos/clone": async (body: { name: string; folder: string }) => {
+      await cloneRepo(body.name, body.folder);
       void refreshCandidates(state, "workwork").catch((error: Error) =>
         console.error(`factory: workwork failed: ${error.message}`),
       );
