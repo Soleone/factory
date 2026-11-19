@@ -81,7 +81,7 @@ function Factory({
   return (
     <div className="mx-auto flex min-h-svh w-full max-w-5xl flex-col gap-6 p-4">
       <header className="flex flex-wrap items-center gap-x-4 gap-y-3">
-        <div className="flex flex-1 items-center gap-3">
+        <div className="flex flex-1 items-center gap-2">
           <h1 className="flex items-center gap-2 font-heading text-xl font-semibold">
             <Logo working={on} />
             Factory
