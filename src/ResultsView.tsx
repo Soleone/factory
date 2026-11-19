@@ -127,8 +127,8 @@ export function ResultsView({
     active.filter((job) => job.item.play === "review").map((job) => itemKey(job.item)),
   );
   const agents = Object.keys(snapshot.settings.agents);
-  const jobs = snapshot.jobs
-    .filter((job) => job.state !== "removed" && job.attempts.length > 0)
+  const jobs = active
+    .filter((job) => job.attempts.length > 0)
     .sort((a, b) => b.attempts.at(-1)!.start.localeCompare(a.attempts.at(-1)!.start));
   if (jobs.length === 0)
     return (
@@ -535,7 +535,7 @@ export function TrainLine({ car }: { car?: TrainCar }) {
 }
 
 export function PrLine({ jobId, url, pr }: { jobId: string; url: string; pr?: Pr }) {
-  const checks = pr && CHECKS[pr.checks];
+  const checks = pr?.state === "OPEN" && CHECKS[pr.checks];
   return (
     <span className="flex flex-wrap items-center gap-x-3">
       <a href={url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1">
@@ -544,7 +544,7 @@ export function PrLine({ jobId, url, pr }: { jobId: string; url: string; pr?: Pr
       </a>
       {pr ? (
         <>
-          {pr.state === "OPEN" && checks && (
+          {checks && (
             <span className={`inline-flex items-center gap-1 ${checks.className ?? ""}`}>
               <checks.Icon className="size-3.5" aria-hidden="true" />
               {checks.label}
