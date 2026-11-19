@@ -285,6 +285,21 @@ describe("the factory", () => {
     expect(sh(base.repo, "git", "worktree", "list").trim().split("\n")).toHaveLength(2);
   });
 
+  test("repos with the same label run in their own worktrees", async () => {
+    const first = setup(["a"]);
+    const second = setup(["b"]);
+    agents({ claude: "git remote get-url origin" });
+    first.pick("a");
+    addJobs(first.state, second.items, "pick");
+
+    const jobs = await work(options(first));
+    expect(jobs.map((job) => job.state)).toEqual(["done", "done"]);
+    for (const job of jobs)
+      expect(readFileSync(job.attempts[0].log, "utf8")).toBe(
+        sh(job.item.repo, "git", "remote", "get-url", "origin"),
+      );
+  });
+
   test("keeps work an agent left unpushed on a branch and starts the next job clean", async () => {
     const base = setup(["a", "b"]);
     agents({ claude: "test -e left.txt && exit 1; echo x > left.txt" });
