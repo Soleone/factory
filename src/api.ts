@@ -18,6 +18,7 @@ export const api = {
     call("POST", "/api/jobs", { items, agent }),
   remove: (id: string) => call("POST", `/api/jobs/${id}/remove`),
   retry: (id: string) => call("POST", `/api/jobs/${id}/retry`),
+  prDetails: (id: string) => call<{ body: string; diff: string }>("GET", `/api/jobs/${id}/pr`),
   merge: (id: string) => call("POST", `/api/jobs/${id}/merge`),
   rebase: (id: string) => call("POST", `/api/jobs/${id}/rebase`),
   close: (id: string) => call("POST", `/api/jobs/${id}/close`),

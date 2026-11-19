@@ -64,7 +64,6 @@ function seed(): Snapshot {
               state: "OPEN",
               draft: false,
               title: job.item.title,
-              summary: "Sample changes and tests for review. This PR is not real.",
               additions: 28,
               deletions: 5,
               files: ["src/index.ts", "tests/index.test.ts"],
@@ -97,6 +96,28 @@ const items: Item[] = [
   level,
   title,
 }));
+
+const DEMO_PR = {
+  body: "## Summary\n\nSample changes and tests for review. This PR is **not real**.\n\n## Changes\n\n- Handles empty exports\n- Quotes values that contain commas, see `toCsv`\n\n## Verification\n\n- [x] `pnpm test` passes\n- [ ] Checked in a spreadsheet app\n\nLevel: skim\n",
+  diff: `diff --git a/src/index.ts b/src/index.ts
+--- a/src/index.ts
++++ b/src/index.ts
+@@ -10,7 +10,9 @@ export function toCsv(rows: string[][]) {
+-  return rows.map((row) => row.join(",")).join("\\n");
++  if (rows.length === 0) return "";
++  const quote = (value: string) => (/[",\\n]/.test(value) ? \`"\${value.replaceAll('"', '""')}"\` : value);
++  return rows.map((row) => row.map(quote).join(",")).join("\\n");
+ }
+diff --git a/tests/index.test.ts b/tests/index.test.ts
+--- a/tests/index.test.ts
++++ b/tests/index.test.ts
+@@ -1,3 +1,7 @@
+ import { toCsv } from "../src/index.ts";
++
++test("empty export", () => expect(toCsv([])).toBe(""));
++test("quotes commas", () => expect(toCsv([["a,b"]])).toBe('"a,b"'));
+`,
+};
 
 export function demoApi(): Plugin {
   return {
@@ -203,6 +224,7 @@ function dispatch(snapshot: Snapshot, route: string, body: unknown): unknown {
       snapshot.on = false;
       return null;
   }
+  if (/^GET \/api\/jobs\/\w+\/pr$/.test(route)) return DEMO_PR;
   const match = /^POST \/api\/jobs\/(\w+)\/(remove|retry|move|merge|rebase|close)$/.exec(route);
   if (!match) return undefined;
   const [, id, action] = match;

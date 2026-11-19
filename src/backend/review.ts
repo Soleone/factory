@@ -46,12 +46,6 @@ async function readPr(url: string): Promise<Pr> {
     state: raw.state,
     draft: raw.isDraft,
     title: raw.title,
-    summary:
-      raw.body
-        .split(/^## /m)
-        .find((section) => section.startsWith("Summary"))
-        ?.slice("Summary".length)
-        .trim() ?? "",
     level: /^Level: (\w+)\s*$/m.exec(raw.body)?.[1],
     additions: raw.additions,
     deletions: raw.deletions,
@@ -71,6 +65,15 @@ function checks(rollup: Check[]): Pr["checks"] {
   if (results.some((result) => result === "" || result === "PENDING" || result === "EXPECTED"))
     return "pending";
   return "passing";
+}
+
+/** What the review popup shows: the whole PR body and its diff, fetched only when opened. */
+export async function readPrDetails(url: string): Promise<{ body: string; diff: string }> {
+  const [view, diff] = await Promise.all([
+    gh(["pr", "view", url, "--json", "body"]),
+    gh(["pr", "diff", url]),
+  ]);
+  return { body: (JSON.parse(view) as { body: string }).body, diff };
 }
 
 export const mergePr = (url: string) => gh(["pr", "merge", url, "--squash", "--delete-branch"]);

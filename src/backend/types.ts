@@ -96,8 +96,6 @@ export type Pr = {
   state: "OPEN" | "MERGED" | "CLOSED";
   draft: boolean;
   title: string;
-  /** The PR body's Summary section, which workwork asks for. */
-  summary: string;
   /** The PR body's Level line: the agent may have raised the candidate's. */
   level?: string;
   additions: number;

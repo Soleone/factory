@@ -193,7 +193,7 @@ describe("the factory", () => {
     script(
       bin,
       "gh",
-      `echo "$*" >> ${bin}/calls\ncase "$1 $2" in\n"pr list") cat ${bin}/list.json ;;\n"pr view") cat ${viewPath} ;;\n"pr merge") sed 's/"state":"OPEN"/"state":"MERGED"/' ${viewPath} > ${viewPath}.new && mv ${viewPath}.new ${viewPath} ;;\nesac`,
+      `echo "$*" >> ${bin}/calls\ncase "$1 $2" in\n"pr list") cat ${bin}/list.json ;;\n"pr view") cat ${viewPath} ;;\n"pr diff") echo "+simpler a" ;;\n"pr merge") sed 's/"state":"OPEN"/"state":"MERGED"/' ${viewPath} > ${viewPath}.new && mv ${viewPath}.new ${viewPath} ;;\nesac`,
     );
     process.env.PATH = `${bin}:${process.env.PATH}`;
     return { calls: () => readFileSync(join(bin, "calls"), "utf8"), answer, viewPath };
@@ -528,11 +528,14 @@ describe("the factory", () => {
         await new Promise((resolve) => setTimeout(resolve, 20));
       }
       expect(prs[pr]).toMatchObject({
-        summary: "Makes a simpler.",
         level: "skim",
         checks: "pending",
         files: ["a.ts"],
         conflicts: false,
+      });
+      expect(await (await fetch(url(`/api/jobs/${job.id}/pr`))).json()).toEqual({
+        body: OPEN_PR.body,
+        diff: "+simpler a\n",
       });
       const merge = () => fetch(url(`/api/jobs/${job.id}/merge`), { method: "POST" });
       expect(await (await merge()).json()).toEqual({

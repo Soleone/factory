@@ -4,7 +4,7 @@ import { extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { addJobs, moveJob, readJobs, removeJob, retryJob } from "./jobs.ts";
 import { turnOff, turnOn } from "./power.ts";
-import { closePr, mergePr, prCache, rebasePr } from "./review.ts";
+import { closePr, mergePr, prCache, readPrDetails, rebasePr } from "./review.ts";
 import {
   checkSettings,
   itemKey,
@@ -31,11 +31,15 @@ const TYPES: Record<string, string> = {
 /** The page and the API it uses: the same state and commands as the CLI, nothing more. */
 export function serve(state: string, port: number, host: string): Server {
   const prs = prCache();
-  /** The job's PR, checked with GitHub just now. */
-  async function openPr(id: string) {
+  function jobPr(id: string) {
     const job = readJobs(state).find((job) => job.id === id);
     const url = job && prUrl(job);
     if (!url) throw new Error(`job ${id} has no PR`);
+    return url;
+  }
+  /** The job's PR, checked with GitHub just now. */
+  async function openPr(id: string) {
+    const url = jobPr(id);
     const pr = await prs.fresh(url);
     if (pr.state !== "OPEN") throw new Error(`${url} is already ${pr.state.toLowerCase()}`);
     return { url, pr };
@@ -60,6 +64,7 @@ export function serve(state: string, port: number, host: string): Server {
     "POST /api/jobs/remove": (_, id) => removeJob(state, id),
     "POST /api/jobs/retry": (_, id) => retryJob(state, id),
     "POST /api/jobs/move": (body: { index: number }, id) => moveJob(state, id, body.index),
+    "GET /api/jobs/pr": (_, id) => readPrDetails(jobPr(id)),
     "POST /api/jobs/merge": async (_, id) => {
       const { url, pr } = await openPr(id);
       if (!canMerge(pr)) throw new Error(`${url} isn't ready to merge: see it on GitHub`);

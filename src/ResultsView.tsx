@@ -1,7 +1,15 @@
-import { XIcon } from "lucide-react";
+import {
+  CircleCheckIcon,
+  CircleDashedIcon,
+  CircleIcon,
+  CircleXIcon,
+  GitPullRequestIcon,
+  XIcon,
+} from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { api, type Act } from "@/api";
 import { AttemptLog } from "@/AttemptLog";
+import { PrReview } from "@/PrReview";
 import {
   canMerge,
   canRebase,
@@ -44,10 +52,10 @@ const FILTERS: Record<string, { label: string; shows: (job: Job, prs: Prs) => bo
 
 const PR_BADGE = { OPEN: "default", MERGED: "secondary", CLOSED: "outline" } as const;
 const CHECKS = {
-  passing: "checks passing",
-  failing: "checks failing",
-  pending: "checks running",
-  none: "no checks",
+  passing: { label: "checks passing", Icon: CircleCheckIcon, className: "text-success" },
+  failing: { label: "checks failing", Icon: CircleXIcon, className: "text-destructive" },
+  pending: { label: "checks running", Icon: CircleDashedIcon, className: undefined },
+  none: { label: "no checks", Icon: CircleIcon, className: undefined },
 };
 
 function canDismiss(job: Job) {
@@ -227,8 +235,7 @@ function Result({
       meta={
         <span className="flex flex-col gap-1">
           <AttemptLine job={job} attempt={last} />
-          {url && <PrLine url={url} pr={pr} />}
-          {pr && <Review pr={pr} />}
+          {url && <PrLine jobId={job.id} url={url} pr={pr} />}
           {job.attempts.length > 1 && (
             <details>
               <summary className="cursor-pointer">
@@ -311,13 +318,20 @@ function AttemptLine({
         <AttemptLog path={attempt.log} agent={agent} />
         {/* An error means the job failed before its prompt was written. */}
         {!attempt.error && (
-          <a
-            href={`/${attempt.log.replace(/agent\.log$/, "prompt.md")}`}
-            target="_blank"
-            rel="noreferrer"
+          <Button
+            variant="link"
+            size="xs"
+            nativeButton={false}
+            render={
+              <a
+                href={`/${attempt.log.replace(/agent\.log$/, "prompt.md")}`}
+                target="_blank"
+                rel="noreferrer"
+              />
+            }
           >
-            prompt
-          </a>
+            Prompt
+          </Button>
         )}
       </span>
       {attempt.error && <span className="text-destructive">{attempt.error.split("\n")[0]}</span>}
@@ -326,17 +340,20 @@ function AttemptLine({
   );
 }
 
-function PrLine({ url, pr }: { url: string; pr?: Pr }) {
+function PrLine({ jobId, url, pr }: { jobId: string; url: string; pr?: Pr }) {
+  const checks = pr && CHECKS[pr.checks];
   return (
-    <span className="flex flex-wrap gap-x-3">
-      <a href={url} target="_blank" rel="noreferrer">
+    <span className="flex flex-wrap items-center gap-x-3">
+      <a href={url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1">
+        <GitPullRequestIcon className="size-3.5" aria-hidden="true" />
         {url.replace("https://github.com/", "")}
       </a>
       {pr ? (
         <>
-          {pr.state === "OPEN" && (
-            <span className={pr.checks === "failing" ? "text-destructive" : undefined}>
-              {CHECKS[pr.checks]}
+          {pr.state === "OPEN" && checks && (
+            <span className={`inline-flex items-center gap-1 ${checks.className ?? ""}`}>
+              <checks.Icon className="size-3.5" aria-hidden="true" />
+              {checks.label}
             </span>
           )}
           {pr.draft && <span>draft</span>}
@@ -347,29 +364,15 @@ function PrLine({ url, pr }: { url: string; pr?: Pr }) {
             </span>
           )}
           <span>
-            +{pr.additions} −{pr.deletions} in {pr.files.length}{" "}
+            <span className="text-success">+{pr.additions}</span>{" "}
+            <span className="text-destructive">−{pr.deletions}</span> in {pr.files.length}{" "}
             {pr.files.length === 1 ? "file" : "files"}
           </span>
+          <PrReview jobId={jobId} url={url} pr={pr} />
         </>
       ) : (
         <span>asking GitHub…</span>
       )}
     </span>
-  );
-}
-
-function Review({ pr }: { pr: Pr }) {
-  return (
-    <details>
-      <summary className="cursor-pointer">{pr.title}</summary>
-      <span className="flex flex-col gap-2 py-1">
-        {pr.summary && <span className="whitespace-pre-wrap">{pr.summary}</span>}
-        <span className="flex flex-col font-mono text-xs">
-          {pr.files.map((file) => (
-            <span key={file}>{file}</span>
-          ))}
-        </span>
-      </span>
-    </details>
   );
 }
