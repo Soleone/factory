@@ -14,7 +14,11 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
 }
 
 export const api = {
-  candidates: () => call<Candidates | { at: null; items: [] }>("GET", "/api/candidates"),
+  candidates: () =>
+    call<{ at: string | null; items: Candidates["items"]; repos: string[] }>(
+      "GET",
+      "/api/candidates",
+    ),
   refreshCandidates: () => call("POST", "/api/candidates/refresh"),
   plays: () => call<Play[]>("GET", "/api/plays"),
   /** What an agent is told to do for the candidate. */

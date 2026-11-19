@@ -4,7 +4,7 @@ import { extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AGENT_NAMES } from "./agents.ts";
 import { chat } from "./chat.ts";
-import { clonableRepos, cloneRepo } from "./repos.ts";
+import { clonableRepos, cloneRepo, localRepos } from "./repos.ts";
 import { agentModels } from "./models.ts";
 import {
   addJobs,
@@ -102,7 +102,12 @@ export function serve(state: string, port: number, host: string): Server {
   }
   const routes: Record<string, (body: never, id: string) => unknown> = {
     "GET /api/state": () => snapshot(state, (urls) => prs.get(urls), train.cars()),
-    "GET /api/candidates": () => readCandidates(state) ?? { at: null, items: [] },
+    "GET /api/candidates": () => {
+      const cached = readCandidates(state);
+      const items = cached?.items ?? [];
+      const repos = [...new Set([...localRepos(), ...items.map((item) => item.repo)])].sort();
+      return { at: cached?.at ?? null, items, repos };
+    },
     "POST /api/candidates/refresh": () => {
       void refreshCandidates(state, "workwork").catch((error: Error) =>
         console.error(`factory: workwork failed: ${error.message}`),

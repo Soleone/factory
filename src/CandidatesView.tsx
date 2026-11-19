@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api, type Act } from "@/api";
 import { ChevronDownIcon, RefreshCwIcon } from "lucide-react";
 import { AGENT_NAMES } from "@/backend/agents.ts";
@@ -27,24 +27,32 @@ import { ItemGroup } from "@/components/ui/item";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectSeparator,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/tooltip/tooltip";
 import { CandidateDetails } from "@/CandidateDetails";
+import { CloneDialog } from "@/CloneDialog";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ago, itemTitle, JOB_BADGE, pinName, repoName } from "@/format";
 import { Row, Section } from "@/Row";
 
 const ALL = "";
+const CLONE = { value: "clone-project", label: "Clone project..." };
 const PAGE = 100;
 const key = (item: { repo: string; id: string }) => `${item.repo} ${item.id}`;
 
 /** Everything workwork found, by play, to pick from. */
 export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act }) {
+  const [cloneOpen, setCloneOpen] = useState(false);
+  const [cloneCount, setCloneCount] = useState(0);
+  const repoTrigger = useRef<HTMLButtonElement>(null);
   const [items, setItems] = useState<Item[]>([]);
+  const [repoPaths, setRepoPaths] = useState<string[]>([]);
   const [repo, setRepo] = useState(ALL);
   const [play, setPlay] = useState(ALL);
   const [levels, setLevels] = useState(["auto", "skim", "decide"]);
@@ -57,7 +65,18 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
   const { at, count, refreshing } = snapshot.candidates;
 
   useEffect(() => {
-    void api.candidates().then((candidates) => setItems(candidates.items));
+    let ignore = false;
+    void api.candidates().then(({ items, repos }) => {
+      if (ignore) return;
+      setItems(items);
+      setRepoPaths(repos);
+    });
+    return () => {
+      ignore = true;
+    };
+  }, [at, cloneCount]);
+
+  useEffect(() => {
     void api
       .plays()
       .then((plays) => setDescribed(new Map(plays.map((each) => [each.name, each.description]))));
@@ -70,15 +89,14 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
     return byItem;
   }, [snapshot.jobs]);
 
+  const allRepos = { value: ALL, label: `All repos (${items.length})` };
   const repos = useMemo(() => {
     const counts = new Map<string, number>();
     for (const item of items) counts.set(item.repo, (counts.get(item.repo) ?? 0) + 1);
-    return [{ value: ALL, label: `All repos (${items.length})` }].concat(
-      [...counts]
-        .sort((a, b) => repoName(a[0]).localeCompare(repoName(b[0])))
-        .map(([path, total]) => ({ value: path, label: `${repoName(path)} (${total})` })),
-    );
-  }, [items]);
+    return repoPaths
+      .map((path) => ({ value: path, label: `${repoName(path)} (${counts.get(path) ?? 0})` }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [items, repoPaths]);
 
   const inRepo = repo === ALL ? items : items.filter((item) => item.repo === repo);
   const playCounts = new Map<string, number>();
@@ -97,24 +115,25 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
   const queue = (wanted: Item[], pin?: Preset) => act(() => api.queue(wanted, pin));
   const open = matches.filter((item) => !jobs.has(key(item)));
 
-  if (items.length === 0)
-    return (
-      <Empty>
-        <EmptyHeader>
-          <EmptyTitle>{refreshing ? "Asking workwork" : "No candidates yet"}</EmptyTitle>
-          <EmptyDescription>
-            {refreshing
-              ? "workwork is looking through every repo under $SRC. That takes a few minutes."
-              : "Ask workwork for candidates across your repos. It takes a few minutes."}
-          </EmptyDescription>
-        </EmptyHeader>
-        <EmptyContent>
-          <Button disabled={refreshing} onClick={() => act(api.refreshCandidates)}>
-            {refreshing && <Spinner />} Ask workwork
-          </Button>
-        </EmptyContent>
-      </Empty>
-    );
+  const empty = (
+    <Empty>
+      <EmptyHeader>
+        <EmptyTitle>{refreshing ? "Asking workwork" : "No candidates yet"}</EmptyTitle>
+        <EmptyDescription>
+          {refreshing
+            ? "workwork is looking through every repo under $SRC. That takes a few minutes."
+            : repo === ALL
+              ? "Ask workwork for candidates across your repos. It takes a few minutes."
+              : `There are no candidates for ${repoName(repo)}.`}
+        </EmptyDescription>
+      </EmptyHeader>
+      <EmptyContent>
+        <Button disabled={refreshing} onClick={() => act(api.refreshCandidates)}>
+          {refreshing && <Spinner />} Ask workwork
+        </Button>
+      </EmptyContent>
+    </Empty>
+  );
 
   return (
     <div className="flex flex-col gap-4 pt-2">
@@ -133,9 +152,13 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
           ))}
         </ToggleGroup>
         <Select
-          items={repos}
+          items={[allRepos, ...repos, CLONE]}
           value={repo}
           onValueChange={(value) => {
+            if (value === CLONE.value) {
+              setCloneOpen(true);
+              return;
+            }
             const next = value ?? ALL;
             setRepo(next);
             setShown(PAGE);
@@ -143,17 +166,31 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
               setPlay(ALL);
           }}
         >
-          <SelectTrigger aria-label="Repo">
+          <SelectTrigger aria-label="Repo" ref={repoTrigger}>
             <SelectValue />
           </SelectTrigger>
-          <SelectContent>
-            {repos.map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label}
-              </SelectItem>
-            ))}
+          <SelectContent alignItemWithTrigger={false}>
+            <SelectGroup>
+              <SelectItem value={allRepos.value}>{allRepos.label}</SelectItem>
+              {repos.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+            <SelectSeparator />
+            <SelectGroup>
+              <SelectItem value={CLONE.value}>{CLONE.label}</SelectItem>
+            </SelectGroup>
           </SelectContent>
         </Select>
+        <CloneDialog
+          act={act}
+          open={cloneOpen}
+          onOpenChange={setCloneOpen}
+          onCloned={() => setCloneCount((count) => count + 1)}
+          finalFocus={repoTrigger}
+        />
         <span className="flex flex-1 items-center justify-end gap-2 text-sm text-muted-foreground">
           {refreshing ? "Asking workwork…" : `${count} candidates${at ? `, ${ago(at)}` : ""}`}
           <Tooltip>
@@ -181,79 +218,87 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
         </span>
       </div>
 
-      <div className="flex flex-col gap-6 md:flex-row">
-        <nav className="flex flex-wrap gap-1 md:w-48 md:flex-none md:flex-col">
-          {[[ALL, inRepo.length] as const, ...plays].map(([name, total]) => (
-            <Tooltip key={name} disabled={!described.has(name)}>
-              <TooltipTrigger
-                render={
-                  <Button
-                    variant={play === name ? "secondary" : "ghost"}
-                    size="sm"
-                    onClick={() => {
-                      setPlay(name);
-                      setShown(PAGE);
-                    }}
-                  />
-                }
-              >
-                <span className="flex-1 text-left">{name || "All plays"}</span>
-                <span className="text-muted-foreground">{total}</span>
-              </TooltipTrigger>
-              <TooltipContent side="right">{described.get(name)}</TooltipContent>
-            </Tooltip>
-          ))}
-        </nav>
+      {inRepo.length === 0 ? (
+        empty
+      ) : (
+        <div className="flex flex-col gap-6 md:flex-row">
+          <nav className="flex flex-wrap gap-1 md:w-48 md:flex-none md:flex-col">
+            {[[ALL, inRepo.length] as const, ...plays].map(([name, total]) => (
+              <Tooltip key={name} disabled={!described.has(name)}>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      variant={play === name ? "secondary" : "ghost"}
+                      size="sm"
+                      onClick={() => {
+                        setPlay(name);
+                        setShown(PAGE);
+                      }}
+                    />
+                  }
+                >
+                  <span className="flex-1 text-left">{name || "All plays"}</span>
+                  <span className="text-muted-foreground">{total}</span>
+                </TooltipTrigger>
+                <TooltipContent side="right">{described.get(name)}</TooltipContent>
+              </Tooltip>
+            ))}
+          </nav>
 
-        <div className="min-w-0 flex-1">
-          <Section
-            title={
-              <span className="flex items-center gap-2">
-                <span className="flex-1">
-                  {matches.length} matching, {open.length} not queued yet
+          <div className="min-w-0 flex-1">
+            <Section
+              title={
+                <span className="flex items-center gap-2">
+                  <span className="flex-1">
+                    {matches.length} matching, {open.length} not queued yet
+                  </span>
+                  {open.length > 0 && open.length <= 20 && (
+                    <QueueButton
+                      label={`Queue all ${open.length}`}
+                      presets={snapshot.settings.presets}
+                      onQueue={(pin) => queue(open, pin)}
+                    />
+                  )}
                 </span>
-                {open.length > 0 && open.length <= 20 && (
-                  <QueueButton
-                    label={`Queue all ${open.length}`}
-                    presets={snapshot.settings.presets}
-                    onQueue={(pin) => queue(open, pin)}
-                  />
-                )}
-              </span>
-            }
-          >
-            <ItemGroup>
-              {matches.slice(0, shown).map((item) => {
-                const job = jobs.get(key(item));
-                const queueButton = (
-                  <QueueButton
-                    label="Queue"
-                    presets={snapshot.settings.presets}
-                    onQueue={(pin) => queue([item], pin)}
-                  />
-                );
-                return (
-                  <Row
-                    key={key(item)}
-                    title={itemTitle(item)}
-                    meta={[item.play, item.level, item.id].join(" · ")}
-                  >
-                    {job ? <Badge variant={JOB_BADGE[job.state]}>{job.state}</Badge> : queueButton}
-                    <CandidateDetails item={item} play={described.get(item.play)}>
-                      {!job && queueButton}
-                    </CandidateDetails>
-                  </Row>
-                );
-              })}
-            </ItemGroup>
-            {matches.length > shown && (
-              <Button variant="ghost" onClick={() => setShown(shown + PAGE)}>
-                Show {Math.min(PAGE, matches.length - shown)} more
-              </Button>
-            )}
-          </Section>
+              }
+            >
+              <ItemGroup>
+                {matches.slice(0, shown).map((item) => {
+                  const job = jobs.get(key(item));
+                  const queueButton = (
+                    <QueueButton
+                      label="Queue"
+                      presets={snapshot.settings.presets}
+                      onQueue={(pin) => queue([item], pin)}
+                    />
+                  );
+                  return (
+                    <Row
+                      key={key(item)}
+                      title={itemTitle(item)}
+                      meta={[item.play, item.level, item.id].join(" · ")}
+                    >
+                      {job ? (
+                        <Badge variant={JOB_BADGE[job.state]}>{job.state}</Badge>
+                      ) : (
+                        queueButton
+                      )}
+                      <CandidateDetails item={item} play={described.get(item.play)}>
+                        {!job && queueButton}
+                      </CandidateDetails>
+                    </Row>
+                  );
+                })}
+              </ItemGroup>
+              {matches.length > shown && (
+                <Button variant="ghost" onClick={() => setShown(shown + PAGE)}>
+                  Show {Math.min(PAGE, matches.length - shown)} more
+                </Button>
+              )}
+            </Section>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

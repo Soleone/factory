@@ -1,8 +1,6 @@
-import { FolderGit2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { type RefObject, useEffect, useState } from "react";
 import { api, type Act } from "@/api";
 import type { GithubRepo } from "@/backend/repos.ts";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/tooltip/tooltip";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -10,31 +8,28 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { ItemGroup } from "@/components/ui/item";
 import { Spinner } from "@/components/ui/spinner";
 import { Row } from "@/Row";
 
-/** A button that lists your GitHub repos not cloned under $SRC yet, to clone one so workwork finds it. */
-export function CloneDialog({ act }: { act: Act }) {
-  const [open, setOpen] = useState(false);
+export function CloneDialog({
+  act,
+  open,
+  onOpenChange,
+  onCloned,
+  finalFocus,
+}: {
+  act: Act;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onCloned: () => void;
+  finalFocus: RefObject<HTMLButtonElement | null>;
+}) {
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <DialogTrigger
-              render={<Button variant="ghost" size="icon" aria-label="Clone a repo" />}
-            />
-          }
-        >
-          <FolderGit2 />
-        </TooltipTrigger>
-        <TooltipContent>Clone a repo</TooltipContent>
-      </Tooltip>
-      <DialogContent className="sm:max-w-xl">
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-xl" finalFocus={finalFocus}>
         <DialogHeader>
           <DialogTitle>Clone a repo</DialogTitle>
           <DialogDescription>
@@ -42,14 +37,14 @@ export function CloneDialog({ act }: { act: Act }) {
             work in it.
           </DialogDescription>
         </DialogHeader>
-        <RepoList act={act} />
+        <RepoList act={act} onCloned={onCloned} />
       </DialogContent>
     </Dialog>
   );
 }
 
 /** Mounted only while the dialog is open, so every opening asks GitHub again. */
-function RepoList({ act }: { act: Act }) {
+function RepoList({ act, onCloned }: { act: Act; onCloned: () => void }) {
   const [listing, setListing] = useState<Awaited<ReturnType<typeof api.repos>>>();
   const [failure, setFailure] = useState<string>();
   const [search, setSearch] = useState("");
@@ -77,6 +72,7 @@ function RepoList({ act }: { act: Act }) {
       setCloning(repo.name);
       try {
         await api.clone(repo.name);
+        onCloned();
         setListing({ ...listing, repos: listing.repos.filter((other) => other !== repo) });
       } finally {
         setCloning(undefined);

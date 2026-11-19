@@ -1,9 +1,15 @@
 import { existsSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { output } from "./state.ts";
 
 /** Where workwork --all looks for repos, with the same fallback. */
-const SRC = process.env.SRC ?? process.cwd();
+const sourceRoot = () => resolve(process.env.SRC ?? process.cwd());
+
+/** Local repos are available as filters even when workwork finds no candidates in them. */
+export function localRepos(): string[] {
+  const root = sourceRoot();
+  return existsSync(root) ? findRepos(root, 4) : [];
+}
 
 export type GithubRepo = { name: string; description: string; createdAt: string };
 
@@ -12,6 +18,7 @@ export type GithubRepo = { name: string; description: string; createdAt: string 
  * yet, newest first.
  */
 export async function clonableRepos(): Promise<{ root: string; repos: GithubRepo[] }> {
+  const root = sourceRoot();
   const listed: { nameWithOwner: string; description: string; createdAt: string }[] = JSON.parse(
     await output(
       "gh",
@@ -25,11 +32,10 @@ export async function clonableRepos(): Promise<{ root: string; repos: GithubRepo
         "--json",
         "nameWithOwner,description,createdAt",
       ],
-      SRC,
+      root,
     ),
   );
-  const local = findRepos(SRC, 4);
-  const cloned = new Set(await Promise.all(local.map(originName)));
+  const cloned = new Set(await Promise.all(localRepos().map(originName)));
   const repos = listed
     .filter((repo) => !cloned.has(repo.nameWithOwner.toLowerCase()))
     .map((repo) => ({
@@ -38,15 +44,16 @@ export async function clonableRepos(): Promise<{ root: string; repos: GithubRepo
       createdAt: repo.createdAt,
     }))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  return { root: SRC, repos };
+  return { root, repos };
 }
 
 /** Clones `name` (owner/repo) to $SRC/<repo> and returns that path. */
 export async function cloneRepo(name: string): Promise<string> {
   if (!/^[\w.-]+\/[\w.-]+$/.test(name)) throw new Error(`${name} isn't a GitHub owner/repo`);
-  const path = join(SRC, name.split("/")[1]);
+  const root = sourceRoot();
+  const path = join(root, name.split("/")[1]);
   if (existsSync(path)) throw new Error(`${path} already exists`);
-  await output("gh", ["repo", "clone", name, path], SRC);
+  await output("gh", ["repo", "clone", name, path], root);
   return path;
 }
 

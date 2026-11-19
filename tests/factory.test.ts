@@ -591,6 +591,39 @@ ${report(base.state, { kind: "ask", text: "A or B?" })}`,
     });
   });
 
+  test("serve lists a newly cloned repo even when workwork finds no candidates", async () => {
+    const source = mkdtempSync(join(scratch, "src-"));
+    const state = mkdtempSync(join(scratch, "state-"));
+    const origin = mkdtempSync(join(scratch, "origin-"));
+    sh(origin, "git", "init", "-q", "--bare");
+    const bin = mkdtempSync(join(scratch, "bin-"));
+    script(bin, "gh", `git clone -q '${origin}' "$4"`);
+    script(bin, "workwork", "echo '[]'");
+    process.env.PATH = `${bin}:${process.env.PATH}`;
+    const previousSource = process.env.SRC;
+    process.env.SRC = source;
+    const server = serve(state, 0, "127.0.0.1");
+    await once(server, "listening");
+    const { port } = server.address() as AddressInfo;
+    const url = `http://127.0.0.1:${port}/api`;
+    const candidates = async () => (await fetch(`${url}/candidates`)).json();
+    try {
+      expect(await candidates()).toEqual({ at: null, items: [], repos: [] });
+      const response = await fetch(`${url}/repos/clone`, {
+        method: "POST",
+        body: JSON.stringify({ name: "owner/new-app" }),
+      });
+      expect(response.status).toBe(200);
+      const repos = [join(source, "new-app")];
+      expect(await candidates()).toMatchObject({ items: [], repos });
+      await expect.poll(candidates).toEqual({ at: expect.any(String), items: [], repos });
+    } finally {
+      server.close();
+      if (previousSource === undefined) delete process.env.SRC;
+      else process.env.SRC = previousSource;
+    }
+  });
+
   test("serve queues cached candidates and shows the results and their logs, nothing outside runs/", async () => {
     const base = setup(["a"]);
     agents({ claude: OK });

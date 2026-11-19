@@ -224,7 +224,11 @@ function dispatch(snapshot: Snapshot, route: string, body: unknown): unknown {
     case "GET /api/state":
       return snapshot;
     case "GET /api/candidates":
-      return { at: snapshot.candidates.at, items };
+      return {
+        at: snapshot.candidates.at,
+        items,
+        repos: [...new Set(items.map((item) => item.repo))].sort(),
+      };
     case "POST /api/candidates/refresh":
       snapshot.candidates.at = new Date().toISOString();
       return null;

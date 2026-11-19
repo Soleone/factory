@@ -10,7 +10,6 @@ import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useSidebar } from "@/components/ui/sidebar";
 import { CandidatesView } from "@/CandidatesView";
-import { CloneDialog } from "@/CloneDialog";
 import { Controls } from "@/Controls";
 import { Logo } from "@/Logo";
 import { PlanView } from "@/PlanView";
@@ -129,9 +128,7 @@ function Factory({
               </TabsTrigger>
             </TabsList>
           </div>
-          <div className="ml-auto">
-            <CloneDialog act={act} />
-          </div>
+          <div className="ml-auto" />
         </div>
         <TabsContent value="queue">
           <QueueView snapshot={snapshot} act={act} onCandidates={() => setTab("candidates")} />
