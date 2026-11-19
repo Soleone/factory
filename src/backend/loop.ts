@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   closeSync,
   existsSync,
@@ -208,7 +209,8 @@ export async function run(options: RunOptions): Promise<string> {
     const dir = join(runDir, slug);
     mkdirSync(dir, { recursive: true });
     const logPath = join(dir, "agent.log");
-    const worktree = join(state, "worktrees", agent.name, job.item.label.replace(/[^\w.-]+/g, "-"));
+    const repoKey = createHash("sha256").update(job.item.repo).digest("hex");
+    const worktree = join(state, "worktrees", agent.name, repoKey);
     const begun: Begun = {
       run: id,
       agent: agent.name,
