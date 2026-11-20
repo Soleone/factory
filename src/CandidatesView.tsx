@@ -326,11 +326,18 @@ function QueueButton({
         {label}
       </Button>
       <DropdownMenu>
-        <DropdownMenuTrigger
-          render={<Button variant="outline" size="icon-sm" aria-label={`${label} with`} />}
-        >
-          <ChevronDownIcon />
-        </DropdownMenuTrigger>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <DropdownMenuTrigger
+                render={<Button variant="outline" size="icon-sm" aria-label={`${label} with`} />}
+              />
+            }
+          >
+            <ChevronDownIcon />
+          </TooltipTrigger>
+          <TooltipContent>{label} for a specific agent or preset</TooltipContent>
+        </Tooltip>
         <DropdownMenuContent align="end" className="w-auto">
           <DropdownMenuGroup>
             <DropdownMenuLabel>Agent</DropdownMenuLabel>

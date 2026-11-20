@@ -15,6 +15,7 @@ import {
 import { ItemGroup } from "@/components/ui/item";
 import { clock, itemTitle, minutesSince, pinName, tuning, WORKER_BADGE } from "@/format";
 import { Row, Section } from "@/Row";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/tooltip/tooltip";
 import { StateIcon, StatePill, TaskDetails } from "@/TaskDetails";
 
 function jobMeta(job: Job, byId: Map<string, Job>): string {
@@ -81,14 +82,21 @@ export function QueueView({
     />
   );
   const remove = (job: Job) => (
-    <Button
-      variant="ghost"
-      size="icon-sm"
-      aria-label="Remove"
-      onClick={() => act(() => api.remove(job.id))}
-    >
-      <XIcon />
-    </Button>
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Remove from queue"
+            onClick={() => act(() => api.remove(job.id))}
+          />
+        }
+      >
+        <XIcon />
+      </TooltipTrigger>
+      <TooltipContent>Remove from queue</TooltipContent>
+    </Tooltip>
   );
 
   return (

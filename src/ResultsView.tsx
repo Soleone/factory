@@ -437,15 +437,26 @@ function Result({
       {primaryButton}
       {retry}
       {canDismiss(job) && (
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label={`Dismiss ${itemTitle(job.item)}`}
-          disabled={disabled}
-          onClick={dismiss}
-        >
-          <XIcon aria-hidden="true" />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={`Dismiss ${itemTitle(job.item)}`}
+                disabled={disabled}
+                onClick={dismiss}
+              />
+            }
+          >
+            <XIcon aria-hidden="true" />
+          </TooltipTrigger>
+          <TooltipContent>
+            {job.attempts.some((attempt) => attempt.branch)
+              ? "Dismiss: hide from results and delete its unpushed branch"
+              : "Dismiss: hide from results, its PR stays as it is"}
+          </TooltipContent>
+        </Tooltip>
       )}
     </Row>
   );
