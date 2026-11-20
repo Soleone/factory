@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { extname, join, relative, resolve, sep } from "node:path";
+import { dirname, extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AGENT_NAMES } from "./agents.ts";
 import { chat } from "./chat.ts";
@@ -87,6 +87,16 @@ export function serve(state: string, port: number, host: string): Server {
       return item;
     });
   }
+  /** What the agent was told, kept with its first run: workwork drops a candidate once it's done. */
+  function jobPrompt(id: string) {
+    const job = readJobs(state).find((job) => job.id === id);
+    if (!job) throw new Error(`no job ${id}`);
+    if (job.prompt) return job.prompt;
+    const run = job.attempts[0] && join(dirname(job.attempts[0].log), "prompt.md");
+    if (run && existsSync(run)) return readFileSync(run, "utf8");
+    const [item] = candidates([job.item]);
+    return output("workwork", ["prompt", item.id], item.repo);
+  }
   function jobPr(id: string) {
     const job = readJobs(state).find((job) => job.id === id);
     const url = job && prUrl(job);
@@ -137,6 +147,7 @@ export function serve(state: string, port: number, host: string): Server {
     "POST /api/jobs/review": (body: { agent: string }, id) => queueReview(state, id, body.agent),
     "POST /api/jobs/move": (body: { index: number }, id) => moveJob(state, id, body.index),
     "GET /api/jobs/pr": (_, id) => readPrDetails(jobPr(id)),
+    "GET /api/jobs/prompt": (_, id) => jobPrompt(id),
     "POST /api/jobs/merge": async (_, id) => {
       const { url, pr } = await openPr(id);
       if (!canMerge(pr)) throw new Error(`${url} isn't ready to merge: see it on GitHub`);

@@ -178,7 +178,7 @@ export function TaskDetails({
           <div className="-mx-4 -mb-4 grid border-t md:max-h-[65dvh] md:grid-cols-[3fr_2fr]">
             <div className="flex min-w-0 flex-col gap-3 overflow-auto p-4">
               <Label>The task</Label>
-              <Task item={item} written={job.prompt} />
+              <Task item={item} jobId={job.id} />
               <About item={item} play={play} />
             </div>
             <div className="flex min-w-0 flex-col gap-3 overflow-auto bg-muted/30 p-4 md:border-l">
@@ -197,22 +197,21 @@ export function TaskDetails({
   );
 }
 
-/** The prompt factory wrote itself, or the one workwork writes for the candidate. */
-function Task({ item, written }: { item: Item; written?: string }) {
-  const [prompt, setPrompt] = useState(written);
+/** The job's prompt, or the one workwork writes for the candidate. */
+function Task({ item, jobId }: { item: Item; jobId?: string }) {
+  const [prompt, setPrompt] = useState<string>();
   const [error, setError] = useState<string>();
 
   useEffect(() => {
-    if (written) return;
     let current = true;
-    api.prompt(item).then(
+    (jobId ? api.jobPrompt(jobId) : api.prompt(item)).then(
       (loaded) => current && setPrompt(loaded),
       (failure: Error) => current && setError(failure.message),
     );
     return () => {
       current = false;
     };
-  }, [item, written]);
+  }, [item, jobId]);
 
   if (error)
     return (

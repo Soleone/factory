@@ -24,6 +24,8 @@ export const api = {
   /** What an agent is told to do for the candidate. */
   prompt: (item: { repo: string; id: string }) =>
     call<string>("POST", "/api/candidates/prompt", { repo: item.repo, id: item.id }),
+  /** What an agent is or was told to do for the job. */
+  jobPrompt: (id: string) => call<string>("GET", `/api/jobs/${id}/prompt`),
   repos: () => call<Awaited<ReturnType<typeof clonableRepos>>>("GET", "/api/repos"),
   clone: (name: string) => call("POST", "/api/repos/clone", { name }),
   /** Without a pin, the job goes to whichever agent is free first, on its run's model and effort. */
