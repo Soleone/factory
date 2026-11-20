@@ -27,10 +27,10 @@ import { NeutralCheckbox } from "@/components/variants/checkbox";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { ItemGroup } from "@/components/ui/item";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/tooltip/tooltip";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { agentName, ago, itemTitle } from "@/format";
 import { Answer } from "@/JobNotes";
 import { Row } from "@/Row";
+import { Choice } from "@/RunFields";
 import { StateIcon, StatePill, TaskDetails, taskState } from "@/TaskDetails";
 
 type Prs = Snapshot["prs"];
@@ -193,24 +193,22 @@ export function ResultsView({
   return (
     <div className="flex flex-col gap-4 pt-2">
       <div className="flex flex-wrap items-center gap-3">
-        <ToggleGroup
-          variant="outline"
-          className="flex-wrap"
-          value={only ? [] : [filter]}
+        <Choice
+          label="Filter"
+          className="w-56"
+          items={Object.entries(FILTERS).map(([name, { label, shows }]) => ({
+            value: name,
+            label: `${label} (${jobs.filter((job) => shows(job, prs)).length})`,
+          }))}
+          value={only ? "" : filter}
           disabled={dismissing}
-          onValueChange={([chosen]) => {
-            if (!chosen || (chosen === filter && !only)) return;
+          onChange={(chosen) => {
+            if (!chosen) return;
             setFilter(chosen);
             setOnly("");
             setSelected(new Set());
           }}
-        >
-          {Object.entries(FILTERS).map(([name, { label, shows }]) => (
-            <ToggleGroupItem key={name} value={name}>
-              {label} ({jobs.filter((job) => shows(job, prs)).length})
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
+        />
         {dismissible.length > 0 && (
           <div
             role="group"
