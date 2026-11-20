@@ -192,65 +192,64 @@ export function ResultsView({
 
   return (
     <div className="flex flex-col gap-4 pt-2">
-      <div className="flex flex-wrap items-center gap-3">
-        <Choice
-          label="Filter"
-          className="w-56"
-          items={Object.entries(FILTERS).map(([name, { label, shows }]) => ({
-            value: name,
-            label: `${label} (${jobs.filter((job) => shows(job, prs)).length})`,
-          }))}
-          value={only ? "" : filter}
-          disabled={dismissing}
-          onChange={(chosen) => {
-            if (!chosen) return;
-            setFilter(chosen);
-            setOnly("");
-            setSelected(new Set());
-          }}
-        />
+      {/* Like GitHub: the batch actions take the filter's place once something is selected. */}
+      <div className="flex min-h-8 flex-wrap items-center gap-3 border border-transparent px-3">
         {dismissible.length > 0 && (
-          <div
-            role="group"
-            aria-label="Batch actions"
-            className="flex items-center gap-2 sm:ml-auto"
-          >
-            <Button
-              variant="ghost"
-              size="sm"
-              aria-label={allSelected ? "Clear selection" : undefined}
-              disabled={dismissing}
-              onClick={() =>
-                setSelected(new Set(allSelected ? [] : dismissible.map((job) => job.id)))
-              }
+          <NeutralCheckbox
+            aria-label={allSelected ? "Clear selection" : "Select all"}
+            checked={selection.length > 0 && allSelected}
+            disabled={dismissing}
+            onCheckedChange={(checked) =>
+              setSelected(new Set(checked ? dismissible.map((job) => job.id) : []))
+            }
+          />
+        )}
+        {selection.length === 0 ? (
+          <Choice
+            label="Filter"
+            className="w-56"
+            items={Object.entries(FILTERS).map(([name, { label, shows }]) => ({
+              value: name,
+              label: `${label} (${jobs.filter((job) => shows(job, prs)).length})`,
+            }))}
+            value={only ? "" : filter}
+            onChange={(chosen) => {
+              if (!chosen) return;
+              setFilter(chosen);
+              setOnly("");
+            }}
+          />
+        ) : (
+          <>
+            <span className="text-sm font-medium">
+              {selection.length} of {dismissible.length} selected
+            </span>
+            <div
+              role="group"
+              aria-label="Batch actions"
+              className="flex items-center gap-2 sm:ml-auto"
             >
-              {allSelected ? "Clear" : "Select all"}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={dismissing || selection.length === 0}
-              onClick={dismissSelected}
-            >
-              {dismissing ? "Dismissing…" : `Dismiss (${selection.length})`}
-            </Button>
-            {shown.some((job) => canBoard(job, prs, train)) && (
-              <Tooltip>
-                {/* A disabled button ignores the pointer, so the wrapper shows the hint. */}
-                <TooltipTrigger render={<span />}>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={dismissing || boarding.length === 0}
-                    onClick={mergeSelected}
-                  >
-                    Merge ({boarding.length})
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Merges one after another per repo, smallest first</TooltipContent>
-              </Tooltip>
-            )}
-          </div>
+              <Button variant="outline" size="sm" disabled={dismissing} onClick={dismissSelected}>
+                {dismissing ? "Dismissing…" : "Dismiss"}
+              </Button>
+              {boarding.length > 0 && (
+                <Tooltip>
+                  {/* A disabled button ignores the pointer, so the wrapper shows the hint. */}
+                  <TooltipTrigger render={<span />}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={dismissing}
+                      onClick={mergeSelected}
+                    >
+                      Merge {boarding.length < selection.length && `(${boarding.length})`}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Merges one after another per repo, smallest first</TooltipContent>
+                </Tooltip>
+              )}
+            </div>
+          </>
         )}
       </div>
       <ItemGroup>
