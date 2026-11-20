@@ -1,7 +1,9 @@
-import type { Attempt, Job } from "@/backend/types.ts";
+import type { Act } from "@/api";
+import type { Attempt, Job, Snapshot } from "@/backend/types.ts";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
-import { clock, itemTitle } from "@/format";
+import { clock } from "@/format";
 import { KIND } from "@/JobNotes";
+import { TaskDetails } from "@/TaskDetails";
 
 /** `ended` is the attempt an entry ends. */
 type Entry = { at: string; job: Job; text: string; tone?: string; ended?: Attempt };
@@ -43,8 +45,8 @@ function entries(jobs: Job[]): Entry[] {
 export const dayOf = (iso: string) =>
   new Date(iso).toLocaleDateString([], { weekday: "long", day: "numeric", month: "short" });
 
-export function ActivityView({ jobs, onOpen }: { jobs: Job[]; onOpen: (id: string) => void }) {
-  const shown = entries(jobs);
+export function ActivityView({ snapshot, act }: { snapshot: Snapshot; act: Act }) {
+  const shown = entries(snapshot.jobs);
   if (shown.length === 0)
     return (
       <Empty>
@@ -78,16 +80,7 @@ export function ActivityView({ jobs, onOpen }: { jobs: Job[]; onOpen: (id: strin
                 >
                   {clock(entry.at)}
                 </time>
-                <a
-                  href={`?tab=results&job=${entry.job.id}`}
-                  className="truncate underline-offset-4 hover:underline"
-                  onClick={(event) => {
-                    event.preventDefault();
-                    onOpen(entry.job.id);
-                  }}
-                >
-                  {itemTitle(entry.job.item)}
-                </a>
+                <TaskDetails item={entry.job.item} job={entry.job} snapshot={snapshot} act={act} />
                 <span
                   className={`col-start-2 wrap-anywhere sm:col-start-3 ${entry.tone ?? "text-muted-foreground"}`}
                 >

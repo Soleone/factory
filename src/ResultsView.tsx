@@ -117,7 +117,6 @@ export function ResultsView({
 }) {
   const [filter, setFilter] = useQueryParam("filter", "all");
   /** One job alone, as a link to it opens it. */
-  const [only, setOnly] = useQueryParam("job", "");
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [dismissing, setDismissing] = useState(false);
   const seen = useLastSeen();
@@ -142,9 +141,7 @@ export function ResultsView({
       </Empty>
     );
 
-  const shown = jobs.filter((job) =>
-    only ? job.id === only : (FILTERS[filter] ?? FILTERS.all).shows(job, prs),
-  );
+  const shown = jobs.filter((job) => (FILTERS[filter] ?? FILTERS.all).shows(job, prs));
   const dismissible = shown.filter(canDismiss);
   const selection = dismissible.filter((job) => selected.has(job.id));
   const allSelected = selection.length === dismissible.length;
@@ -212,12 +209,8 @@ export function ResultsView({
               value: name,
               label: `${label} (${jobs.filter((job) => shows(job, prs)).length})`,
             }))}
-            value={only ? "" : filter}
-            onChange={(chosen) => {
-              if (!chosen) return;
-              setFilter(chosen);
-              setOnly("");
-            }}
+            value={filter}
+            onChange={(chosen) => chosen && setFilter(chosen)}
           />
         ) : (
           <>

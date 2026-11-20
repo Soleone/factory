@@ -17,7 +17,7 @@ import { QueueView } from "@/QueueView";
 import { ResultsView } from "@/ResultsView";
 import { SettingsDialog } from "@/SettingsDialog";
 import { clock, runStart } from "@/format";
-import { setQueryParam, useQueryParam } from "@/hooks/use-query-param";
+import { useQueryParam } from "@/hooks/use-query-param";
 
 export function App() {
   const { snapshot, error, act } = useFactory();
@@ -132,13 +132,7 @@ function Factory({
           <CandidatesView snapshot={snapshot} act={act} />
         </TabsContent>
         <TabsContent value="activity">
-          <ActivityView
-            jobs={snapshot.jobs}
-            onOpen={(id) => {
-              setQueryParam("job", id);
-              setTab("results");
-            }}
-          />
+          <ActivityView snapshot={snapshot} act={act} />
         </TabsContent>
         <TabsContent value="results">
           <ResultsView
