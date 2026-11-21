@@ -181,7 +181,9 @@ describe("queue", () => {
     moveJob(state, c.id, 1);
     expect(ids(readJobs(state))).toEqual(["a", "c", "auto1"]);
     await expect(removeJob(state, b.id)).rejects.toThrow("is removed");
-    expect(() => retryJob(state, a.id)).toThrow("is queued");
+    expect(() => retryJob(state, a.id)).toThrow(
+      `Job ${a.id} is queued. Try again with a job in an allowed state: failed.`,
+    );
   });
 });
 
