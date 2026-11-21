@@ -1,7 +1,21 @@
 import { type ComponentProps, useEffect, useState } from "react";
-import { PlusIcon, Settings2, XIcon } from "lucide-react";
+import {
+  ArrowDownIcon,
+  ArrowUpIcon,
+  GripVerticalIcon,
+  PlusIcon,
+  Settings2,
+  XIcon,
+} from "lucide-react";
 import { api, type Act } from "@/api";
-import type { Preset, Settings, Snapshot } from "@/backend/types.ts";
+import {
+  presetId,
+  TIERS,
+  type Preset,
+  type Settings,
+  type Snapshot,
+  type Tier,
+} from "@/backend/types.ts";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -85,6 +99,7 @@ function SettingsForm({
         <TabsList>
           <TabsTrigger value="runs">Runs</TabsTrigger>
           <TabsTrigger value="presets">Presets</TabsTrigger>
+          <TabsTrigger value="tiers">Tiers</TabsTrigger>
           <TabsTrigger value="auto">Auto mode</TabsTrigger>
           <TabsTrigger value="chat">Live Agent</TabsTrigger>
         </TabsList>
@@ -111,6 +126,13 @@ function SettingsForm({
             <PresetFields
               value={draft.presets}
               onChange={(presets) => setDraft({ ...draft, presets })}
+            />
+          </StackedTabsContent>
+          <StackedTabsContent value="tiers">
+            <TierFields
+              presets={draft.presets}
+              value={draft.tiers}
+              onChange={(tiers) => setDraft({ ...draft, tiers })}
             />
           </StackedTabsContent>
           <StackedTabsContent value="auto">
@@ -217,7 +239,10 @@ function PresetFields({
   return (
     <FieldGroup>
       <FieldDescription>
-        Queue a candidate with one of these from the arrow next to its Queue button.
+        Queue a candidate with one of these from the arrow next to its Queue button. Tiers run on
+        them too: workers is how many run at once (empty: one once a tier lists it), and k ctx the
+        context size, in thousands of tokens, where the agent compacts (empty: 90 for Haiku, 200
+        otherwise).
       </FieldDescription>
       {value.map((preset, index) => (
         <Field key={index} orientation="horizontal">
@@ -231,7 +256,36 @@ function PresetFields({
           <TuningFields
             agent={preset.agent}
             value={preset}
-            onChange={(tuning) => set(index, { ...tuning, agent: preset.agent })}
+            onChange={(tuning) => set(index, { ...preset, ...tuning, agent: preset.agent })}
+          />
+          <Input
+            aria-label="Workers"
+            type="number"
+            min={0}
+            className="w-16"
+            placeholder="workers"
+            value={preset.workers ?? ""}
+            onChange={(event) =>
+              set(index, {
+                ...preset,
+                workers: event.target.value === "" ? undefined : Number(event.target.value),
+              })
+            }
+          />
+          <Input
+            aria-label="Compact at, thousands of tokens"
+            type="number"
+            min={10}
+            className="w-20"
+            placeholder="k ctx"
+            value={preset.compactAt ? preset.compactAt / 1000 : ""}
+            onChange={(event) =>
+              set(index, {
+                ...preset,
+                compactAt:
+                  event.target.value === "" ? undefined : Number(event.target.value) * 1000,
+              })
+            }
           />
           <Button
             type="button"
@@ -268,5 +322,120 @@ function StackedTabsContent(props: ComponentProps<typeof TabsContent>) {
       className="col-start-1 row-start-1 data-hidden:invisible"
       {...props}
     />
+  );
+}
+
+const TIER_ABOUT: Record<Tier, string> = {
+  communicator: "decomposition, UX, visual design, copy: anything judged by taste",
+  builder: "architecture, foundations, tricky logic, reviews",
+  grunt: "well-specified mechanical work",
+};
+
+/** Each tier's presets, tried in order: drag or use the arrows to reorder. */
+function TierFields({
+  presets,
+  value,
+  onChange,
+}: {
+  presets: Preset[];
+  value: Settings["tiers"];
+  onChange: (tiers: Settings["tiers"]) => void;
+}) {
+  const [dragging, setDragging] = useState<{ tier: Tier; index: number }>();
+  const ids = presets.map(presetId);
+  const set = (tier: Tier, list: string[]) => onChange({ ...value, [tier]: list });
+  const move = (tier: Tier, from: number, to: number) => {
+    const list = [...value[tier]];
+    const [id] = list.splice(from, 1);
+    list.splice(to, 0, id);
+    set(tier, list);
+  };
+  return (
+    <FieldGroup>
+      <FieldDescription>
+        A goal's node runs on the first preset of its tier whose usage limit isn't hit and that has
+        a free worker. A tier with no presets here runs on the run's agents.
+      </FieldDescription>
+      {TIERS.map((tier) => {
+        const list = value[tier];
+        const free = ids.filter((id) => !list.includes(id));
+        return (
+          <Field key={tier}>
+            <FieldLabel>
+              {tier} <span className="font-normal text-muted-foreground">{TIER_ABOUT[tier]}</span>
+            </FieldLabel>
+            <ol className="flex flex-col gap-1">
+              {list.map((id, index) => (
+                <li
+                  key={id}
+                  draggable
+                  onDragStart={() => setDragging({ tier, index })}
+                  onDragOver={(event) => dragging?.tier === tier && event.preventDefault()}
+                  onDrop={() => {
+                    if (dragging?.tier === tier) move(tier, dragging.index, index);
+                    setDragging(undefined);
+                  }}
+                  className="flex items-center gap-1 rounded-md border px-2 py-1 text-sm"
+                >
+                  <GripVerticalIcon className="size-4 cursor-grab text-muted-foreground" />
+                  <span className="flex-1">
+                    {index + 1}. {id}
+                    {!ids.includes(id) && (
+                      <span className="text-destructive"> (no such preset)</span>
+                    )}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label="Move up"
+                    disabled={index === 0}
+                    onClick={() => move(tier, index, index - 1)}
+                  >
+                    <ArrowUpIcon />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label="Move down"
+                    disabled={index === list.length - 1}
+                    onClick={() => move(tier, index, index + 1)}
+                  >
+                    <ArrowDownIcon />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label="Remove from tier"
+                    onClick={() =>
+                      set(
+                        tier,
+                        list.filter((each) => each !== id),
+                      )
+                    }
+                  >
+                    <XIcon />
+                  </Button>
+                </li>
+              ))}
+            </ol>
+            {free.length > 0 && (
+              <Choice
+                label={`Add a preset to ${tier}`}
+                className="w-56"
+                items={[
+                  { value: "", label: "Add a preset…" },
+                  ...free.map((id) => ({ value: id, label: id })),
+                ]}
+                value=""
+                onChange={(id) => id && set(tier, [...list, id])}
+              />
+            )}
+          </Field>
+        );
+      })}
+    </FieldGroup>
   );
 }

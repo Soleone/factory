@@ -2,7 +2,7 @@ import { ArrowDownIcon, ArrowUpIcon, XIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import type { ReactNode, Ref } from "react";
 import { api, type Act } from "@/api";
-import type { Job, Snapshot } from "@/backend/types.ts";
+import { TIERS, type Job, type Snapshot } from "@/backend/types.ts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -104,55 +104,87 @@ export function QueueView({
 
   return (
     <div className="flex flex-col gap-8 pt-2">
-      {on && status && (
-        <Section title="Agents">
-          <ItemGroup>
-            {status.workers.map((worker) => {
-              const job = worker.job ? byId.get(worker.job) : undefined;
-              const what = job
-                ? undefined
-                : worker.until
-                  ? `until ${clock(worker.until)}`
-                  : (worker.reason ?? "waiting for work");
-              const pool = status.pools.find((each) => each.name === worker.pool);
-              const limits = `${worker.pool}: limits hit ${pool?.limits ?? 0} of ${status.limit ?? "∞"}`;
-              const budget = job && `${minutesSince(worker.since)} min`;
-              const said = job?.notes.at(-1);
-              return (
-                <Row
-                  key={worker.id}
-                  title={
-                    <>
-                      {worker.id} <Badge variant={WORKER_BADGE[worker.state]}>{worker.state}</Badge>
-                    </>
-                  }
-                  meta={
-                    <span className="flex flex-col gap-1">
-                      {job && (
-                        <span className="flex items-center gap-2 text-foreground">
-                          <StateIcon state={job.state} />
-                          {details(job, false)}
-                        </span>
-                      )}
-                      <span>
-                        {[what, tuning(worker), budget || `since ${clock(worker.since)}`, limits]
-                          .filter(Boolean)
-                          .join(" · ")}
-                      </span>
-                      {worker.activity && <span>{worker.activity}</span>}
-                      {said && (
-                        <span>
-                          {clock(said.at)} {said.kind}: {said.text}
-                        </span>
-                      )}
-                    </span>
-                  }
-                />
-              );
-            })}
-          </ItemGroup>
-        </Section>
-      )}
+      {on &&
+        status &&
+        status.pools.map((pool) => {
+          const pause = pool.stopped ?? (pool.until ? `sleeps until ${clock(pool.until)}` : "");
+          return (
+            <Section
+              key={pool.name}
+              title={`${pool.name}: limits hit ${pool.limits} of ${status.limit ?? "∞"}${pause ? `, ${pause}` : ""}`}
+            >
+              <ItemGroup>
+                {status.workers
+                  .filter((worker) => worker.pool === pool.name)
+                  .map((worker) => {
+                    const job = worker.job ? byId.get(worker.job) : undefined;
+                    const what = job
+                      ? undefined
+                      : worker.until
+                        ? `until ${clock(worker.until)}`
+                        : (worker.reason ?? "waiting for work");
+                    const tiers = TIERS.filter((tier) =>
+                      settings.tiers[tier].includes(worker.preset),
+                    );
+                    const step = job?.notes.findLast(
+                      (note) => note.kind === "step" && note.attempt === job.attempts.length + 1,
+                    );
+                    const said = job?.notes.findLast((note) => note.kind !== "step");
+                    return (
+                      <Row
+                        key={worker.id}
+                        title={
+                          <>
+                            {worker.id}{" "}
+                            <Badge variant={WORKER_BADGE[worker.state]}>{worker.state}</Badge>
+                            {tiers.map((tier) => (
+                              <Badge key={tier} variant="secondary" className="ml-1">
+                                {tier}
+                              </Badge>
+                            ))}
+                          </>
+                        }
+                        meta={
+                          <span className="flex flex-col gap-1">
+                            {job && (
+                              <span className="flex items-center gap-2 text-foreground">
+                                <StateIcon state={job.state} />
+                                {details(job, false)}
+                              </span>
+                            )}
+                            <span>
+                              {[
+                                what,
+                                tuning(worker),
+                                job
+                                  ? `${minutesSince(worker.since)} min`
+                                  : `since ${clock(worker.since)}`,
+                                worker.context && `${Math.round(worker.context / 1000)}k context`,
+                              ]
+                                .filter(Boolean)
+                                .join(" · ")}
+                            </span>
+                            {step && (
+                              <span className="text-foreground">
+                                {step.text}
+                                {step.of ? ` (${step.done ?? 0}/${step.of})` : ""}
+                              </span>
+                            )}
+                            {worker.activity && <span>{worker.activity}</span>}
+                            {said && (
+                              <span>
+                                {clock(said.at)} {said.kind}: {said.text}
+                              </span>
+                            )}
+                          </span>
+                        }
+                      />
+                    );
+                  })}
+              </ItemGroup>
+            </Section>
+          );
+        })}
 
       <Section title={`Your picks (${picks.length})`}>
         {picks.length === 0 ? (

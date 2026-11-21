@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Activity, Inbox, ListOrdered, PackageCheck } from "lucide-react";
+import { Activity, Inbox, ListOrdered, PackageCheck, Workflow } from "lucide-react";
 import { ActivityView } from "@/ActivityView";
 import { useFactory, type Act } from "@/api";
 import type { Snapshot } from "@/backend/types.ts";
@@ -11,6 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useSidebar } from "@/components/ui/sidebar";
 import { CandidatesView } from "@/CandidatesView";
 import { Controls } from "@/Controls";
+import { GoalsView } from "@/GoalsView";
 import { Logo } from "@/Logo";
 import { PlanView } from "@/PlanView";
 import { QueueView } from "@/QueueView";
@@ -62,7 +63,13 @@ function Factory({
   const [tab, setTab] = useQueryParam("tab", "queue");
   const { isMobile, setOpen, setOpenMobile } = useSidebar();
   const { on, status } = snapshot;
-  const queued = snapshot.jobs.filter((job) => job.state === "queued").length;
+  const queued = snapshot.jobs.filter(
+    (job) => job.state === "queued" && !job.of && !job.goal,
+  ).length;
+  const goals = snapshot.jobs.filter(
+    (job) => job.goal && job.state !== "removed" && job.state !== "done",
+  );
+  const waiting = goals.filter((goal) => goal.blocked === "checkpoint").length;
   const run =
     on && status
       ? [
@@ -102,12 +109,17 @@ function Factory({
       )}
       <Tabs value={tab} onValueChange={setTab}>
         <div className="flex items-center gap-2">
-          {/* Four tabs don't fit a phone; they scroll on their own rather than the page. */}
+          {/* The tabs don't fit a phone; they scroll on their own rather than the page. */}
           <div className="min-w-0 overflow-x-auto overflow-y-hidden">
             <TabsList>
               <TabsTrigger value="queue">
                 <ListOrdered />
                 Queue{queued ? ` (${queued})` : ""}
+              </TabsTrigger>
+              <TabsTrigger value="goals">
+                <Workflow />
+                Goals{goals.length ? ` (${goals.length})` : ""}
+                {waiting > 0 && <Badge variant="accent">{waiting}</Badge>}
               </TabsTrigger>
               <TabsTrigger value="candidates">
                 <Inbox />
@@ -127,6 +139,9 @@ function Factory({
         </div>
         <TabsContent value="queue">
           <QueueView snapshot={snapshot} act={act} onCandidates={() => setTab("candidates")} />
+        </TabsContent>
+        <TabsContent value="goals">
+          <GoalsView snapshot={snapshot} act={act} />
         </TabsContent>
         <TabsContent value="candidates">
           <CandidatesView snapshot={snapshot} act={act} />

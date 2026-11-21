@@ -33,6 +33,120 @@ const DEMO_NOTES: Record<number, Omit<Job["notes"][number], "at" | "attempt">[]>
 /** What a fresh job has besides its item. */
 const BLANK = { after: [], gates: [], needs: [], unverified: [], escalations: 0, open: false };
 
+/** A goal part way through: a foundation merged, two nodes side by side, the rest waiting. */
+function demoGoal(at: string, run: string): Job[] {
+  const repo = "/demo/atlas";
+  const item = (id: string, title: string) => ({
+    repo,
+    label: "atlas",
+    id,
+    play: "goal",
+    level: "decide",
+    title,
+  });
+  const attempt = (
+    outcome: "done" | "failed",
+    preset: string,
+    peak: number,
+    compactions: number,
+  ) => ({
+    run,
+    agent: preset.startsWith("opus") ? "claude" : "pi",
+    preset,
+    start: new Date(Date.parse(at) - 40 * 60_000).toISOString(),
+    end: new Date(Date.parse(at) - 20 * 60_000).toISOString(),
+    outcome,
+    log: `runs/${run}/goal-1/agent.log`,
+    turns: 2,
+    followups: 1,
+    peak,
+    compactions,
+    tokens: { input: 40_000, cached: 900_000, output: 30_000 },
+  });
+  const node = (id: string, title: string, rest: Partial<Job>): Job => ({
+    ...BLANK,
+    id,
+    item: item(id, title),
+    source: "goal",
+    of: "goal",
+    key: id,
+    added: at,
+    state: "queued",
+    attempts: [],
+    notes: [],
+    gates: ["pnpm test"],
+    touches: [`src/${id}/**`],
+    prompt: `Build ${title.toLowerCase()}.`,
+    ...rest,
+  });
+  return [
+    {
+      ...BLANK,
+      id: "goal",
+      item: { ...item("goal/export", "Export to every format"), play: "goal" },
+      source: "goal",
+      added: at,
+      state: "queued",
+      attempts: [],
+      notes: [
+        { at, attempt: 0, kind: "factory", text: "the plan has 6 nodes; approve it to start" },
+      ],
+      goal: {
+        repo,
+        slug: "export",
+        summary: "Exports to CSV, JSON and XLSX with one shared writer.",
+        gates: ["pnpm test"],
+        budget: { attempts: 30 },
+        allowUp: true,
+      },
+    },
+    node("writer", "Shared export writer", {
+      tier: "builder",
+      state: "done",
+      attempts: [attempt("done", "sol", 150_000, 1)],
+      notes: [
+        {
+          at,
+          attempt: 1,
+          kind: "factory",
+          text: "merged into goal/export",
+          url: "https://example.com/demo/pull/21",
+        },
+      ],
+    }),
+    node("csv", "CSV format", {
+      tier: "grunt",
+      after: ["writer"],
+      state: "running",
+      notes: [
+        { at, attempt: 1, kind: "step", text: "Quoting rules", done: 2, of: 5 },
+        {
+          at,
+          attempt: 1,
+          kind: "assume",
+          text: "Excel-style or RFC 4180 line endings?",
+          assumed: "RFC 4180",
+        },
+      ],
+    }),
+    node("json", "JSON format", {
+      tier: "grunt",
+      after: ["writer"],
+      state: "done",
+      unverified: ["checked in a browser"],
+      attempts: [attempt("done", "luna", 260_000, 3)],
+      notes: [{ at, attempt: 1, kind: "factory", text: "merged into goal/export" }],
+    }),
+    node("xlsx", "XLSX format", { tier: "builder", after: ["writer"], needs: ["display"] }),
+    node("menu", "Export menu and copy", {
+      tier: "communicator",
+      after: ["csv", "json", "xlsx"],
+      checkpoint: true,
+    }),
+    node("docs", "Document the formats", { tier: "grunt", after: ["menu"] }),
+  ];
+}
+
 function seed(): Snapshot {
   const at = new Date().toISOString();
   const run = at.slice(0, 19).replaceAll(":", "");
@@ -73,6 +187,7 @@ function seed(): Snapshot {
         notes: DEMO_NOTES[index]?.map((note) => ({ at, attempt: 1, ...note })) ?? [],
       };
     }),
+    ...demoGoal(at, run),
   ];
   return {
     on: false,
@@ -81,10 +196,14 @@ function seed(): Snapshot {
     settings: {
       agents: { claude: {}, pi: {} },
       chat: { agent: "pi" },
-      presets: [{ agent: "pi", effort: "max" }],
+      presets: [
+        { agent: "claude", model: "opus", effort: "high", id: "opus" },
+        { agent: "pi", model: "openai/gpt-6.2-sol", effort: "high", id: "sol", workers: 2 },
+        { agent: "pi", model: "openai-codex/gpt-6-luna", effort: "max", id: "luna", workers: 3 },
+      ],
       limit: 2,
       idle: 10,
-      tiers: { communicator: [], builder: [], grunt: [] },
+      tiers: { communicator: ["opus"], builder: ["sol", "opus"], grunt: ["luna"] },
       store: "local",
       capabilities: [],
       env: {},
@@ -322,9 +441,18 @@ function dispatch(snapshot: Snapshot, route: string, body: unknown): unknown {
       return null;
   }
   if (/^GET \/api\/jobs\/\w+\/pr$/.test(route)) return DEMO_PR;
-  const match = /^POST \/api\/jobs\/(\w+)\/(remove|retry|move|merge|rebase|close|answer)$/.exec(
-    route,
-  );
+  const prompt = /^GET \/api\/jobs\/(\w+)\/prompt$/.exec(route);
+  if (prompt) {
+    const job = jobs.find((entry) => entry.id === prompt[1]);
+    return (
+      job?.prompt ??
+      `# workwork: ${job?.item.id}\n\n## Task\n\nDemo task: ${job?.item.title.toLowerCase()}.\n`
+    );
+  }
+  const match =
+    /^POST \/api\/jobs\/(\w+)\/(remove|retry|move|merge|rebase|close|answer|approve|pause|resume|cancel|replan|verify)$/.exec(
+      route,
+    );
   if (!match) return undefined;
   const [, id, action] = match;
   const job = jobs.find((entry) => entry.id === id && entry.state !== "removed");
@@ -334,12 +462,37 @@ function dispatch(snapshot: Snapshot, route: string, body: unknown): unknown {
       job.state = "removed";
       break;
     case "retry":
+    case "resume":
+    case "approve":
       job.state = "queued";
+      job.blocked = undefined;
       break;
+    case "pause":
+      job.state = "blocked";
+      job.blocked = "paused";
+      break;
+    case "cancel":
+      job.state = "removed";
+      break;
+    case "replan":
+      job.notes.push({
+        at: new Date().toISOString(),
+        attempt: 0,
+        kind: "factory",
+        text: `replan queued: ${(body as { why: string }).why}`,
+      });
+      break;
+    case "verify": {
+      const { need } = body as { need?: string };
+      job.unverified = need ? job.unverified.filter((each) => each !== need) : [];
+      break;
+    }
     case "answer": {
       const { text } = body as { text: string };
-      job.notes.push({ at: new Date().toISOString(), attempt: 1, kind: "answer", text });
-      job.state = "queued";
+      const assumed = job.notes.findIndex((note) => note.kind === "assume");
+      const re = job.state === "blocked" || assumed < 0 ? undefined : assumed;
+      job.notes.push({ at: new Date().toISOString(), attempt: 1, kind: "answer", text, re });
+      if (re === undefined) job.state = "queued";
       break;
     }
     case "move": {

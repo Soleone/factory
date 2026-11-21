@@ -23,6 +23,8 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { clock, minutesSince, repoName } from "@/format";
 import { AttemptFile } from "@/AttemptFile";
@@ -112,11 +114,11 @@ export function taskState(job: Job | undefined, prs: Snapshot["prs"]): TaskState
   return pr === "MERGED" ? "merged" : pr === "CLOSED" ? "closed" : "review";
 }
 
-/** A muted repo before the title, as the same name reads in every list. */
-function TaskTitle({ item }: { item: Item }) {
+/** A muted repo before the title, as the same name reads in every list; `bare` where the repo goes without saying. */
+function TaskTitle({ item, bare }: { item: Item; bare?: boolean }) {
   return (
     <>
-      <span className="font-normal text-muted-foreground">{repoName(item.repo)}:</span>{" "}
+      {!bare && <span className="font-normal text-muted-foreground">{repoName(item.repo)}: </span>}
       {item.title || item.id}
     </>
   );
@@ -133,9 +135,12 @@ export function TaskDetails({
   snapshot,
   act,
   actions,
+  bare,
 }: {
   item: Item;
   job?: Job;
+  /** Without the repo, as inside a goal, where every node shares it. */
+  bare?: boolean;
   /** What the item's play does, once workwork has said. */
   play?: string;
   snapshot: Snapshot;
@@ -153,7 +158,7 @@ export function TaskDetails({
           />
         }
       >
-        <TaskTitle item={item} />
+        <TaskTitle item={item} bare={bare} />
       </DialogTrigger>
       <DialogContent className={job ? "sm:max-w-5xl" : "sm:max-w-3xl"}>
         <DialogHeader className="mr-8">
@@ -230,7 +235,7 @@ function Task({ item, jobId }: { item: Item; jobId?: string }) {
       {/* The title and facts above already say what the prompt's header does, and the coding
       standard every prompt ends with says nothing about this task. */}
       <Markdown options={MARKDOWN}>
-        {prompt.split("\n## Standard")[0].replace(/^# [^]*?(?=^## )/m, "")}
+        {prompt.split("\n## Standard")[0].replace(/^# workwork[^]*?(?=^## )/m, "")}
       </Markdown>
     </div>
   );
@@ -246,6 +251,9 @@ function Story({ job, snapshot, act }: { job: Job; snapshot: Snapshot; act: Act 
       .map((each) => each.item.title),
   );
   const worker = status?.workers.find((each) => each.job === job.id);
+  const step = job.notes.findLast(
+    (note) => note.kind === "step" && note.attempt === job.attempts.length + 1,
+  );
   const question =
     job.state === "blocked" ? job.notes.findLast((note) => note.kind === "ask") : undefined;
   const url = prUrl(job);
@@ -264,9 +272,20 @@ function Story({ job, snapshot, act }: { job: Job; snapshot: Snapshot; act: Act 
             <StateIcon state="running" />
             {worker.id} working, {minutesSince(worker.since)} min
           </span>
-          {worker.activity && <span>{worker.activity}</span>}
+          {step && (
+            <span>
+              {step.text}
+              {step.of ? ` (${step.done ?? 0}/${step.of})` : ""}
+            </span>
+          )}
+          <span className="text-muted-foreground">
+            {[worker.activity, worker.context && `${Math.round(worker.context / 1000)}k context`]
+              .filter(Boolean)
+              .join(" · ")}
+          </span>
         </Now>
       )}
+      <Facts job={job} act={act} />
       {question && <Answer job={job} question={question} act={act} />}
       {last?.error && (
         <Now className="border-destructive/40 text-destructive">{last.error.split("\n")[0]}</Now>
@@ -315,6 +334,74 @@ function Story({ job, snapshot, act }: { job: Job; snapshot: Snapshot; act: Act 
         ))}
       </div>
     </>
+  );
+}
+
+/** What the job is held to and what's left for the user to check, for jobs that have any. */
+function Facts({ job, act }: { job: Job; act: Act }) {
+  const assumed = job.notes.flatMap((note, index) =>
+    note.kind === "assume" &&
+    !job.notes.some((other) => other.kind === "answer" && other.re === index)
+      ? [note]
+      : [],
+  );
+  const facts = [
+    job.tier && `tier ${job.tier}${job.escalations ? `, moved up ${job.escalations}×` : ""}`,
+    job.gates.length > 0 && `gates ${job.gates.map((gate) => `\`${gate}\``).join(", ")}`,
+    job.touches && `touches ${job.touches.length ? job.touches.join(", ") : "anything"}`,
+    job.needs.length > 0 && `needs ${job.needs.join(", ")}`,
+  ].filter(Boolean);
+  if (facts.length === 0 && job.unverified.length === 0 && assumed.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-2 text-sm">
+      {facts.length > 0 && <p className="text-xs text-muted-foreground">{facts.join(" · ")}</p>}
+      {job.unverified.map((need) => (
+        <Now key={need} className="border-warning/40">
+          <span className="flex flex-wrap items-center gap-2">
+            <span className="flex-1">Not verified: {need}</span>
+            <Button size="sm" variant="outline" onClick={() => act(() => api.verify(job.id, need))}>
+              Checked
+            </Button>
+          </span>
+        </Now>
+      ))}
+      {assumed.map((note) => (
+        <Now key={note.at} className="border-warning/40">
+          <span>
+            Assumed <strong>{note.assumed}</strong>, asked: {note.text}
+          </span>
+          <span className="flex gap-2">
+            <Button size="sm" onClick={() => act(() => api.answer(job.id, "fine"))}>
+              Fine
+            </Button>
+            <span className="text-xs text-muted-foreground">or answer below to queue a change</span>
+          </span>
+          <AssumeAnswer job={job} act={act} />
+        </Now>
+      ))}
+    </div>
+  );
+}
+
+function AssumeAnswer({ job, act }: { job: Job; act: Act }) {
+  const [text, setText] = useState("");
+  return (
+    <form
+      className="flex gap-2"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void act(() => api.answer(job.id, text));
+      }}
+    >
+      <Input
+        value={text}
+        onChange={(event) => setText(event.target.value)}
+        placeholder="Your answer"
+      />
+      <Button type="submit" size="sm" variant="outline" disabled={!text.trim()}>
+        Answer
+      </Button>
+    </form>
   );
 }
 

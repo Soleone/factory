@@ -15,11 +15,13 @@ import {
   queueFollowup,
   queueReview,
   readJobs,
+  record,
   removeJob,
   retryJob,
 } from "./jobs.ts";
 import { turnOff, turnOn } from "./power.ts";
 import { closePr, mergePr, prCache, readPrDetails, rebasePr } from "./review.ts";
+import { approveGoal, cancelGoal, findGoal, pauseGoal, queueReplan, resumeGoal } from "./goals.ts";
 import { mirrorTasks } from "./tasksStore.ts";
 import { mergeTrain } from "./train.ts";
 import {
@@ -145,6 +147,16 @@ export function serve(state: string, port: number, host: string): Server {
     "POST /api/jobs/remove": (_, id) => removeJob(state, id),
     "POST /api/jobs/retry": (_, id) => retryJob(state, id),
     "POST /api/jobs/answer": (body: { text: string }, id) => answer(state, id, body.text),
+    "POST /api/jobs/approve": (_, id) => approveGoal(state, id),
+    "POST /api/jobs/pause": (_, id) => pauseGoal(state, id),
+    "POST /api/jobs/resume": (_, id) => resumeGoal(state, id),
+    "POST /api/jobs/cancel": (_, id) => cancelGoal(state, id),
+    "POST /api/jobs/replan": (body: { why: string }, id) => {
+      if (!body.why?.trim()) throw new Error("a replan wants a reason");
+      queueReplan(state, findGoal(state, id), body.why);
+    },
+    "POST /api/jobs/verify": (body: { need?: string }, id) =>
+      record(state, { type: "verify", id, need: body.need }),
     "POST /api/jobs/followup": (body: { task: string }, id) => queueFollowup(state, id, body.task),
     "POST /api/jobs/review": (body: { agent: string }, id) => queueReview(state, id, body.agent),
     "POST /api/jobs/move": (body: { index: number }, id) => moveJob(state, id, body.index),

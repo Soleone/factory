@@ -10,6 +10,20 @@ type Entry = { at: string; job: Job; text: string; tone?: string; ended?: Attemp
 
 const SHOWN = 200;
 
+/** Turns, follow-ups, peak context and compactions, as far as the runner reported them. */
+function attemptNumbers(attempt: Attempt): string {
+  if (!attempt.turns) return "";
+  const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
+  return [
+    plural(attempt.turns, "turn"),
+    attempt.followups ? plural(attempt.followups, "follow-up") : "",
+    attempt.peak ? `peak ${Math.round(attempt.peak / 1000)}k` : "",
+    attempt.compactions ? plural(attempt.compactions, "compaction") : "",
+  ]
+    .filter(Boolean)
+    .join(", ");
+}
+
 /** Everything that happened to one job: queued, each attempt's start and end, and what its agents said. */
 export function jobEntries(job: Job): Entry[] {
   return [
@@ -19,7 +33,13 @@ export function jobEntries(job: Job): Entry[] {
       {
         at: attempt.end,
         job,
-        text: `${attempt.agent} ${attempt.outcome}${attempt.url ? ` · ${attempt.url.replace("https://github.com/", "")}` : ""}`,
+        text: [
+          `${attempt.preset ?? attempt.agent} ${attempt.outcome}`,
+          attempt.url?.replace("https://github.com/", ""),
+          attemptNumbers(attempt),
+        ]
+          .filter(Boolean)
+          .join(" · "),
         tone: attempt.outcome === "done" ? undefined : "text-destructive",
         ended: attempt,
       },

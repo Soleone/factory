@@ -33,8 +33,14 @@ export const api = {
     call("POST", "/api/jobs", { items, pin }),
   remove: (id: string) => call("POST", `/api/jobs/${id}/remove`),
   retry: (id: string) => call("POST", `/api/jobs/${id}/retry`),
-  /** Answers the question a blocked job's agent asked; the job goes back in the queue. */
+  /** Answers the question a blocked job's agent asked, which picks its session up again, or else its oldest assumption. */
   answer: (id: string, text: string) => call("POST", `/api/jobs/${id}/answer`, { text }),
+  /** A goal's approve, pause, resume or cancel. */
+  goal: (id: string, action: "approve" | "pause" | "resume" | "cancel") =>
+    call("POST", `/api/jobs/${id}/${action}`),
+  replan: (id: string, why: string) => call("POST", `/api/jobs/${id}/replan`, { why }),
+  /** The user checked what the job couldn't; without a need, all of it. */
+  verify: (id: string, need?: string) => call("POST", `/api/jobs/${id}/verify`, { need }),
   followup: (id: string, task: string) => call("POST", `/api/jobs/${id}/followup`, { task }),
   review: (id: string, agent: string) => call("POST", `/api/jobs/${id}/review`, { agent }),
   prDetails: (id: string) => call<{ body: string; diff: string }>("GET", `/api/jobs/${id}/pr`),
