@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.1](https://github.com/Soleone/factory/compare/v0.3.0...v0.3.1) (2026-11-21)
+
+### Features
+
+* **goals:** start a goal from the page, in a repo or a new project ([8c48092](https://github.com/Soleone/factory/commit/8c4809268a58d887a047697d5457d9f7a8264500))
+
 ## [0.3.0](https://github.com/Soleone/factory/compare/v0.2.2...v0.3.0) (2026-11-21)
 
 ### Features
