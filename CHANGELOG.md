@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.3.0](https://github.com/Soleone/factory/compare/v0.2.2...v0.3.0) (2026-11-21)
+
+### Features
+
+* **activity:** open the task's details in place instead of filtering Results to it ([a020034](https://github.com/Soleone/factory/commit/a020034ef84a447a3121f857d91b175d8091bb1c))
+* goals as graphs of jobs, sessions with follow-ups, tiers and pools ([1b642c7](https://github.com/Soleone/factory/commit/1b642c7401d29d7525c000cea0fb732af4204783))
+* mirror goals into Tasks, both ways ([cf75deb](https://github.com/Soleone/factory/commit/cf75deb948a871609fd10a4150bf9add4e27c076))
+* **page:** a Goals tab with each goal's graph, workers by pool, and tiers ([4ec9113](https://github.com/Soleone/factory/commit/4ec91134e42f26fde6661365258854b00e46e736))
+* **results:** GitHub-style header, batch actions replace the filter while selecting ([2c43b9f](https://github.com/Soleone/factory/commit/2c43b9fcfe8da1df1aecfc630110b70e9ea16f4a))
+* **results:** pick the filter from a dropdown instead of buttons ([692721f](https://github.com/Soleone/factory/commit/692721f62ed6a5c54232b769156702744e21865b))
+* **ui:** tooltips on the dismiss, remove and queue-with icon buttons ([3051a15](https://github.com/Soleone/factory/commit/3051a1514cece74bfb23e29ccff621f6d1757417))
+
+### Bug Fixes
+
+* **goals:** a milestone's nodes wait for what the milestone comes after ([ab4cca9](https://github.com/Soleone/factory/commit/ab4cca923a91c150b5c9a55fbad46db38e0222a1))
+* **page:** setQueryParam is only used inside its hook ([5e68660](https://github.com/Soleone/factory/commit/5e68660ad1ce7bacb47b7151283a3c5fe527055d))
+* **tasks:** show a finished job's prompt from its run, not workwork's candidate list ([c3e27ad](https://github.com/Soleone/factory/commit/c3e27ada286d1825b7b2328465fce80e83b59ff5))
+
 ## [0.2.2](https://github.com/Soleone/factory/compare/v0.2.1...v0.2.2) (2026-11-19)
 
 ### Features
