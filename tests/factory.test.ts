@@ -1322,13 +1322,19 @@ esac`,
       // The fake gh answers the same for every PR, so the first merge closes the second.
       expect(train).toEqual({
         [jobs[0].id]: { step: "merged" },
-        [jobs[1].id]: { step: "skipped", reason: "already merged" },
+        [jobs[1].id]: {
+          step: "skipped",
+          reason: "This pull request is already merged; no action needed",
+        },
       });
       expect(github.calls().match(/pr merge/g)).toHaveLength(1);
       const said = readJobs(base.state).map((job) =>
         job.notes.filter((note) => note.kind === "train").map((note) => note.text),
       );
-      expect(said).toEqual([["merged"], ["skipped: already merged"]]);
+      expect(said).toEqual([
+        ["merged"],
+        ["skipped: This pull request is already merged; no action needed"],
+      ]);
     } finally {
       server.close();
     }
