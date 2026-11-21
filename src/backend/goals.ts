@@ -490,6 +490,15 @@ ${job.gates.length ? `\nChecks: ${job.gates.map((gate) => `\`${gate}\``).join(",
 
 type Log = (message: string) => void;
 
+/** Drops an in-flight child when its goal was canceled before the attempt ended. */
+export function discardCancelledJob(state: string, jobs: Job[], job: Job): boolean {
+  const current = jobs.find((each) => each.id === job.id);
+  if (!current?.of || jobs.find((each) => each.id === current.of)?.state !== "removed")
+    return false;
+  if (current.state !== "removed") record(state, { type: "remove", id: current.id });
+  return true;
+}
+
 /**
  * What follows an attempt of a goal job: a done node's branch merges into the integration branch,
  * a decomposer's plan is imported, a replan applied, a review's findings become a fix; a node failed
@@ -503,6 +512,7 @@ export async function afterAttempt(
 ): Promise<void> {
   const jobs = readJobs(state);
   const job = jobs.find((each) => each.id === id)!;
+  if (discardCancelledJob(state, jobs, job)) return;
   const goalJob = jobs.find((each) => each.id === job.of);
   if (!goalJob?.goal) return;
   try {
