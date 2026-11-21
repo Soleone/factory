@@ -16,6 +16,7 @@ type PiModel = {
   id: string;
   name: string;
   provider: string;
+  contextWindow?: number;
   reasoning: boolean;
   thinkingLevelMap?: { [level: string]: string | null };
 };
@@ -56,6 +57,22 @@ function matches(known: PiModel[], pattern: string): PiModel[] {
   );
   const full = known.filter((model) => glob.test(`${model.provider}/${model.id}`));
   return full.length > 0 ? full : known.filter((model) => glob.test(model.id));
+}
+
+/** Each model's context window, by provider/id, as pi knows it. */
+export async function piWindows(): Promise<Record<string, number>> {
+  const answer = await ask(
+    "pi",
+    ["--mode", "rpc", "--no-session", "--offline"],
+    { type: "get_available_models" },
+    (record) => record.type === "response" && record.command === "get_available_models",
+  );
+  const known: PiModel[] = answer.data.models;
+  return Object.fromEntries(
+    known.flatMap((model) =>
+      model.contextWindow ? [[`${model.provider}/${model.id}`, model.contextWindow]] : [],
+    ),
+  );
 }
 
 /** Pi's own rule (pi-ai's getSupportedThinkingLevels): null rules a level out, xhigh and max must be named. */

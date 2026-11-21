@@ -79,6 +79,22 @@ export async function readPrDetails(url: string): Promise<{ body: string; diff: 
   return { body: (JSON.parse(view) as { body: string }).body, diff };
 }
 
+/** Opens a PR from head into base, in the repo; returns its URL. */
+export async function createPr(
+  repo: string,
+  base: string,
+  head: string,
+  title: string,
+  body: string,
+): Promise<string> {
+  const printed = await output(
+    "gh",
+    ["pr", "create", "--base", base, "--head", head, "--title", title, "--body", body],
+    repo,
+  );
+  return printed.trim().split("\n").at(-1) ?? "";
+}
+
 export const mergePr = (url: string) => gh(["pr", "merge", url, "--squash", "--delete-branch"]);
 export const closePr = (url: string) => gh(["pr", "close", url, "--delete-branch"]);
 

@@ -4,32 +4,62 @@ import { basename, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { agent } from "./agents.ts";
 import {
+  addJob,
   addJobs,
   addNote,
+  answer,
+  newId,
+  openAssumptions,
   queueReview,
   readJobs,
+  record,
   removeJob,
   retryJob,
   type Event,
 } from "./jobs.ts";
+import {
+  approveGoal,
+  cancelGoal,
+  checkPlan,
+  findGoal,
+  importPlan,
+  newGoal,
+  pauseGoal,
+  queueReplan,
+  readPlan,
+  resumeGoal,
+  showGoal,
+  type Plan,
+} from "./goals.ts";
 import { run, type RunOptions } from "./loop.ts";
 import { logPath, turnOff, turnOn } from "./power.ts";
 import { output, pidPath, readSettings, runningPid, STATE, writeSettings } from "./state.ts";
-import { prUrl, type Confidence, type Item, type Job, type Status, type Tuning } from "./types.ts";
+import {
+  prUrl,
+  TIERS,
+  type Confidence,
+  type Item,
+  type Job,
+  type Status,
+  type Tier,
+  type Tuning,
+} from "./types.ts";
 import { serve } from "./web.ts";
 // Bundled into dist, so it works from source and from the package alike.
 import packageJson from "../../package.json" with { type: "json" };
 
-const USAGE = `factory: works a queue of workwork candidates with headless coding agents
+const USAGE = `factory: works workwork candidates and long goals with headless coding agents
 
   factory start [run options]  turn the factory on, in the background
   factory run [run options]    the same, in the foreground
   factory stop [--kill]        turn it off; agents at work finish, and the next start records them;
                                --kill stops them too and puts their jobs back in the queue
   factory status               on or off, what each agent is doing, the queue
-  factory add <id>... [--repo DIR] [--agent NAME] [--model M] [--effort E] [--after JOB]
+  factory add <id>... [--repo DIR] [--agent NAME] [--model M] [--effort E] [--after JOB]...
                                queue workwork candidates from DIR (default: here), ahead of auto jobs;
                                --after: start once that job is done
+  factory add --prompt FILE --tier T [--repo DIR] [--title TEXT]
+                               one job of your own, without workwork, for a tier
   factory review <job> --agent NAME
                                queue a review of the job's PR by another agent, once the job is done
   factory wait <job> [--timeout MIN]
@@ -37,17 +67,35 @@ const USAGE = `factory: works a queue of workwork candidates with headless codin
   factory tail                 follow what happens to every job, one line each
   factory remove <job>         take a job out of the queue or the results, with its kept branches
   factory retry <job>          queue a failed job again, with the same agent
-  factory answer <job> "<text>" answer the question a blocked job asked, and queue it again
+  factory answer <job> "<text>" answer the question a blocked job asked, and queue it again; or
+                               the oldest assumption it made: anything but "fine" queues a change
+  factory verify <job> [NEED]  you checked what the job couldn't (all of it, or one need)
   factory auto on|off          let auto mode keep the queue topped up from workwork, or not
   factory report [--all]       the last run (or every run): outcome, agent, job, PR/issue link or log
   factory serve [--port 7040] [--host 127.0.0.1]
                                a web page to watch, browse candidates, queue them and turn it on or off
 
+Goals: one large task as a graph of jobs on its own integration branch
+  factory goal new "<title>" --repo DIR [--brief FILE]
+                               queue a decomposer; the goal waits at a checkpoint for its plan
+  factory goal import PLAN     validate and import a plan (JSON or YAML); waits for approval
+  factory goal check PLAN      validate only, listing every problem
+  factory goal show [GOAL] [--json]
+                               the graph: layers, states, tiers, the critical path, unverified work
+  factory goal approve|pause|resume|cancel GOAL
+  factory goal replan GOAL "<why>"
+
 For the agent working a job (the job is $FACTORY_JOB, or --job ID):
+  factory step "<what>" [--done N --of M]
+                               progress in your own words; the job shows the latest
   factory note "<text>"        something worth knowing later
-  factory ask "<question>"     a decision for the user; the job waits for the answer once the agent ends
+  factory ask "<question>" [--assume "<default>"]
+                               a decision for the user; with --assume you carry on with the default,
+                               without it the job waits for the answer once you end
   factory result "<summary>" [--confidence low|medium|high] [--url LINK] [--followup "<task>"]...
-                               what the job delivered, and tasks that deserve their own job
+                 [--unverified "<what>"]...
+                               what the job delivered, tasks that deserve their own job, and what
+                               you couldn't check
 
 Run options (defaults from settings.json):
   --agents claude,pi           which registered agents work this run
@@ -55,7 +103,7 @@ Run options (defaults from settings.json):
   --until HH:MM                start nothing new after this local time
   --model NAME=MODEL           e.g. --model claude=opus; repeat per agent
   --effort NAME=LEVEL          e.g. --effort pi=high; repeat per agent
-  --timeout MIN                minutes before an agent is killed
+  --idle MIN                   minutes without a sign of life before an attempt times out
 
 State: ${STATE}`;
 
@@ -69,12 +117,22 @@ async function main(): Promise<void> {
       model: { type: "string", multiple: true },
       effort: { type: "string", multiple: true },
       timeout: { type: "string" },
+      idle: { type: "string" },
       repo: { type: "string" },
+      prompt: { type: "string" },
+      tier: { type: "string" },
+      title: { type: "string" },
+      brief: { type: "string" },
+      json: { type: "boolean" },
+      assume: { type: "string" },
+      done: { type: "string" },
+      of: { type: "string" },
+      unverified: { type: "string", multiple: true },
       agent: { type: "string" },
       all: { type: "boolean" },
       kill: { type: "boolean" },
       job: { type: "string" },
-      after: { type: "string" },
+      after: { type: "string", multiple: true },
       confidence: { type: "string" },
       url: { type: "string" },
       followup: { type: "string", multiple: true },
@@ -96,9 +154,23 @@ async function main(): Promise<void> {
   }
   if (command === "retry") return args.forEach((id) => retryJob(STATE, id));
   if (command === "auto") return auto(args[0]);
-  if (command === "answer") return addNote(STATE, args[0], { kind: "answer", text: text(args[1]) });
-  if (command === "note" || command === "ask")
-    return addNote(STATE, ownJob(values.job), { kind: command, text: text(args[0]) });
+  if (command === "answer") {
+    const change = answer(STATE, args[0], text(args[1]));
+    return change && console.log(`queued ${change.id} to change it: ${change.item.title}`);
+  }
+  if (command === "verify") return record(STATE, { type: "verify", id: args[0], need: args[1] });
+  if (command === "note")
+    return addNote(STATE, ownJob(values.job), { kind: "note", text: text(args[0]) });
+  if (command === "ask")
+    return addNote(
+      STATE,
+      ownJob(values.job),
+      values.assume === undefined
+        ? { kind: "ask", text: text(args[0]) }
+        : { kind: "assume", text: text(args[0]), assumed: text(values.assume) },
+    );
+  if (command === "step") return step(args[0], values);
+  if (command === "goal") return goal(args, values);
   if (command === "result") return result(args[0], values);
   if (command === "review") return review(args[0], values.agent);
   if (command === "wait") return wait(args[0], values.timeout);
@@ -136,7 +208,7 @@ function runOptions(values: {
   until?: string;
   model?: string[];
   effort?: string[];
-  timeout?: string;
+  idle?: string;
 }): RunOptions {
   const settings = readSettings(STATE);
   const names = values.agents?.split(",") ?? Object.keys(settings.agents);
@@ -163,7 +235,7 @@ function runOptions(values: {
     agents,
     limit,
     until: until === undefined ? undefined : nextTime(until),
-    timeoutMs: count(values.timeout ?? String(settings.timeout), "--timeout") * 60_000,
+    idleMs: count(values.idle ?? String(settings.idle), "--idle") * 60_000,
     state: STATE,
     workwork: "workwork",
   };
@@ -171,9 +243,20 @@ function runOptions(values: {
 
 async function add(
   ids: string[],
-  values: { repo?: string; agent?: string; model?: string[]; effort?: string[]; after?: string },
+  values: {
+    repo?: string;
+    agent?: string;
+    model?: string[];
+    effort?: string[];
+    after?: string[];
+    prompt?: string;
+    tier?: string;
+    title?: string;
+  },
 ): Promise<void> {
-  if (ids.length === 0) throw new Error("factory add wants at least one workwork id");
+  if (values.prompt) return addOwn(values);
+  if (ids.length === 0)
+    throw new Error("factory add wants at least one workwork id, or --prompt FILE");
   const repo = resolve(values.repo ?? ".");
   const candidates: Item[] = JSON.parse(await output("workwork", ["--json"], repo));
   const items = ids.map((id) => {
@@ -182,8 +265,9 @@ async function add(
     return item;
   });
   if (values.agent) agent(values.agent);
-  if (values.after && !readJobs(STATE).some((job) => job.id === values.after))
-    throw new Error(`--after names no job ${values.after}; factory status lists them`);
+  for (const after of values.after ?? [])
+    if (!readJobs(STATE).some((job) => job.id === after))
+      throw new Error(`--after names no job ${after}; factory status lists them`);
   const pin = {
     agent: values.agent,
     model: values.model?.[0],
@@ -194,6 +278,117 @@ async function add(
   for (const job of added) console.log(`queued ${job.id}: ${job.item.label} ${job.item.id}`);
   for (const item of items.filter((item) => !added.some((job) => job.item === item)))
     console.log(`already queued: ${item.label} ${item.id}`);
+}
+
+/** A job from a prompt file, for a tier, without workwork. */
+function addOwn(values: {
+  repo?: string;
+  prompt?: string;
+  tier?: string;
+  title?: string;
+  after?: string[];
+}): void {
+  const tier = values.tier as Tier;
+  if (!TIERS.includes(tier))
+    throw new Error(`--tier wants ${TIERS.join(", ")}, got ${values.tier}`);
+  const repo = resolve(values.repo ?? ".");
+  const prompt = readFileSync(values.prompt!, "utf8");
+  const title =
+    values.title ??
+    prompt
+      .split("\n")
+      .find((line) => line.trim())!
+      .replace(/^#+\s*/, "")
+      .slice(0, 100);
+  const job = addJob(STATE, {
+    id: newId(),
+    item: {
+      repo,
+      label: basename(repo),
+      id: `own-${Date.now()}`,
+      play: "own",
+      level: "decide",
+      title,
+    },
+    source: "pick",
+    tier,
+    prompt,
+    after: values.after,
+  });
+  console.log(`queued ${job.id}: ${title} (${tier})`);
+}
+
+function step(
+  what: string | undefined,
+  values: { job?: string; done?: string; of?: string },
+): void {
+  const done = values.done === undefined ? undefined : Number(values.done);
+  const of = values.of === undefined ? undefined : Number(values.of);
+  if (
+    (done !== undefined && !Number.isInteger(done)) ||
+    (of !== undefined && !Number.isInteger(of))
+  )
+    throw new Error("--done and --of want whole numbers");
+  addNote(STATE, ownJob(values.job), { kind: "step", text: text(what), done, of });
+}
+
+async function goal(
+  args: string[],
+  values: { repo?: string; brief?: string; json?: boolean },
+): Promise<void> {
+  const [sub, target, why] = args;
+  if (sub === "new") {
+    if (!target || !values.repo) throw new Error('factory goal new wants "<title>" --repo DIR');
+    const brief = values.brief ? readFileSync(values.brief, "utf8") : "";
+    const job = await newGoal(STATE, target, resolve(values.repo), brief);
+    return console.log(
+      `goal ${job.goal!.slug} (${job.id}): the decomposer is queued; approve its plan with factory goal approve ${job.goal!.slug}`,
+    );
+  }
+  if (sub === "check" || sub === "import") {
+    if (!target) throw new Error(`factory goal ${sub} wants a plan file`);
+    const plan = readPlan(target);
+    const problems = checkPlan(plan);
+    if (problems.length) {
+      process.exitCode = 1;
+      return console.log(
+        `${target} has ${problems.length} problem${problems.length === 1 ? "" : "s"}:\n${problems.map((each) => `- ${each}`).join("\n")}`,
+      );
+    }
+    if (sub === "check") return console.log(`${target} is a valid plan`);
+    const job = await importPlan(STATE, plan as Plan);
+    return console.log(
+      `goal ${job.goal!.slug} (${job.id}) imported; it waits for factory goal approve ${job.goal!.slug}`,
+    );
+  }
+  if (sub === "show" || sub === undefined) {
+    const jobs = readJobs(STATE);
+    const goals = target
+      ? [findGoal(STATE, target)]
+      : jobs.filter((job) => job.goal && job.state !== "removed");
+    if (values.json)
+      return console.log(
+        JSON.stringify(
+          goals.map((each) => ({ goal: each, nodes: jobs.filter((job) => job.of === each.id) })),
+          null,
+          2,
+        ),
+      );
+    if (goals.length === 0)
+      return console.log("no goals; factory goal new or factory goal import starts one");
+    return console.log(goals.map((each) => showGoal(jobs, each)).join("\n\n"));
+  }
+  if (!target) throw new Error(`factory goal ${sub} wants a goal`);
+  const id = findGoal(STATE, target).id;
+  if (sub === "approve") return approveGoal(STATE, id);
+  if (sub === "pause") return pauseGoal(STATE, id);
+  if (sub === "resume") return resumeGoal(STATE, id);
+  if (sub === "cancel") return cancelGoal(STATE, id);
+  if (sub === "replan") {
+    const job = queueReplan(STATE, findGoal(STATE, id), text(why));
+    return console.log(job ? `queued replan ${job.id}` : "a replan is already waiting");
+  }
+  throw new Error(`unknown goal command ${sub}\n\n${USAGE}`);
 }
 
 function review(id: string | undefined, name: string | undefined): void {
@@ -243,7 +438,15 @@ async function tail(): Promise<void> {
   }
 }
 
-const PAST = { remove: "removed", requeue: "back in the queue", retry: "queued for a retry" };
+const PAST: Record<string, string> = {
+  remove: "removed",
+  requeue: "back in the queue",
+  retry: "queued for a retry",
+  merged: "merged",
+  unblock: "goes on",
+  update: "changed by a replan",
+  verify: "verified",
+};
 
 function eventLine(event: Event, jobs: Map<string, Job>): string {
   const id = event.type === "add" ? event.job.id : event.id;
@@ -259,7 +462,11 @@ function eventLine(event: Event, jobs: Map<string, Job>): string {
             ? `${event.note.kind}: ${event.note.text}`
             : event.type === "move"
               ? `moved to ${event.index + 1}`
-              : PAST[event.type];
+              : event.type === "pause"
+                ? `waits: ${event.reason}`
+                : event.type === "block"
+                  ? `blocked: ${event.reason}`
+                  : PAST[event.type];
   return `${clock(event.at)} ${id} ${job ? basename(job.item.repo) : ""} ${what}`.trimEnd();
 }
 
@@ -278,9 +485,15 @@ const CONFIDENCES = ["low", "medium", "high"];
 
 function result(
   summary: string | undefined,
-  values: { job?: string; confidence?: string; url?: string; followup?: string[] },
+  values: {
+    job?: string;
+    confidence?: string;
+    url?: string;
+    followup?: string[];
+    unverified?: string[];
+  },
 ): void {
-  const { confidence, url, followup = [] } = values;
+  const { confidence, url, followup = [], unverified } = values;
   if (confidence !== undefined && !CONFIDENCES.includes(confidence))
     throw new Error(`--confidence wants ${CONFIDENCES.join(", ")}, got ${confidence}`);
   addNote(STATE, ownJob(values.job), {
@@ -289,6 +502,7 @@ function result(
     confidence: confidence as Confidence | undefined,
     url,
     followups: followup,
+    unverified,
   });
 }
 
@@ -308,12 +522,17 @@ function status(): void {
     const status: Status = JSON.parse(readFileSync(path, "utf8"));
     const until = status.until ? `, until ${clock(status.until)}` : "";
     console.log(`run ${status.run}, limit ${status.limit ?? "none"}${until}`);
-    for (const worker of status.workers) {
-      const what =
-        worker.job ?? (worker.until ? `until ${clock(worker.until)}` : (worker.reason ?? ""));
-      console.log(
-        `  ${worker.agent.padEnd(7)} ${worker.state.padEnd(9)} ${what}  (since ${clock(worker.since)}, limits hit ${worker.limits})`,
-      );
+    for (const pool of status.pools) {
+      const pause = pool.stopped ?? (pool.until ? `sleeps until ${clock(pool.until)}` : "");
+      console.log(`  pool ${pool.name}: limits hit ${pool.limits}${pause ? `, ${pause}` : ""}`);
+      for (const worker of status.workers.filter((each) => each.pool === pool.name)) {
+        const what =
+          worker.job ?? (worker.until ? `until ${clock(worker.until)}` : (worker.reason ?? ""));
+        const doing = worker.activity ? `  ${worker.activity}` : "";
+        console.log(
+          `    ${worker.id.padEnd(20)} ${worker.state.padEnd(9)} ${what}${doing}  (since ${clock(worker.since)})`,
+        );
+      }
     }
   }
   const jobs = readJobs(STATE);
@@ -333,7 +552,32 @@ function line(job: Job): string {
 }
 
 function report(all: boolean, run?: string): string {
-  const attempts = readJobs(STATE)
+  const jobs = readJobs(STATE);
+  return [attemptReport(jobs, all, run), checklist(jobs)].filter(Boolean).join("\n\n");
+}
+
+/** What waits on the user besides questions: work nobody could verify here, and assumptions to confirm. */
+function checklist(jobs: Job[]): string {
+  const lines: string[] = [];
+  for (const job of jobs.filter((each) => each.state !== "removed"))
+    for (const need of job.unverified)
+      lines.push(
+        `  [ ] ${job.id} ${job.item.title}: ${need}  (factory verify ${job.id} "${need}")`,
+      );
+  const unverified = lines.length ? ["unverified, for you to check:", ...lines] : [];
+  const assumed = jobs.flatMap((job) =>
+    openAssumptions(job).map(
+      (note) =>
+        `  ${job.id} ${job.item.title}: assumed ${note.assumed}, asked ${note.text}  (factory answer ${job.id} "fine")`,
+    ),
+  );
+  return [...unverified, ...(assumed.length ? ["assumptions to confirm:", ...assumed] : [])].join(
+    "\n",
+  );
+}
+
+function attemptReport(jobs: Job[], all: boolean, run?: string): string {
+  const attempts = jobs
     .flatMap((job) => job.attempts.map((attempt) => ({ job, attempt })))
     .sort((a, b) => a.attempt.start.localeCompare(b.attempt.start));
   const last = run ?? attempts.at(-1)?.attempt.run;
@@ -350,9 +594,23 @@ function report(all: boolean, run?: string): string {
         details.push(`${note.kind === "ask" ? "asks" : "result"}: ${note.text}`);
     if (attempt.error) details.push(attempt.error.split("\n")[0]);
     if (attempt.branch) details.push(`unpushed work kept on branch ${attempt.branch}`);
+    const numbers = attemptNumbers(attempt);
+    if (numbers) details.push(numbers);
     lines.push(...details.map((detail) => `          ${detail}`));
   }
   return lines.join("\n");
+}
+
+/** Turns, follow-ups, peak context and compactions, when the runner reported them. */
+function attemptNumbers(attempt: Job["attempts"][number]): string {
+  if (!attempt.turns) return "";
+  const parts = [`${attempt.turns} turn${attempt.turns === 1 ? "" : "s"}`];
+  if (attempt.followups)
+    parts.push(`${attempt.followups} follow-up${attempt.followups === 1 ? "" : "s"}`);
+  if (attempt.peak) parts.push(`peak ${Math.round(attempt.peak / 1000)}k context`);
+  if (attempt.compactions)
+    parts.push(`${attempt.compactions} compaction${attempt.compactions === 1 ? "" : "s"}`);
+  return parts.join(", ");
 }
 
 /** The next time the local clock shows HH:MM. */

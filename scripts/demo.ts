@@ -30,6 +30,9 @@ const DEMO_NOTES: Record<number, Omit<Job["notes"][number], "at" | "attempt">[]>
   ],
 };
 
+/** What a fresh job has besides its item. */
+const BLANK = { after: [], gates: [], needs: [], unverified: [], escalations: 0, open: false };
+
 function seed(): Snapshot {
   const at = new Date().toISOString();
   const run = at.slice(0, 19).replaceAll(":", "");
@@ -42,11 +45,13 @@ function seed(): Snapshot {
       state: "queued",
       attempts: [],
       notes: [],
+      ...BLANK,
     })),
     ...items.slice(3, 7).map((item, index): Job => {
       const id = `result${index + 1}`;
       const failed = index === 2;
       return {
+        ...BLANK,
         id,
         item,
         source: "pick",
@@ -78,7 +83,11 @@ function seed(): Snapshot {
       chat: { agent: "pi" },
       presets: [{ agent: "pi", effort: "max" }],
       limit: 2,
-      timeout: 60,
+      idle: 10,
+      tiers: { communicator: [], builder: [], grunt: [] },
+      store: "local",
+      capabilities: [],
+      env: {},
       auto: { on: true, levels: ["auto"], plays: [], repos: [] },
     },
     candidates: { at, count: items.length, refreshing: false },
@@ -231,6 +240,7 @@ function dispatch(snapshot: Snapshot, route: string, body: unknown): unknown {
         const item = items.find(({ repo, id }) => repo === wanted.repo && id === wanted.id);
         if (!item || jobs.some((job) => job.item === item && job.state !== "removed")) continue;
         jobs.push({
+          ...BLANK,
           id: randomUUID().replaceAll("-", ""),
           item,
           source: "pick",
@@ -292,13 +302,16 @@ function dispatch(snapshot: Snapshot, route: string, body: unknown): unknown {
         run: since.slice(0, 19).replaceAll(":", ""),
         until,
         limit,
-        timeout: snapshot.settings.timeout,
+        idle: snapshot.settings.idle,
+        pools: Object.keys(agents).map((name) => ({ name, limits: 0 })),
         workers: Object.entries(agents).map(([agent, tuning]) => ({
+          id: `${agent}#1`,
           agent,
+          preset: agent,
+          pool: agent,
           ...tuning,
           state: "idle",
           since,
-          limits: 0,
           reason: "Demo mode: no agents are launched",
         })),
       };

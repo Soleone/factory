@@ -9,6 +9,7 @@ import { agent, classify, resetTime } from "../src/backend/agents.ts";
 import {
   addJobs,
   addNote,
+  answer,
   autoPicks,
   endJob,
   moveJob,
@@ -17,11 +18,13 @@ import {
   queueReview,
   order,
   readJobs,
+  record,
   removeJob,
   retryJob,
   startJob,
 } from "../src/backend/jobs.ts";
-import { run, type RunOptions } from "../src/backend/loop.ts";
+import { approveGoal, importPlan, newGoal, type Plan } from "../src/backend/goals.ts";
+import { makeSlots, piSettingsWarnings, run, type RunOptions } from "../src/backend/loop.ts";
 import { agentModels } from "../src/backend/models.ts";
 import { readSettings, writeSettings } from "../src/backend/state.ts";
 import {
@@ -182,7 +185,11 @@ describe("jobs that wait on others", () => {
     expect(addJobs(state, [item("r", "a")], "pick")).toEqual([]);
     expect(() => queueReview(state, fix.id, "claude")).toThrow("claude's own");
     const review = queueReview(state, fix.id, "pi")!;
-    expect(review).toMatchObject({ after: fix.id, agent: "pi", item: { id: "a", play: "review" } });
+    expect(review).toMatchObject({
+      after: [fix.id],
+      agent: "pi",
+      item: { id: "a", play: "review" },
+    });
     expect(review.prompt).toContain("gh pr diff workwork/a");
     expect(queueReview(state, fix.id, "pi")).toBeUndefined();
     expect(nextJob(readJobs(state), "pi")).toBeUndefined();
@@ -198,11 +205,11 @@ describe("jobs that wait on others", () => {
     expect(nextJob(readJobs(state), "pi")?.id).toBe(review.id);
   });
 
-  test("a job waiting on one that failed goes with it, and comes back on a retry", () => {
+  test("a job waiting on one that failed is held, and goes on after a retry", () => {
     const state = mkdtempSync(join(scratch, "state-"));
     const [fix] = addJobs(state, [item("r", "a")], "pick", { agent: "claude" });
     const review = queueReview(state, fix.id, "pi")!;
-    addJobs(state, [item("r", "b")], "pick", { after: review.id });
+    addJobs(state, [item("r", "b")], "pick", { after: [review.id] });
     for (let i = 0; i < 2; i++) {
       startJob(state, fix.id, "claude");
       endJob(state, fix.id, {
@@ -215,7 +222,8 @@ describe("jobs that wait on others", () => {
       });
     }
     const states = () => readJobs(state).map((job) => job.state);
-    expect(states()).toEqual(["failed", "removed", "removed"]);
+    expect(states()).toEqual(["failed", "blocked", "blocked"]);
+    expect(readJobs(state).map((job) => job.blocked)).toEqual([undefined, "held", "held"]);
     retryJob(state, fix.id);
     expect(states()).toEqual(["queued", "queued", "queued"]);
   });
@@ -248,10 +256,10 @@ describe("the factory", () => {
     chmodSync(join(dir, name), 0o755);
   }
 
-  /** Fake claude and pi on PATH; each reads its prompt and runs its body. */
+  /** Fake claude and pi on PATH; each reads its prompt into $prompt and runs its body. */
   function agents(bodies: { claude?: string; pi?: string }): void {
     const bin = mkdtempSync(join(scratch, "bin-"));
-    for (const [name, body] of Object.entries(bodies)) script(bin, name, `cat >/dev/null\n${body}`);
+    for (const [name, body] of Object.entries(bodies)) script(bin, name, `prompt=$(cat)\n${body}`);
     process.env.PATH = `${bin}:${process.env.PATH}`;
   }
 
@@ -266,7 +274,7 @@ describe("the factory", () => {
     script(
       bin,
       "gh",
-      `echo "$*" >> ${bin}/calls\ncase "$1 $2" in\n"pr list") cat ${bin}/list.json ;;\n"pr view") cat ${viewPath} ;;\n"pr diff") echo "+simpler a" ;;\n"pr merge") sed 's/"state":"OPEN"/"state":"MERGED"/' ${viewPath} > ${viewPath}.new && mv ${viewPath}.new ${viewPath} ;;\nesac`,
+      `echo "$*" >> ${bin}/calls\ncase "$1 $2" in\n"pr list") cat ${bin}/list.json ;;\n"pr view") cat ${viewPath} ;;\n"pr diff") echo "+simpler a" ;;\n"pr create") n=$(($(cat ${bin}/n 2>/dev/null || echo 0) + 1)); echo $n > ${bin}/n; echo "https://github.com/o/r/pull/10$n" ;;\n"pr merge") sed 's/"state":"OPEN"/"state":"MERGED"/' ${viewPath} > ${viewPath}.new && mv ${viewPath}.new ${viewPath} ;;\nesac`,
     );
     process.env.PATH = `${bin}:${process.env.PATH}`;
     return { calls: () => readFileSync(join(bin, "calls"), "utf8"), answer, viewPath };
@@ -303,7 +311,7 @@ describe("the factory", () => {
   const options = (
     base: { state: string; workwork: string },
     agents: RunOptions["agents"] = { claude: {} },
-  ): RunOptions => ({ ...base, agents, limit: 2, timeoutMs: 60_000, pollMs: 20 });
+  ): RunOptions => ({ ...base, agents, limit: 2, idleMs: 60_000, pollMs: 20 });
 
   const busy = (jobs: Job[]) =>
     jobs.some((job) => job.state === "queued" || job.state === "running");
@@ -327,7 +335,9 @@ describe("the factory", () => {
 
   const status = (state: string): Status =>
     JSON.parse(readFileSync(join(state, "status.json"), "utf8"));
-  const OK = "echo 'opened https://github.com/o/r/pull/7'";
+  /** A shell line reporting a result for the job, from its worktree under state/worktrees/<repo>/<n>. */
+  const RESULT = `echo '{"at":"2026-11-16T04:00:00Z","type":"note","id":"'$FACTORY_JOB'","note":{"kind":"result","text":"did it"}}' >> ../../../jobs.jsonl`;
+  const OK = `${RESULT}; echo 'opened https://github.com/o/r/pull/7'`;
   const OPEN_PR = {
     state: "OPEN",
     isDraft: false,
@@ -373,7 +383,7 @@ describe("the factory", () => {
   test("repos with the same label run in their own worktrees", async () => {
     const first = setup(["a"]);
     const second = setup(["b"]);
-    agents({ claude: "git remote get-url origin" });
+    agents({ claude: `git remote get-url origin; ${RESULT}` });
     first.pick("a");
     addJobs(first.state, second.items, "pick");
 
@@ -387,7 +397,7 @@ describe("the factory", () => {
 
   test("keeps work an agent left unpushed on a branch and starts the next job clean", async () => {
     const base = setup(["a", "b"]);
-    agents({ claude: "test -e left.txt && exit 1; echo x > left.txt" });
+    agents({ claude: `test -e left.txt && exit 1; echo x > left.txt; ${RESULT}` });
     const a = base.pick("a");
     const b = base.pick("b");
     const [first, second] = await work(options(base));
@@ -415,35 +425,152 @@ describe("the factory", () => {
   const report = (state: string, note: Record<string, unknown>) =>
     `echo '{"at":"2026-11-16T04:00:00Z","type":"note","id":"'$FACTORY_JOB'","note":${JSON.stringify(note)}}' >> ${state}/jobs.jsonl`;
 
-  test("a question blocks the job until answered; the next attempt gets the notes, the answer and the kept work", async () => {
+  test("a question pauses the attempt until answered; the same session goes on in the same worktree", async () => {
     const base = setup(["a"]);
-    const asked = join(mkdtempSync(join(scratch, "marker-")), "asked");
     agents({
-      claude: `if [ -e ${asked} ]; then ${report(base.state, { kind: "result", text: "did A", url: "https://github.com/o/r/pull/9" })}; exit 0; fi
-touch ${asked}; echo x > half.txt
+      claude: `if [ -e half.txt ]; then ${report(base.state, { kind: "result", text: "did A", url: "https://github.com/o/r/pull/9" })}; exit 0; fi
+echo x > half.txt
 ${report(base.state, { kind: "note", text: "B breaks the API" })}
 ${report(base.state, { kind: "ask", text: "A or B?" })}`,
     });
     const job = base.pick("a");
     const [blocked] = await work(options(base));
-    expect(blocked.state).toBe("blocked");
+    expect(blocked).toMatchObject({ state: "blocked", blocked: "asked", open: true, attempts: [] });
     expect(() => addNote(base.state, job.id, { kind: "note", text: "late" })).toThrow("is blocked");
 
-    addNote(base.state, job.id, { kind: "answer", text: "A" });
+    answer(base.state, job.id, "A");
     const [done] = await work(options(base));
     expect(done.state).toBe("done");
-    expect(done.attempts[1].url).toBe("https://github.com/o/r/pull/9");
+    expect(done.attempts).toMatchObject([
+      { outcome: "done", turns: 2, url: "https://github.com/o/r/pull/9" },
+    ]);
     expect(done.notes.map((note) => [note.attempt, note.kind, note.text])).toEqual([
       [1, "note", "B breaks the API"],
       [1, "ask", "A or B?"],
       [1, "answer", "A"],
-      [2, "result", "did A"],
+      [1, "result", "did A"],
     ]);
-    const prompt = readFileSync(join(dirname(done.attempts[1].log), "prompt.md"), "utf8");
-    expect(prompt).toContain(`its work is kept on branch factory/${job.id}-1`);
-    expect(prompt).toContain(
-      "- note: B breaks the API\n- it asked: A or B?\n- the user answered: A",
-    );
+    const turn = readFileSync(join(dirname(done.attempts[0].log), "turn-2.md"), "utf8");
+    expect(turn).toContain("The user answered your question: A");
+    expect(readFileSync(done.attempts[0].log, "utf8")).toBe("");
+  });
+
+  test("an unfinished exit or a failed gate gets a follow-up in the same session", async () => {
+    const base = setup(["a"]);
+    const turns = join(mkdtempSync(join(scratch, "turns-")), "n");
+    // Turn 1 ends without a result; turn 2 reports one but leaves the gate failing; turn 3 fixes it.
+    agents({
+      claude: `n=$(($(cat ${turns} 2>/dev/null || echo 0) + 1)); echo $n > ${turns}; echo "args: $*"
+[ $n -ge 2 ] && ${RESULT}
+[ $n -ge 3 ] && touch fixed; exit 0`,
+    });
+    base.pick("a", { gates: ["test -e fixed || (echo not fixed; exit 1)"] });
+    const [job] = await work(options(base));
+    expect(job.state).toBe("done");
+    expect(job.attempts).toMatchObject([{ outcome: "done", turns: 3, followups: 2 }]);
+    expect(job.notes.filter((note) => note.kind === "factory").map((note) => note.text)).toEqual([
+      expect.stringContaining("follow-up 1 of 2: You stopped without finishing"),
+      expect.stringContaining("follow-up 2 of 2: The gate `test -e fixed"),
+    ]);
+    const dir = dirname(job.attempts[0].log);
+    expect(readFileSync(join(dir, "turn-3.md"), "utf8")).toContain("not fixed");
+    const log = readFileSync(job.attempts[0].log, "utf8");
+    const session = /--session-id (\S+)/.exec(log)![1];
+    expect(log.match(/--resume (\S+)/g)).toEqual([`--resume ${session}`, `--resume ${session}`]);
+    expect(job.attempts[0].session).toBe(session);
+  });
+
+  test("follow-ups run out: the attempt fails, and the retry is a fresh session", async () => {
+    const base = setup(["a"]);
+    agents({ claude: 'echo "args: $*"; exit 1' });
+    base.pick("a");
+    const [job] = await work(options(base));
+    expect(job.state).toBe("failed");
+    expect(job.attempts.map((attempt) => [attempt.outcome, attempt.turns])).toEqual([
+      ["failed", 3],
+      ["failed", 3],
+    ]);
+    expect(job.attempts[0].session).not.toBe(job.attempts[1].session);
+  });
+
+  test("the stream gives the worker's activity, and the attempt its context, compactions and tokens", async () => {
+    const base = setup(["a"]);
+    const lines = [
+      { type: "system", subtype: "init", session_id: "s-1" },
+      {
+        type: "assistant",
+        message: {
+          id: "m1",
+          content: [{ type: "tool_use", name: "Bash", input: { command: "cargo test" } }],
+          usage: {
+            input_tokens: 10,
+            cache_read_input_tokens: 90000,
+            cache_creation_input_tokens: 0,
+            output_tokens: 50,
+          },
+        },
+      },
+      {
+        type: "system",
+        subtype: "compact_boundary",
+        compact_metadata: { trigger: "auto", pre_tokens: 90010 },
+      },
+      {
+        type: "assistant",
+        message: {
+          id: "m2",
+          content: [{ type: "text", text: "all done" }],
+          usage: {
+            input_tokens: 5,
+            cache_read_input_tokens: 20000,
+            cache_creation_input_tokens: 0,
+            output_tokens: 20,
+          },
+        },
+      },
+      {
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        result: "all done",
+        session_id: "s-1",
+      },
+    ];
+    const seen = join(mkdtempSync(join(scratch, "seen-")), "status");
+    agents({
+      claude: `echo '${JSON.stringify(lines[0])}'; echo '${JSON.stringify(lines[1])}'; sleep 0.3; cp ../../../status.json ${seen}
+${lines
+  .slice(2)
+  .map((line) => `echo '${JSON.stringify(line)}'`)
+  .join("; ")}; ${RESULT}`,
+    });
+    base.pick("a");
+    const [job] = await work(options(base));
+    expect(JSON.parse(readFileSync(seen, "utf8")).workers[0]).toMatchObject({
+      activity: "running cargo test",
+      context: 90010,
+    });
+    expect(job.attempts[0]).toMatchObject({
+      session: "s-1",
+      peak: 90010,
+      compactions: 1,
+      tokens: { input: 15, cached: 110000, output: 70 },
+    });
+  });
+
+  test("an agent that goes quiet for the idle time times out; one that keeps talking doesn't", async () => {
+    const base = setup(["a", "b"]);
+    agents({
+      claude: `if [ "$FACTORY_JOB" = "$(cat ../../../quiet)" ]; then sleep 5; fi; for i in 1 2 3 4 5 6; do echo tick; sleep 0.1; done; ${RESULT}`,
+    });
+    const quiet = base.pick("a");
+    writeFileSync(join(base.state, "quiet"), quiet.id);
+    base.pick("b");
+    const jobs = await work({ ...options(base), idleMs: 400 });
+    expect(jobs.map((job) => job.attempts.map((attempt) => attempt.outcome))).toEqual([
+      ["timeout", "timeout"],
+      ["done"],
+    ]);
   });
 
   test("a job keeps its agent: one retry after a failure, then only by hand", async () => {
@@ -474,14 +601,14 @@ ${report(base.state, { kind: "ask", text: "A or B?" })}`,
 
   test("the run's model and effort per agent, unless the job has its own", async () => {
     const base = setup(["a"]);
-    agents({ claude: 'echo "args: $*"' });
+    agents({ claude: `echo "args: $*"; ${RESULT}` });
     base.pick("a", { effort: "low" });
     const [job] = await work(options(base, { claude: { model: "opus", effort: "high" } }));
     expect(job.attempts[0]).toMatchObject({ model: "opus", effort: "low", outcome: "done" });
     expect(readFileSync(job.attempts[0].log, "utf8")).toContain("--model opus --effort low");
   });
 
-  test("limit 1: an agent stops at its first limit hit and the factory turns off with no agent left", async () => {
+  test("limit 1: a pool stops at its first limit hit and the factory turns off with no worker left", async () => {
     const base = setup(["a"]);
     agents({ claude: "echo 'Claude AI usage limit reached|1794801600'; exit 1" });
     base.pick("a");
@@ -490,17 +617,18 @@ ${report(base.state, { kind: "ask", text: "A or B?" })}`,
       { ...options(base), limit: 1, sleep: async (ms) => void wakes.push(ms) },
       () => false,
     );
-    expect(job.state).toBe("queued");
-    expect(job.agent).toBe("claude");
-    expect(job.attempts.map((attempt) => attempt.outcome)).toEqual(["limited"]);
+    expect(job).toMatchObject({ state: "queued", agent: "claude", open: true, attempts: [] });
     expect(wakes).toHaveLength(0);
     expect(status(base.state).workers[0]).toMatchObject({
       state: "stopped",
       reason: "limit 1 of 1",
     });
+    expect(status(base.state).pools).toEqual([
+      { name: "claude", limits: 1, stopped: "limit 1 of 1" },
+    ]);
   });
 
-  test("sleeps until the parsed reset, keeps the job, and stops at its limit", async () => {
+  test("sleeps until the parsed reset, resumes the session, and stops at its limit", async () => {
     const base = setup(["a", "b"]);
     const reset = Math.floor(Date.now() / 1000) + 3600;
     agents({ claude: `echo 'Claude AI usage limit reached|${reset}'; exit 1` });
@@ -511,8 +639,11 @@ ${report(base.state, { kind: "ask", text: "A or B?" })}`,
       { ...options(base), sleep: async (ms) => void wakes.push(Date.now() + ms) },
       () => false,
     );
-    expect(jobs[0].attempts.map((attempt) => attempt.outcome)).toEqual(["limited", "limited"]);
-    expect(jobs[1].attempts).toEqual([]);
+    expect(jobs[0]).toMatchObject({ open: true, attempts: [] });
+    expect(jobs[1]).toMatchObject({ open: false, attempts: [] });
+    const dir = join(base.state, "running");
+    const live = JSON.parse(readFileSync(join(dir, `${jobs[0].id}.json`), "utf8"));
+    expect(live).toMatchObject({ turns: 2, waiting: "limited" });
     expect(wakes).toHaveLength(1);
     expect(Math.abs(wakes[0] - (reset * 1000 + 2 * MINUTE))).toBeLessThan(100);
     expect(status(base.state).workers[0]).toMatchObject({ reason: "limit 2 of 2" });
@@ -522,7 +653,7 @@ ${report(base.state, { kind: "ask", text: "A or B?" })}`,
     const base = setup(["a"]);
     const counter = join(scratch, `count-${Date.now()}`);
     agents({
-      claude: `echo x >> ${counter}; [ $(wc -l < ${counter}) -gt 3 ] && exit 0; echo 'Claude AI usage limit reached|1794801600'; exit 1`,
+      claude: `echo x >> ${counter}; [ $(wc -l < ${counter}) -gt 3 ] && { ${RESULT}; exit 0; }; echo 'Claude AI usage limit reached|1794801600'; exit 1`,
     });
     base.pick("a");
     const wakes: number[] = [];
@@ -531,12 +662,7 @@ ${report(base.state, { kind: "ask", text: "A or B?" })}`,
       limit: null,
       sleep: async (ms) => void wakes.push(ms),
     });
-    expect(job.attempts.map((attempt) => attempt.outcome)).toEqual([
-      "limited",
-      "limited",
-      "limited",
-      "done",
-    ]);
+    expect(job.attempts).toMatchObject([{ outcome: "done", turns: 4 }]);
     expect(wakes).toHaveLength(3);
   });
 
@@ -565,7 +691,7 @@ ${report(base.state, { kind: "ask", text: "A or B?" })}`,
     const marker = join(scratch, `survived-${Date.now()}`);
     agents({ claude: `(sleep 2; touch ${marker}) & sleep 30` });
     base.pick("a");
-    const [job] = await work({ ...options(base), timeoutMs: 300 });
+    const [job] = await work({ ...options(base), idleMs: 300 });
     expect(job.attempts.map((attempt) => attempt.outcome)).toEqual(["timeout", "timeout"]);
     await new Promise((resolve) => setTimeout(resolve, 2500));
     expect(() => readFileSync(marker)).toThrow();
@@ -595,6 +721,394 @@ ${report(base.state, { kind: "ask", text: "A or B?" })}`,
       agent: "claude",
       attempts: [{ outcome: "stopped", branch: `factory/${job.id}-1` }],
     });
+  });
+
+  /** Settings with presets and tiers, for runs without agent workers. */
+  function tiered(state: string, change: Partial<Settings>): void {
+    writeSettings(state, { ...readSettings(state), ...change });
+  }
+
+  test("a tier runs on the first preset in its list whose pool isn't limited", async () => {
+    const base = setup(["a", "b"]);
+    agents({
+      pi: "echo 'You have hit your ChatGPT usage limit (plus plan). Try again in ~42 min.'; exit 1",
+      claude: `echo "args: $*"; ${RESULT}`,
+    });
+    tiered(base.state, {
+      presets: [
+        { agent: "pi", model: "openai-codex/luna", id: "luna" },
+        { agent: "claude", model: "haiku", id: "haiku" },
+      ],
+      tiers: { communicator: [], builder: [], grunt: ["luna", "haiku"] },
+    });
+    const first = base.pick("a", { tier: "grunt" });
+    base.pick("b", { tier: "grunt" });
+    const jobs = await work({ ...options(base, {}), limit: 1 }, (jobs) => jobs[1].state === "done");
+    expect(jobs[0]).toMatchObject({ id: first.id, state: "queued", open: true });
+    expect(jobs[1].attempts).toMatchObject([{ outcome: "done", agent: "claude", preset: "haiku" }]);
+    expect(readFileSync(jobs[1].attempts[0].log, "utf8")).toContain(
+      "--autocompact 90000 --model haiku",
+    );
+    expect(status(base.state).pools).toMatchObject([
+      { name: "openai-codex", limits: 1, stopped: "limit 1 of 1" },
+      { name: "claude", limits: 0 },
+    ]);
+  });
+
+  test("a preset's workers run jobs side by side in worktrees of their own; overlapping touches wait", async () => {
+    const base = setup(["a", "b", "c"]);
+    const times = mkdtempSync(join(scratch, "times-"));
+    agents({
+      claude: `echo "start $(date +%s%N) $(pwd)" >> ${times}/$FACTORY_JOB; sleep 0.4; echo "end $(date +%s%N)" >> ${times}/$FACTORY_JOB; ${RESULT}`,
+    });
+    tiered(base.state, {
+      presets: [{ agent: "claude", id: "c", workers: 2 }],
+      tiers: { communicator: [], builder: ["c"], grunt: [] },
+    });
+    const a = base.pick("a", { tier: "builder", touches: ["src/a/**"] });
+    const b = base.pick("b", { tier: "builder", touches: ["docs/**"] });
+    const c = base.pick("c", { tier: "builder", touches: ["src/**"] });
+    const jobs = await work(options(base, {}));
+    expect(jobs.map((job) => job.state)).toEqual(["done", "done", "done"]);
+    const read = (id: string) => {
+      const [start, end] = readFileSync(join(times, id), "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => line.split(" "));
+      return { start: Number(start[1]), end: Number(end[1]), dir: start[2] };
+    };
+    const [ta, tb, tc] = [read(a.id), read(b.id), read(c.id)];
+    expect(tb.start).toBeLessThan(ta.end);
+    expect(ta.dir).not.toBe(tb.dir);
+    expect(tc.start).toBeGreaterThan(ta.end);
+    expect(sh(base.repo, "git", "worktree", "list").trim().split("\n")).toHaveLength(3);
+  });
+
+  test("agents and gates get the repo's env, with {worktree} filled in", async () => {
+    const base = setup(["a"]);
+    agents({ claude: `echo "target=$CARGO_TARGET_DIR"; ${RESULT}` });
+    tiered(base.state, { env: { [base.repo]: { CARGO_TARGET_DIR: "{worktree}/target" } } });
+    base.pick("a", { gates: ['test "$CARGO_TARGET_DIR" = "$(pwd)/target"'] });
+    const [job] = await work(options(base));
+    expect(job.state).toBe("done");
+    expect(readFileSync(job.attempts[0].log, "utf8")).toMatch(/target=.*worktrees\/\w+\/1\/target/);
+  });
+
+  test("needs no worker has: the agent is told, and the job waits for the user to verify", async () => {
+    const base = setup(["a"]);
+    agents({
+      claude: `case "$prompt" in *"needs gpu"*) ;; *) exit 1 ;; esac; ${report(base.state, { kind: "result", text: "did it", unverified: ["shader output"] })}`,
+    });
+    tiered(base.state, { capabilities: ["display"] });
+    const job = base.pick("a", { needs: ["display", "gpu"] });
+    const [done] = await work(options(base));
+    expect(done).toMatchObject({ state: "done", unverified: ["shader output", "gpu"] });
+    record(base.state, { type: "verify", id: job.id, need: "gpu" });
+    expect(readJobs(base.state)[0].unverified).toEqual(["shader output"]);
+    record(base.state, { type: "verify", id: job.id });
+    expect(readJobs(base.state)[0].unverified).toEqual([]);
+  });
+
+  test("pi's compaction threshold: a warning with the settings to add when they don't match", () => {
+    const dir = mkdtempSync(join(scratch, "pi-"));
+    process.env.PI_CODING_AGENT_DIR = dir;
+    try {
+      const presets = [
+        { agent: "pi", model: "openai-codex/sol" },
+        { agent: "pi", model: "x/luna", compactAt: 150_000 },
+      ];
+      const windows = { "openai-codex/sol": 1_000_000, "x/luna": 400_000 };
+      const [first, second] = piSettingsWarnings(presets, windows);
+      expect(first).toContain(
+        '{"compaction":{"modelOverrides":{"openai-codex/sol":{"reserveTokens":800000}}}}',
+      );
+      expect(second).toContain('"reserveTokens":250000');
+      writeFileSync(
+        join(dir, "settings.json"),
+        JSON.stringify({
+          compaction: { modelOverrides: { "openai-codex/sol": { reserveTokens: 800_000 } } },
+        }),
+      );
+      expect(piSettingsWarnings(presets, windows)).toHaveLength(1);
+    } finally {
+      delete process.env.PI_CODING_AGENT_DIR;
+    }
+  });
+
+  test("workers: one per run agent, and each preset's, by default one when a tier lists it", () => {
+    const settings = {
+      ...readSettings(mkdtempSync(join(scratch, "state-"))),
+      presets: [
+        { agent: "pi", model: "p/a", id: "a" },
+        { agent: "pi", model: "p/b", id: "b" },
+        { agent: "claude", model: "haiku", id: "h", workers: 2 },
+      ],
+      tiers: { communicator: [], builder: ["a"], grunt: [] },
+    };
+    expect(
+      makeSlots({ claude: {} }, settings).map((slot) => [slot.worker.id, slot.worker.pool]),
+    ).toEqual([
+      ["claude#1", "claude"],
+      ["a#1", "p"],
+      ["h#1", "claude"],
+      ["h#2", "claude"],
+    ]);
+  });
+
+  /** A goal's plan for the scratch repo: nodes as given, every node delivering a file named after itself. */
+  function plan(
+    repo: string,
+    nodes: Record<string, unknown>[],
+    goal: Record<string, unknown> = {},
+  ): Plan {
+    return {
+      format: "factory-plan/1",
+      goal: {
+        title: "Demo goal",
+        repo,
+        branch: "goal/demo",
+        summary: "Make a demo.",
+        gates: [],
+        ...goal,
+      },
+      nodes: nodes.map((node) => ({
+        tier: "builder",
+        prompt: `Do ${String(node.key)}.`,
+        title: String(node.key),
+        after: [],
+        touches: [],
+        gates: [],
+        ...node,
+      })),
+    } as unknown as Plan;
+  }
+
+  /** The fake agent of a goal node: commits <key>.txt on its branch and pushes it. */
+  const NODE = `b=$(git rev-parse --abbrev-ref HEAD); key=$(basename $b)
+echo "$key" > $key.txt; git add $key.txt; git commit -qm "$key"; git push -q origin HEAD:$b; ${RESULT}`;
+
+  function goalRepo() {
+    const github = gh();
+    const { repo, origin } = repoWithOrigin();
+    const state = mkdtempSync(join(scratch, "state-"));
+    const files = (branch: string) =>
+      sh(origin, "git", "ls-tree", "--name-only", "-r", branch).trim().split("\n");
+    return { repo, origin, state, github, files, base: { state, workwork: "false" } };
+  }
+
+  test("a goal: waits for approval, merges each node into its integration branch in order, then opens the final PR", async () => {
+    const { repo, state, github, files, base } = goalRepo();
+    agents({ claude: NODE });
+    const goal = await importPlan(
+      state,
+      plan(
+        repo,
+        [
+          { key: "a", gates: ["test -e a.txt"] },
+          { key: "b", after: ["a"] },
+        ],
+        { gates: ["test -e .factory/demo.md"] },
+      ),
+    );
+    expect(files("goal/demo")).toEqual([".factory/demo.md", ".factory/demo.plan.json"]);
+    expect(readJobs(state).find((job) => job.id === goal.id)).toMatchObject({
+      state: "blocked",
+      blocked: "checkpoint",
+    });
+    const quiet = Date.now() + 300;
+    expect(
+      (await work(options(base), () => Date.now() > quiet)).filter((job) => job.attempts.length),
+    ).toEqual([]);
+
+    approveGoal(state, goal.id);
+    const jobs = await work(
+      options(base),
+      (jobs) => jobs.find((job) => job.id === goal.id)!.state === "done",
+    );
+    expect(jobs.filter((job) => job.of).map((job) => [job.key, job.state])).toEqual([
+      ["a", "done"],
+      ["b", "done"],
+    ]);
+    expect(files("goal/demo")).toEqual([
+      ".factory/demo.md",
+      ".factory/demo.plan.json",
+      "a.txt",
+      "b.txt",
+    ]);
+    const calls = github.calls();
+    expect(calls).toContain("pr create --base goal/demo --head node/demo/a");
+    expect(calls).toContain("pr create --base goal/demo --head node/demo/b");
+    expect(calls).toContain("pr create --base main --head goal/demo --title Demo goal");
+    const prompt = readFileSync(
+      join(dirname(jobs.find((job) => job.key === "b")!.attempts[0].log), "prompt.md"),
+      "utf8",
+    );
+    expect(prompt).toContain("Read `.factory/demo.md` first");
+    expect(prompt).toContain("You're on branch `node/demo/b`");
+    expect(prompt).toMatch(
+      /## What this builds on\n\n- a: did it \(https:\/\/github.com\/o\/r\/pull\/10\d\)/,
+    );
+  });
+
+  test("a node that no longer rebases gets a conflicts job on its branch, then merges", async () => {
+    const { repo, state, files, base } = goalRepo();
+    const script = `b=$(git rev-parse --abbrev-ref HEAD); key=$(basename $b)
+case "$prompt" in
+  *"no longer rebases cleanly"*) git rebase -q origin/goal/demo || { echo both > same.txt; git add same.txt; GIT_EDITOR=true git rebase --continue; }; git push -qf origin HEAD:$b ;;
+  *) echo "$key" > same.txt; git add same.txt; git commit -qm "$key"; sleep 0.3; git push -q origin HEAD:$b ;;
+esac; ${RESULT}`;
+    agents({ claude: script, pi: script });
+    const goal = await importPlan(
+      state,
+      plan(repo, [
+        { key: "a", touches: ["a/**"] },
+        { key: "b", touches: ["b/**"] },
+      ]),
+    );
+    approveGoal(state, goal.id);
+    const jobs = await work(
+      options(base, { claude: {}, pi: {} }),
+      (jobs) => jobs.find((job) => job.id === goal.id)!.state === "done",
+    );
+    const conflicts = jobs.filter((job) => job.item.play === "conflicts");
+    expect(conflicts).toHaveLength(1);
+    expect(conflicts[0]).toMatchObject({ state: "done", front: true });
+    expect(sh(repo, "git", "show", "origin/goal/demo:same.txt")).toBe("both\n");
+    expect(files("goal/demo")).toContain("same.txt");
+  });
+
+  test("a red integration branch pauses the goal and queues a fix at the front", async () => {
+    const { repo, state, files, base } = goalRepo();
+    agents({
+      claude: `b=$(git rev-parse --abbrev-ref HEAD)
+case "$prompt" in
+  *"integration branch"*"fails"*) git rm -q bad.txt; git commit -qm fix ;;
+  *) echo bad > bad.txt; git add bad.txt; git commit -qm bad ;;
+esac; git push -q origin HEAD:$b; ${RESULT}`,
+    });
+    const goal = await importPlan(
+      state,
+      plan(repo, [{ key: "a" }, { key: "b", after: ["a"] }], { gates: ["test ! -e bad.txt"] }),
+    );
+    approveGoal(state, goal.id);
+    const jobs = await work(
+      options(base),
+      (jobs) => jobs.find((job) => job.id === goal.id)!.state === "done",
+    );
+    const goalJob = jobs.find((job) => job.id === goal.id)!;
+    expect(goalJob.notes.map((note) => note.text)).toContain(
+      "goal/demo fails `test ! -e bad.txt` after merging a",
+    );
+    expect(jobs.filter((job) => job.item.play === "red").map((job) => job.state)).toEqual([
+      "done",
+      "done",
+    ]);
+    expect(files("goal/demo")).not.toContain("bad.txt");
+  });
+
+  test("a node with a review: its findings become a fix on its branch before it merges", async () => {
+    const { repo, state, base } = goalRepo();
+    agents({
+      claude: `b=$(git rev-parse --abbrev-ref HEAD)
+case "$prompt" in
+  *"Review the work"*) ${report(state, { kind: "result", text: "one finding", followups: ["a.txt says a, should say A"] })} ;;
+  *"A review of branch"*) echo A > a.txt; git commit -qam fix; git push -q origin HEAD:$b; ${RESULT} ;;
+  *) ${NODE} ;;
+esac`,
+    });
+    const goal = await importPlan(state, plan(repo, [{ key: "a", review: "builder" }]));
+    approveGoal(state, goal.id);
+    const jobs = await work(
+      options(base),
+      (jobs) => jobs.find((job) => job.id === goal.id)!.state === "done",
+    );
+    expect(jobs.filter((job) => job.of).map((job) => [job.item.play, job.state])).toEqual([
+      ["review", "done"],
+      ["fix", "done"],
+      ["goal", "done"],
+    ]);
+    expect(sh(repo, "git", "show", "origin/goal/demo:a.txt")).toBe("A\n");
+  });
+
+  test("goal new: the decomposer writes a plan, gets a follow-up while it's invalid, and the goal waits with it", async () => {
+    const { repo, state, base } = goalRepo();
+    const turns = join(mkdtempSync(join(scratch, "turns-")), "n");
+    const valid = plan(repo, [{ key: "a" }, { key: "b", after: ["a"] }]);
+    agents({
+      claude: `n=$(($(cat ${turns} 2>/dev/null || echo 0) + 1)); echo $n > ${turns}; mkdir -p .factory
+if [ $n = 1 ]; then echo '{"format":"factory-plan/1","nodes":[]}' > .factory/demo-goal.plan.json; else echo '${JSON.stringify(valid)}' > .factory/demo-goal.plan.json; fi; ${RESULT}`,
+    });
+    const goal = await newGoal(state, "Demo goal", repo, "Make a demo.");
+    const jobs = await work(options(base), (jobs) => jobs.some((job) => job.key === "b"));
+    const decompose = jobs.find((job) => job.item.play === "decompose")!;
+    expect(decompose).toMatchObject({ state: "done", tier: "communicator" });
+    expect(decompose.notes.find((note) => note.kind === "factory")?.text).toContain(
+      "has problems; fix them all:",
+    );
+    expect(readFileSync(join(dirname(decompose.attempts[0].log), "prompt.md"), "utf8")).toContain(
+      "Write the plan to `.factory/demo-goal.plan.json`",
+    );
+    expect(jobs.find((job) => job.id === goal.id)).toMatchObject({
+      state: "blocked",
+      blocked: "checkpoint",
+    });
+    expect(jobs.filter((job) => job.key).map((job) => job.key)).toEqual(["a", "b"]);
+  });
+
+  test("a node failed for good queues a replan; a replan may change what hasn't started, and a big one waits for approval", async () => {
+    const { repo, state, base } = goalRepo();
+    const replanned = plan(repo, [
+      { key: "a", tier: "communicator" },
+      { key: "c", prompt: "Do c instead." },
+      { key: "d", after: ["c"] },
+    ]);
+    agents({
+      claude: `case "$prompt" in
+  *"Replan the goal"*) mkdir -p .factory; echo '${JSON.stringify(replanned)}' > .factory/demo.replan.json; ${RESULT} ;;
+  *) exit 1 ;;
+esac`,
+    });
+    const goal = await importPlan(
+      state,
+      plan(repo, [{ key: "a", tier: "communicator" }, { key: "b", after: ["a"] }, { key: "c" }]),
+    );
+    approveGoal(state, goal.id);
+    const jobs = await work(options(base), (jobs) =>
+      jobs.some((job) => job.item.play === "replan" && job.state === "done"),
+    );
+    const nodes = jobs.filter((job) => job.key).sort((x, y) => x.key!.localeCompare(y.key!));
+    expect(nodes.map((job) => [job.key, job.state])).toEqual([
+      ["a", "failed"],
+      ["b", "removed"],
+      ["c", "queued"],
+      ["d", "queued"],
+    ]);
+    expect(jobs.find((job) => job.key === "c")!.prompt).toBe("Do c instead.");
+    expect(jobs.find((job) => job.id === goal.id)).toMatchObject({
+      state: "blocked",
+      blocked: "checkpoint",
+    });
+  });
+
+  test("a goal at its attempt budget waits; approving gives it the budget again", async () => {
+    const { repo, state, base } = goalRepo();
+    agents({ claude: NODE });
+    const goal = await importPlan(
+      state,
+      plan(repo, [{ key: "a" }, { key: "b" }], { budget: { attempts: 1 } }),
+    );
+    approveGoal(state, goal.id);
+    let jobs = await work(
+      options(base),
+      (jobs) => jobs.find((job) => job.id === goal.id)!.blocked === "checkpoint",
+    );
+    expect(jobs.filter((job) => job.state === "done" && job.key)).toHaveLength(1);
+    approveGoal(state, goal.id);
+    jobs = await work(
+      options(base),
+      (jobs) => jobs.find((job) => job.id === goal.id)!.state !== "queued",
+    );
+    expect(jobs.filter((job) => job.key).map((job) => job.state)).toEqual(["done", "done"]);
   });
 
   test("serve lists a newly cloned repo even when workwork finds no candidates", async () => {
@@ -706,7 +1220,7 @@ ${report(base.state, { kind: "ask", text: "A or B?" })}`,
     const github = gh();
     const count = join(mkdtempSync(join(scratch, "count-")), "n");
     agents({
-      claude: `n=$(($(cat ${count} 2>/dev/null || echo 0) + 1)); echo $n > ${count}; echo "opened https://github.com/o/r/pull/$n"`,
+      claude: `n=$(($(cat ${count} 2>/dev/null || echo 0) + 1)); echo $n > ${count}; echo "opened https://github.com/o/r/pull/$n"; ${RESULT}`,
     });
     const jobs = [base.pick("a"), base.pick("b")];
     await work(options(base));
@@ -731,7 +1245,9 @@ ${report(base.state, { kind: "ask", text: "A or B?" })}`,
         [jobs[1].id]: { step: "skipped", reason: "already merged" },
       });
       expect(github.calls().match(/pr merge/g)).toHaveLength(1);
-      const said = readJobs(base.state).map((job) => job.notes.map((note) => note.text));
+      const said = readJobs(base.state).map((job) =>
+        job.notes.filter((note) => note.kind === "train").map((note) => note.text),
+      );
       expect(said).toEqual([["merged"], ["skipped: already merged"]]);
     } finally {
       server.close();
@@ -1031,7 +1547,7 @@ esac; done`,
         `https://github.com/o/${name}.git`,
       );
       const github = gh({ mergeable: "CONFLICTING" });
-      agents({ claude: `echo 'opened ${pr}'` });
+      agents({ claude: `echo 'opened ${pr}'; ${RESULT}` });
       const job = base.pick("a");
 
       writeFileSync(join(repo, "shared.txt"), "original\n");

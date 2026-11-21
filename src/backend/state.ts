@@ -4,7 +4,14 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { AGENT_NAMES } from "./agents.ts";
-import type { Candidates, Item, Settings } from "./types.ts";
+import {
+  presetId,
+  TIERS,
+  type Candidates,
+  type Item,
+  type Preset,
+  type Settings,
+} from "./types.ts";
 
 export const STATE = process.env.DATA
   ? join(process.env.DATA, "apps", "factory")
@@ -35,7 +42,11 @@ const DEFAULTS: Settings = {
   chat: { agent: "pi" },
   presets: [],
   limit: 1,
-  timeout: 60,
+  idle: 10,
+  tiers: { communicator: [], builder: [], grunt: [] },
+  store: "local",
+  capabilities: [],
+  env: {},
   auto: { on: false, levels: LEVELS, plays: [], repos: [] },
 };
 
@@ -51,8 +62,15 @@ export function writeSettings(state: string, settings: Settings): void {
 }
 
 /** Settings come from a file people edit and from the page, so they are checked on the way in. */
-export function checkSettings(raw: Partial<Settings>): Settings {
-  const settings = { ...DEFAULTS, ...raw, auto: { ...DEFAULTS.auto, ...raw.auto } };
+export function checkSettings(raw: Partial<Settings> & { timeout?: number }): Settings {
+  // timeout was a wall clock and has no match in idle minutes, so an old file's is dropped.
+  const { timeout: _, ...rest } = raw;
+  const settings = {
+    ...DEFAULTS,
+    ...rest,
+    tiers: { ...DEFAULTS.tiers, ...rest.tiers },
+    auto: { ...DEFAULTS.auto, ...rest.auto },
+  };
   for (const name of Object.keys(settings.agents))
     if (!AGENT_NAMES.includes(name))
       throw new Error(`unknown agent ${name} (known: ${AGENT_NAMES.join(", ")})`);
@@ -67,8 +85,19 @@ export function checkSettings(raw: Partial<Settings>): Settings {
     throw new Error(`limit wants a whole number above 0 or null, got ${settings.limit}`);
   if (settings.until !== undefined && !/^\d{1,2}:\d{2}$/.test(settings.until))
     throw new Error(`until wants HH:MM, got ${settings.until}`);
-  if (!(Number.isInteger(settings.timeout) && settings.timeout > 0))
-    throw new Error(`timeout wants whole minutes above 0, got ${settings.timeout}`);
+  if (!(Number.isInteger(settings.idle) && settings.idle > 0))
+    throw new Error(`idle wants whole minutes above 0, got ${settings.idle}`);
+  const ids = settings.presets.map(presetId);
+  if (new Set(ids).size !== ids.length)
+    throw new Error(`presets need distinct ids, got ${ids.join(", ")}`);
+  for (const [tier, list] of Object.entries(settings.tiers)) {
+    if (!(TIERS as readonly string[]).includes(tier))
+      throw new Error(`unknown tier ${tier} (known: ${TIERS.join(", ")})`);
+    for (const id of list)
+      if (!ids.includes(id)) throw new Error(`tier ${tier} names no preset ${id}`);
+  }
+  if (settings.store !== "local" && settings.store !== "tasks")
+    throw new Error(`store wants local or tasks, got ${String(settings.store)}`);
   for (const level of settings.auto.levels)
     if (!LEVELS.includes(level)) throw new Error(`unknown level ${level}`);
   return settings;
@@ -117,3 +146,16 @@ export async function output(command: string, args: string[], cwd: string): Prom
   process.stderr.write(stderr);
   return stdout;
 }
+
+/** The account a preset's usage counts against: claude's, or pi's provider. */
+export const poolOf = (preset: Preset) =>
+  preset.pool ?? (preset.agent === "pi" ? (preset.model?.split("/")[0] ?? "pi") : preset.agent);
+
+/** Haiku 5.5 costs more above 100k, the others above 272k, so each compacts below its step. */
+export const compactAt = (preset: Preset) =>
+  preset.compactAt ?? (/haiku/i.test(preset.model ?? "") ? 90_000 : 200_000);
+
+/** A preset gets a worker by default once a tier lists it. */
+export const workersOf = (preset: Preset, settings: Settings) =>
+  preset.workers ??
+  (Object.values(settings.tiers).some((list) => list.includes(presetId(preset))) ? 1 : 0);

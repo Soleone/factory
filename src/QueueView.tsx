@@ -20,8 +20,11 @@ import { StateIcon, StatePill, TaskDetails } from "@/TaskDetails";
 
 function jobMeta(job: Job, byId: Map<string, Job>): string {
   const pin = job.agent ? pinName({ ...job, agent: job.agent }) : "";
-  const before = job.after && byId.get(job.after);
-  const after = before && before.state !== "done" && `after ${itemTitle(before.item)}`;
+  const waiting = job.after.flatMap((id) => {
+    const before = byId.get(id);
+    return before && before.state !== "done" ? [itemTitle(before.item)] : [];
+  });
+  const after = waiting.length > 0 && `after ${waiting.join(", ")}`;
   return [job.item.play, job.item.level, pin, after].filter(Boolean).join(" · ");
 }
 
@@ -111,17 +114,16 @@ export function QueueView({
                 : worker.until
                   ? `until ${clock(worker.until)}`
                   : (worker.reason ?? "waiting for work");
-              const limits = `limits hit ${worker.limits} of ${status.limit ?? "∞"}`;
-              const budget = job && `${minutesSince(worker.since)} of ${status.timeout} min`;
+              const pool = status.pools.find((each) => each.name === worker.pool);
+              const limits = `${worker.pool}: limits hit ${pool?.limits ?? 0} of ${status.limit ?? "∞"}`;
+              const budget = job && `${minutesSince(worker.since)} min`;
               const said = job?.notes.at(-1);
               return (
                 <Row
-                  key={worker.agent}
-                  progress={job && minutesSince(worker.since) / status.timeout}
+                  key={worker.id}
                   title={
                     <>
-                      {worker.agent}{" "}
-                      <Badge variant={WORKER_BADGE[worker.state]}>{worker.state}</Badge>
+                      {worker.id} <Badge variant={WORKER_BADGE[worker.state]}>{worker.state}</Badge>
                     </>
                   }
                   meta={
@@ -137,6 +139,7 @@ export function QueueView({
                           .filter(Boolean)
                           .join(" · ")}
                       </span>
+                      {worker.activity && <span>{worker.activity}</span>}
                       {said && (
                         <span>
                           {clock(said.at)} {said.kind}: {said.text}

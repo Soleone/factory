@@ -262,13 +262,9 @@ function Story({ job, snapshot, act }: { job: Job; snapshot: Snapshot; act: Act 
         <Now className="border-primary/40">
           <span className="flex items-center gap-2 font-medium">
             <StateIcon state="running" />
-            {worker.agent} working, {minutesSince(worker.since)} of {status.timeout} min
+            {worker.id} working, {minutesSince(worker.since)} min
           </span>
-          <progress
-            className="h-1.5 w-full accent-primary"
-            max={status.timeout}
-            value={minutesSince(worker.since)}
-          />
+          {worker.activity && <span>{worker.activity}</span>}
         </Now>
       )}
       {question && <Answer job={job} question={question} act={act} />}

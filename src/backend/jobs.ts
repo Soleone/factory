@@ -4,9 +4,12 @@ import { join } from "node:path";
 import { workworkBranch } from "./review.ts";
 import { LEVELS, output } from "./state.ts";
 import {
+  chains,
   itemKey,
   prUrl,
+  TIERS,
   type Attempt,
+  type Blocked,
   type Item,
   type Job,
   type Note,
@@ -18,16 +21,63 @@ import {
  * each other; the queue is whatever replaying it gives.
  */
 export type Event = { at: string } & (
-  | {
-      type: "add";
-      job: Pick<Job, "id" | "item" | "source" | "agent" | "model" | "effort" | "prompt" | "after">;
-    }
-  | { type: "remove" | "requeue" | "retry"; id: string }
+  | { type: "add"; job: NewJob }
+  | { type: "remove" | "requeue" | "retry" | "merged" | "unblock"; id: string }
   | { type: "move"; id: string; index: number }
-  | { type: "start"; id: string; agent: string }
+  | { type: "start"; id: string; agent: string; preset?: string }
   | { type: "attempt"; id: string; attempt: Attempt }
   | { type: "note"; id: string; note: NoteBody }
+  /** The open attempt waits: for the user's answer, or for its pool's limit to reset. */
+  | { type: "pause"; id: string; reason: "asked" | "limited" }
+  | { type: "block"; id: string; reason: Blocked }
+  /** A replan's change to a job that hasn't started. */
+  | { type: "update"; id: string; change: Change }
+  /** The user checked a need it couldn't verify; no need: all of them. */
+  | { type: "verify"; id: string; need?: string }
 );
+
+/** What a new job may say; the rest starts empty. Old logs have `after` as one id. */
+export type NewJob = Pick<Job, "id" | "item" | "source"> &
+  Partial<
+    Pick<
+      Job,
+      | "agent"
+      | "model"
+      | "effort"
+      | "preset"
+      | "tier"
+      | "prompt"
+      | "after"
+      | "parent"
+      | "gates"
+      | "touches"
+      | "needs"
+      | "goal"
+      | "key"
+      | "checkpoint"
+      | "review"
+      | "of"
+      | "branchOf"
+      | "front"
+    >
+  >;
+
+export type Change = Partial<
+  Pick<
+    Job,
+    | "item"
+    | "tier"
+    | "prompt"
+    | "after"
+    | "parent"
+    | "gates"
+    | "touches"
+    | "needs"
+    | "checkpoint"
+    | "review"
+    | "goal"
+  >
+>;
 
 export type NoteBody = Omit<Note, "at" | "attempt">;
 
@@ -40,34 +90,61 @@ function append(state: string, event: Event): void {
   appendFileSync(path(state), `${JSON.stringify(event)}\n`);
 }
 
-/** Every job ever, the queued ones in the order they will be taken: picks first, then auto. */
+/** Appends an event now. */
+export function record(state: string, event: DistributiveOmit<Event, "at">): void {
+  append(state, { at: new Date().toISOString(), ...event } as Event);
+}
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+
+const fresh = (job: NewJob, at: string): Job => ({
+  ...job,
+  after: typeof job.after === "string" ? [job.after] : (job.after ?? []),
+  gates: job.gates ?? [],
+  needs: job.needs ?? [],
+  unverified: [],
+  added: at,
+  state: "queued",
+  attempts: [],
+  notes: [],
+  escalations: 0,
+  open: false,
+});
+
+/**
+ * Every job ever, the queued ones in the order they will be taken: picks first, then goal nodes by
+ * goal and longest remaining chain, then auto.
+ */
 export function readJobs(state: string): Job[] {
   if (!existsSync(path(state))) return [];
+  const events: Event[] = readFileSync(path(state), "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+  return replay(events);
+}
+
+export function replay(events: Event[]): Job[] {
   const jobs = new Map<string, Job>();
   const failures = new Map<string, number>();
-  // Picks keep the order the user gave them; auto jobs keep the order they were added in.
+  // Picks keep the order the user gave them; the rest keep the order they were added in.
   const picks: Job[] = [];
-  const autos: Job[] = [];
-  for (const line of readFileSync(path(state), "utf8").split("\n")) {
-    if (!line) continue;
-    const event: Event = JSON.parse(line);
+  const others: Job[] = [];
+  for (const event of events) {
     if (event.type === "add") {
-      const job: Job = {
-        ...event.job,
-        added: event.at,
-        state: "queued",
-        attempts: [],
-        notes: [],
-      };
+      const job = fresh(event.job, event.at);
       jobs.set(job.id, job);
-      (job.source === "pick" ? picks : autos).push(job);
+      (job.source === "pick" ? picks : others).push(job);
       continue;
     }
     const job = jobs.get(event.id)!;
     if (event.type === "remove") job.state = "removed";
-    if (event.type === "requeue") job.state = "queued";
+    if (event.type === "requeue" || event.type === "unblock") {
+      job.state = "queued";
+      job.blocked = undefined;
+    }
     if (event.type === "retry") {
       job.state = "queued";
+      job.blocked = undefined;
       failures.set(job.id, 0);
     }
     if (event.type === "move") {
@@ -77,47 +154,196 @@ export function readJobs(state: string): Job[] {
     }
     if (event.type === "start") {
       job.state = "running";
+      job.blocked = undefined;
+      job.open = true;
       job.agent = event.agent;
     }
+    if (event.type === "pause") {
+      job.state = event.reason === "asked" ? "blocked" : "queued";
+      job.blocked = event.reason === "asked" ? "asked" : undefined;
+    }
+    if (event.type === "block") {
+      job.state = "blocked";
+      job.blocked = event.reason;
+    }
+    if (event.type === "merged") {
+      job.state = "done";
+      job.blocked = undefined;
+    }
+    if (event.type === "update") Object.assign(job, event.change);
+    if (event.type === "verify")
+      job.unverified = event.need ? job.unverified.filter((need) => need !== event.need) : [];
     if (event.type === "note") {
       const { kind } = event.note;
-      // An agent's note comes during the attempt that isn't recorded yet; the user's answer and
-      // the merge train's report after the attempt they follow.
-      const attempt = job.attempts.length + (kind === "answer" || kind === "train" ? 0 : 1);
+      // Notes during an attempt belong to it; the merge train's report and answers to a finished
+      // attempt (old logs) belong to the last one.
+      const attempt = job.attempts.length + (job.open ? 1 : 0);
       job.notes.push({ ...event.note, at: event.at, attempt });
-      if (kind === "answer") job.state = "queued";
+      if (kind === "answer" && event.note.re === undefined && job.state === "blocked") {
+        job.state = "queued";
+        job.blocked = undefined;
+      }
     }
     if (event.type === "attempt") {
       job.attempts.push(event.attempt);
+      job.open = false;
       const { outcome } = event.attempt;
-      const asked = job.notes.some(
-        (note) => note.kind === "ask" && note.attempt === job.attempts.length,
-      );
-      if (asked) job.state = "blocked";
-      else if (outcome === "done") job.state = "done";
-      else if (outcome === "limited" || outcome === "stopped") job.state = "queued";
+      const number = job.attempts.length;
+      const said = job.notes.filter((note) => note.attempt === number);
+      // Old logs ended an attempt with an unanswered question; now an answer goes on in it.
+      const asked =
+        said.findLastIndex((note) => note.kind === "ask") >
+        said.findLastIndex((note) => note.kind === "answer" && note.re === undefined);
+      const unverified = job.notes.findLast(
+        (note) => note.kind === "result" && note.attempt === number,
+      )?.unverified;
+      const lacking = [...(unverified ?? []), ...(event.attempt.missing ?? [])];
+      if (outcome === "done" && lacking.length)
+        job.unverified = [...new Set([...job.unverified, ...lacking])];
+      if (asked) {
+        // Old logs: the attempt ended with the question.
+        job.state = "blocked";
+        job.blocked = "asked";
+      } else if (outcome === "done") {
+        // A goal node is done once its branch is merged into the integration branch.
+        job.state = job.of ? "blocked" : "done";
+        job.blocked = job.of ? "review" : undefined;
+      } else if (outcome === "limited" || outcome === "stopped") job.state = "queued";
       else {
         const count = (failures.get(job.id) ?? 0) + 1;
         failures.set(job.id, count);
-        job.state = count >= TRIES ? "failed" : "queued";
+        const up = job.tier && TIERS[TIERS.indexOf(job.tier) - 1];
+        if (count < TRIES) job.state = "queued";
+        else if (up) {
+          job.notes.push({
+            at: event.at,
+            attempt: number,
+            kind: "factory",
+            text: `failed twice on ${job.tier}; moves up to ${up}`,
+          });
+          job.tier = up;
+          job.escalations++;
+          failures.set(job.id, 0);
+          job.state = "queued";
+        } else job.state = "failed";
       }
     }
   }
-  // A job waiting on one that failed or was removed would wait forever. It goes too, and comes
-  // back if that job is retried. Jobs replay in the order added, so chains of them follow.
-  for (const job of jobs.values()) {
-    const state = job.after && jobs.get(job.after)!.state;
-    if (job.state === "queued" && (state === "failed" || state === "removed"))
-      job.state = "removed";
-  }
-  return [...picks, ...autos];
+  settle(jobs);
+  return [...picks, ...ordered(others, jobs)];
 }
 
-/** The next job this agent may take: queued for it, with the job it comes after done. */
+/**
+ * States that follow from others: a job waiting on one that failed or was removed is held until
+ * that one is retried; a job with children is done when they are, and waits until then.
+ */
+function settle(jobs: Map<string, Job>): void {
+  const children = childrenOf(jobs.values());
+  const settled = new Map<string, Job["state"]>();
+  const stateOf = (job: Job): Job["state"] => {
+    const known = settled.get(job.id);
+    if (known) return known;
+    const kids = (children.get(job.id) ?? []).filter((kid) => kid.state !== "removed");
+    let state = job.state;
+    if (!job.goal && kids.length > 0 && (state === "queued" || state === "done"))
+      state = kids.every((kid) => stateOf(kid) === "done") ? "done" : "queued";
+    settled.set(job.id, state);
+    return state;
+  };
+  for (const job of jobs.values()) job.state = stateOf(job);
+  for (const job of jobs.values()) {
+    if (job.state !== "queued") continue;
+    const lost = job.after.some((id) => {
+      const state = jobs.get(id)?.state;
+      return state === "failed" || state === "removed";
+    });
+    if (lost) {
+      job.state = "blocked";
+      job.blocked = "held";
+    }
+  }
+  // Holding spreads down the chain, in any order of adding.
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const job of jobs.values())
+      if (
+        job.state === "queued" &&
+        job.after.some(
+          (id) => jobs.get(id)?.blocked === "held" && jobs.get(id)?.state === "blocked",
+        )
+      ) {
+        job.state = "blocked";
+        job.blocked = "held";
+        changed = true;
+      }
+  }
+}
+
+function childrenOf(jobs: Iterable<Job>): Map<string, Job[]> {
+  const children = new Map<string, Job[]>();
+  for (const job of jobs)
+    if (job.parent) children.set(job.parent, [...(children.get(job.parent) ?? []), job]);
+  return children;
+}
+
+/** Goal jobs in the order their goals were added, factory's own first, then the longest remaining chain; auto jobs last. */
+function ordered(others: Job[], jobs: Map<string, Job>): Job[] {
+  const goals = others.filter((job) => job.goal).map((job) => job.id);
+  const chain = chains(jobs);
+  const rank = (job: Job) =>
+    job.source === "auto" ? goals.length : Math.max(0, goals.indexOf(job.of ?? job.id));
+  return others
+    .map((job, index) => ({ job, index }))
+    .sort(
+      (a, b) =>
+        rank(a.job) - rank(b.job) ||
+        Number(b.job.front ?? false) - Number(a.job.front ?? false) ||
+        (chain.get(b.job.id) ?? 0) - (chain.get(a.job.id) ?? 0) ||
+        a.index - b.index,
+    )
+    .map(({ job }) => job);
+}
+
+/**
+ * Whether a job may start now, whoever takes it: queued, not a goal or a group, everything it comes
+ * after done, no goal or group above it waiting, and no running job that may touch the same files.
+ */
+export function ready(job: Job, jobs: Job[]): boolean {
+  if (job.state !== "queued" || job.goal) return false;
+  const byId = new Map(jobs.map((each) => [each.id, each]));
+  if (jobs.some((each) => each.parent === job.id && each.state !== "removed")) return false;
+  if (!job.after.every((id) => byId.get(id)?.state === "done")) return false;
+  for (let up = job.parent ?? job.of; up;) {
+    const above = byId.get(up);
+    if (!above || above.state === "removed") return false;
+    // Factory's own jobs work a goal that waits for approval or a fix: the decomposer, conflicts, fixes.
+    const through = job.front && (above.blocked === "checkpoint" || above.blocked === "red");
+    if (above.state === "blocked" && !through) return false;
+    up = above.parent ?? (above.goal ? undefined : above.of);
+  }
+  return !jobs.some(
+    (other) =>
+      other.state === "running" && other.item.repo === job.item.repo && overlap(job, other),
+  );
+}
+
+/**
+ * Two jobs may touch the same files when both track touches and a glob of one could match a path of
+ * the other; an empty list means anything. Compared by the part before the first wildcard.
+ */
+export function overlap(a: Job, b: Job): boolean {
+  if (!a.touches || !b.touches) return false;
+  if (a.touches.length === 0 || b.touches.length === 0) return true;
+  const stem = (glob: string) => glob.split(/[*?[{]/)[0];
+  return a.touches.some((x) =>
+    b.touches!.some((y) => stem(x).startsWith(stem(y)) || stem(y).startsWith(stem(x))),
+  );
+}
+
+/** The next untiered job this agent may take: ready, and queued for it or for anyone. */
 export function nextJob(jobs: Job[], agent: string): Job | undefined {
-  const done = (id?: string) => !id || jobs.find((job) => job.id === id)?.state === "done";
   return jobs.find(
-    (job) => job.state === "queued" && (job.agent ?? agent) === agent && done(job.after),
+    (job) => !job.tier && !job.preset && (job.agent ?? agent) === agent && ready(job, jobs),
   );
 }
 
@@ -129,7 +355,7 @@ export function addJobs(
   state: string,
   items: Item[],
   source: Job["source"],
-  pin: Pick<Job, "agent" | "model" | "effort" | "prompt" | "after"> = {},
+  pin: Omit<NewJob, "id" | "item" | "source"> = {},
 ): Job[] {
   const at = new Date().toISOString();
   const active = new Set(
@@ -137,12 +363,17 @@ export function addJobs(
       .filter((job) => ACTIVE.includes(job.state))
       .map((job) => sameWork(job.item)),
   );
-  const fresh = items.filter((item) => !active.has(sameWork(item)));
-  return fresh.map((item) => {
-    const job = { id: randomBytes(4).toString("hex"), item, source, ...pin };
-    append(state, { at, type: "add", job });
-    return { ...job, added: at, state: "queued", attempts: [], notes: [] };
-  });
+  return items
+    .filter((item) => !active.has(sameWork(item)))
+    .map((item) => addJob(state, { id: newId(), item, source, ...pin }, at));
+}
+
+export const newId = () => randomBytes(4).toString("hex");
+
+/** Queues one job as given. */
+export function addJob(state: string, job: NewJob, at = new Date().toISOString()): Job {
+  append(state, { at, type: "add", job });
+  return fresh(job, at);
 }
 
 /**
@@ -182,7 +413,7 @@ export function queueReview(state: string, id: string, agent: string): Job | und
   const branch = workworkBranch(job.item);
   const item = { ...job.item, play: "review", title: `Review: ${job.item.title}` };
   const prompt = reviewPrompt(branch, job.agent);
-  return addJobs(state, [item], "pick", { agent, prompt, after: id })[0];
+  return addJobs(state, [item], "pick", { agent, prompt, after: [id] })[0];
 }
 
 const reviewPrompt = (
@@ -238,6 +469,7 @@ export async function removeJob(state: string, id: string): Promise<void> {
   if (left.length) await output("git", ["branch", "-D", ...left], job.item.repo);
 }
 
+/** A failed job goes back in the queue, and with it the jobs it held. */
 export function retryJob(state: string, id: string): void {
   find(state, id, "failed");
   append(state, { at: new Date().toISOString(), type: "retry", id });
@@ -249,27 +481,88 @@ export function moveJob(state: string, id: string, index: number): void {
   append(state, { at: new Date().toISOString(), type: "move", id, index });
 }
 
-/**
- * An agent's note on the job it works, the user's answer to a blocked job, which queues it again,
- * or what the merge train did with the job's PR.
- */
+/** What agents say while they work; the rest come from the user, the merge train and factory. */
+const AGENT_KINDS: Note["kind"][] = ["note", "ask", "assume", "result", "step"];
+
+/** An agent's note on the job it works, what the merge train did with its PR, or factory's own. */
 export function addNote(state: string, id: string, note: NoteBody): void {
+  if (note.kind === "answer") throw new Error("answers go through answer()");
   // The train only takes jobs with a PR, and the job may have been removed since it boarded.
-  if (note.kind !== "train") find(state, id, note.kind === "answer" ? "blocked" : "running");
+  if (AGENT_KINDS.includes(note.kind)) find(state, id, "running");
   append(state, { at: new Date().toISOString(), type: "note", id, note });
 }
 
-export function startJob(state: string, id: string, agent: string): void {
-  append(state, { at: new Date().toISOString(), type: "start", id, agent });
+/** Assumptions the user hasn't answered yet. */
+export const openAssumptions = (job: Job) =>
+  job.notes.flatMap((note, index) =>
+    note.kind === "assume" &&
+    !job.notes.some((other) => other.kind === "answer" && other.re === index)
+      ? [{ ...note, index }]
+      : [],
+  );
+
+const FINE = /^\s*(fine|ok|okay|yes|good|agreed)[.!]?\s*$/i;
+
+/**
+ * The user's answer: to the question a blocked job asked, which queues it again, or else to its
+ * oldest open assumption. An answer to an assumption that isn't "fine" queues a job after it, in its
+ * tier, to change what was assumed; returns that job.
+ */
+export function answer(state: string, id: string, text: string): Job | undefined {
+  const job = find(state, id, "queued", "running", "blocked", "done", "failed");
+  if (job.state === "blocked" && job.blocked === "asked") {
+    append(state, {
+      at: new Date().toISOString(),
+      type: "note",
+      id,
+      note: { kind: "answer", text },
+    });
+    return undefined;
+  }
+  const assumption = openAssumptions(job)[0];
+  if (!assumption) throw new Error(`job ${id} has no question or assumption to answer`);
+  append(state, {
+    at: new Date().toISOString(),
+    type: "note",
+    id,
+    note: { kind: "answer", text, re: assumption.index },
+  });
+  if (FINE.test(text)) return undefined;
+  const prompt = `${job.item.title} (job ${job.id}) was done assuming: ${assumption.assumed}
+
+It had asked: ${assumption.text}
+
+The user answered: ${text}
+
+Change the work to follow the answer. ${prUrl(job) ? `Its pull request is ${prUrl(job)}; push the change to its branch.` : "Start from what it delivered."}
+`;
+  return addJob(state, {
+    id: newId(),
+    item: {
+      ...job.item,
+      id: `${job.item.id}+answer`,
+      play: "answer",
+      title: `Follow the answer: ${job.item.title}`,
+    },
+    source: job.of ? "goal" : "pick",
+    prompt,
+    after: [job.id],
+    tier: job.tier,
+    agent: job.tier ? undefined : job.agent,
+    of: job.of,
+    parent: job.parent,
+    gates: job.gates,
+    touches: job.touches,
+    needs: job.needs,
+  });
+}
+
+export function startJob(state: string, id: string, agent: string, preset?: string): void {
+  append(state, { at: new Date().toISOString(), type: "start", id, agent, preset });
 }
 
 export function endJob(state: string, id: string, attempt: Attempt): void {
   append(state, { at: new Date().toISOString(), type: "attempt", id, attempt });
-}
-
-/** A job whose run stopped before its agent started goes back to the queue, its agent kept. */
-export function requeueJob(state: string, id: string): void {
-  append(state, { at: new Date().toISOString(), type: "requeue", id });
 }
 
 /** Cheapest attention first, and within a level one item per repo in turn so no repo takes the night. */

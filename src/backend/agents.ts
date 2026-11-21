@@ -21,7 +21,13 @@ export const EFFORTS: Record<string, string[]> = {
   pi: ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
 };
 
-export function agent(name: string, { model, effort }: Tuning = {}): Agent {
+/**
+ * A run's session: the first turn names it, later turns resume it in the same folder. Pi keeps its
+ * session files in `folder`. `compactAt` only reaches Claude Code; pi reads it from its settings.
+ */
+export type Session = { id: string; resume: boolean; folder: string; compactAt?: number };
+
+export function agent(name: string, { model, effort }: Tuning = {}, session?: Session): Agent {
   const pick = model ? ["--model", model] : [];
   if (name === "claude")
     return {
@@ -32,7 +38,10 @@ export function agent(name: string, { model, effort }: Tuning = {}): Agent {
         "--permission-mode",
         "bypassPermissions",
         "--output-format",
-        "json",
+        "stream-json",
+        "--verbose",
+        ...(session ? [session.resume ? "--resume" : "--session-id", session.id] : []),
+        ...(session?.compactAt ? ["--autocompact", String(session.compactAt)] : []),
         ...pick,
         ...(effort ? ["--effort", effort] : []),
       ],
@@ -42,7 +51,21 @@ export function agent(name: string, { model, effort }: Tuning = {}): Agent {
     return {
       name,
       command: "pi",
-      args: ["-p", ...pick, ...(effort ? ["--thinking", effort] : [])],
+      args: [
+        "-p",
+        "--mode",
+        "json",
+        ...(session
+          ? [
+              session.resume ? "--session" : "--session-id",
+              session.id,
+              "--session-dir",
+              session.folder,
+            ]
+          : []),
+        ...pick,
+        ...(effort ? ["--thinking", effort] : []),
+      ],
       limit: LIMITS.pi,
     };
   throw new Error(`unknown agent ${name} (known: ${AGENT_NAMES.join(", ")})`);
@@ -106,12 +129,19 @@ export function chatAgent(
   throw new Error(`unknown agent ${name} (known: ${AGENT_NAMES.join(", ")})`);
 }
 
-/** Only the end of the log decides: the agent's own work earlier on may mention limits too. */
-export function classify(agent: Agent, code: number, log: string): Exclude<Outcome, "timeout"> {
+/**
+ * Only the end of the log decides: the agent's own work earlier on may mention limits too. Both
+ * runners can report an error with exit 0, which the stream's `error` carries.
+ */
+export function classify(
+  agent: Agent,
+  code: number,
+  log: string,
+  error?: string,
+): Exclude<Outcome, "timeout"> {
   const tail = log.slice(-8000);
-  // claude --output-format json can report an error with exit 0.
-  if (code === 0 && !/"is_error":\s*true/.test(tail)) return "done";
-  return agent.limit.test(tail) ? "limited" : "failed";
+  if (code === 0 && !error && !/"is_error":\s*true/.test(tail)) return "done";
+  return agent.limit.test(`${tail}\n${error ?? ""}`) ? "limited" : "failed";
 }
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];

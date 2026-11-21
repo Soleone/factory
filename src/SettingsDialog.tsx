@@ -93,14 +93,16 @@ function SettingsForm({
             <FieldGroup>
               <RunFields value={draft} onChange={(run) => setDraft({ ...draft, ...run })} />
               <Field orientation="horizontal">
-                <FieldLabel htmlFor="timeout">Minutes before an agent is stopped</FieldLabel>
+                <FieldLabel htmlFor="idle">
+                  Minutes without a sign of life before an attempt times out
+                </FieldLabel>
                 <Input
-                  id="timeout"
+                  id="idle"
                   type="number"
                   className="w-20"
                   min={1}
-                  value={draft.timeout}
-                  onChange={(event) => setDraft({ ...draft, timeout: Number(event.target.value) })}
+                  value={draft.idle}
+                  onChange={(event) => setDraft({ ...draft, idle: Number(event.target.value) })}
                 />
               </Field>
             </FieldGroup>

@@ -3,8 +3,27 @@
 /** Unset means the agent's own default. */
 export type Tuning = { model?: string; effort?: string };
 
-/** An agent with a model and effort, saved to queue jobs with in one click. */
-export type Preset = Tuning & { agent: string };
+/** An agent with a model and effort, saved to queue jobs with in one click, and what tiers run on. */
+export type Preset = Tuning & {
+  agent: string;
+  /** Stable, so tiers can name it; unset: agent/model/effort. */
+  id?: string;
+  /** The account its usage limit counts against; unset: claude, or pi's provider. */
+  pool?: string;
+  /** Process slots a run gives it; unset: 1 when a tier lists it, else 0. */
+  workers?: number;
+  /** Context tokens at which the runner compacts; unset: 90k for Haiku, 200k otherwise. */
+  compactAt?: number;
+  /** Turns factory adds to an attempt after a failed gate or an unfinished exit. */
+  followups?: number;
+};
+
+/** What kind of intelligence a job needs, highest first. */
+export const TIERS = ["communicator", "builder", "grunt"] as const;
+export type Tier = (typeof TIERS)[number];
+
+export const presetId = (preset: Preset) =>
+  preset.id ?? [preset.agent, preset.model, preset.effort].filter(Boolean).join("/");
 
 /**
  * A model the settings offer for an agent: what --model takes, how to show it, and its efforts.
@@ -12,7 +31,7 @@ export type Preset = Tuning & { agent: string };
  */
 export type Model = { value: string; label: string; efforts: string[]; scoped: boolean };
 
-/** stopped: the factory was turned off with --kill while the agent worked. */
+/** stopped: the factory was turned off with --kill while the agent worked. timeout: no output for `idle` minutes. */
 export type Outcome = "done" | "failed" | "limited" | "timeout" | "stopped";
 
 /** The global settings; a run starts from these unless told otherwise. */
@@ -27,8 +46,16 @@ export type Settings = {
   limit: number | null;
   /** HH:MM local time after which a run starts nothing new. */
   until?: string;
-  /** Minutes before an agent is killed. */
-  timeout: number;
+  /** Minutes without a sign of life from an agent before its attempt ends as a timeout. */
+  idle: number;
+  /** Each tier's presets by id, in the order they're tried. */
+  tiers: Record<Tier, string[]>;
+  /** Where goals and everything under them live; workwork jobs always stay local. */
+  store: "local" | "tasks";
+  /** What this machine's workers can verify with, like display, gpu or android-emulator. */
+  capabilities: string[];
+  /** Environment per repo path for the agents and gates that work it. */
+  env: Record<string, Record<string, string>>;
   /** Auto mode tops up the queue from workwork; empty repos or plays means all of them. */
   auto: { on: boolean; levels: string[]; plays: string[]; repos: string[] };
 };
@@ -52,12 +79,20 @@ export type Candidates = { at: string; items: Item[] };
 /** A play as `workwork plays --json` prints it, with the fields factory shows. */
 export type Play = { name: string; description: string };
 
-/** One agent working one job. `branch` holds work it left unpushed. */
+/** Tokens by kind over an attempt, as the runner's event stream reports them. */
+export type Tokens = { input: number; cached: number; output: number };
+
+/**
+ * One agent working one job, in one session that factory may talk to several times: `turns` counts
+ * the runs, `followups` those factory sent after a failed gate or an unfinished exit. `branch`
+ * holds work it left unpushed.
+ */
 export type Attempt = {
   run: string;
   agent: string;
   model?: string;
   effort?: string;
+  preset?: string;
   start: string;
   end: string;
   outcome: Outcome;
@@ -65,6 +100,15 @@ export type Attempt = {
   log: string;
   branch?: string;
   error?: string;
+  session?: string;
+  turns?: number;
+  followups?: number;
+  /** Largest context seen, in tokens, and how often the runner compacted it. */
+  peak?: number;
+  compactions?: number;
+  tokens?: Tokens;
+  /** Needs the job had that no worker here could check. */
+  missing?: string[];
 };
 
 export type Confidence = "low" | "medium" | "high";
@@ -76,39 +120,114 @@ export type Confidence = "low" | "medium" | "high";
 export type Note = {
   at: string;
   attempt: number;
-  kind: "note" | "ask" | "answer" | "result" | "train";
+  /**
+   * step: progress in the agent's words. assume: a question it carried on from with `assumed`.
+   * factory: what factory did, like a follow-up, an escalation or a merge.
+   */
+  kind: "note" | "ask" | "assume" | "answer" | "result" | "step" | "train" | "factory";
   text: string;
   confidence?: Confidence;
   followups?: string[];
   url?: string;
+  assumed?: string;
+  /** An answer to an assumption names the assumption's index among the job's notes. */
+  re?: number;
+  /** Needs the agent couldn't check, from `factory result --unverified`. */
+  unverified?: string[];
+  done?: number;
+  of?: number;
 };
 
-/** A workwork candidate in the queue. Once it has an agent, by choice or by its first start, it keeps it. */
+/** A goal: a job with children, worked on its own integration branch. */
+export type Goal = {
+  repo: string;
+  /** Names the branch `goal/<slug>` and the memory file `.factory/<slug>.md`. */
+  slug: string;
+  summary: string;
+  /** Run on the integration branch after every merge into it. */
+  gates: string[];
+  budget?: { attempts: number };
+  /** Nodes may run on a higher tier than their own when theirs is busy or limited. */
+  allowUp: boolean;
+  /** The tier replans run on. */
+  replanTier?: Tier;
+};
+
+/**
+ * Why a job waits. asked: for the user's answer. held: a job it comes after failed or was removed.
+ * checkpoint: for the user's approval. paused: by the user. red: a goal whose integration branch fails
+ * its gates, until a fix merges. review: a done node's branch waits to merge (a review, its fixes, conflicts).
+ */
+export type Blocked = "asked" | "held" | "checkpoint" | "paused" | "red" | "review";
+
+/**
+ * One unit of work: a workwork candidate, a goal or a node of one, or a job factory writes itself
+ * (conflicts, reviews, fixes, replans). Goal nodes carry a made-up item with the goal's repo and their
+ * plan key as id. An attempt keeps its agent and preset; untiered jobs keep their agent.
+ */
 export type Job = Tuning & {
   id: string;
   item: Item;
-  source: "pick" | "auto";
+  /** pick and auto: workwork candidates; goal: goals and everything under them. */
+  source: "pick" | "auto" | "goal";
   added: string;
   agent?: string;
-  /** blocked: its agent asked the user something, and it waits for the answer. */
+  /** A pin that overrides the tier. */
+  preset?: string;
+  tier?: Tier;
   state: "queued" | "running" | "blocked" | "done" | "failed" | "removed";
+  blocked?: Blocked;
   attempts: Attempt[];
   notes: Note[];
-  /** For jobs factory writes itself, like resolving a PR's conflicts; the rest ask workwork. */
+  /** For jobs that aren't workwork's, which asks workwork for the rest. */
   prompt?: string;
-  /** A job that has to be done before this one starts, like the fix a review is of. */
-  after?: string;
+  /** Jobs that have to be done before this one starts. */
+  after: string[];
+  parent?: string;
+  /** Shell commands run in the job's worktree after the agent stops; it's done only when all pass. */
+  gates: string[];
+  /** Globs of files it expects to change; unset: not tracked, empty: anything, so it runs alone. */
+  touches?: string[];
+  needs: string[];
+  /** Needs no worker had when it was done, until the user checks them. */
+  unverified: string[];
+  goal?: Goal;
+  /** Its key in the goal's plan. */
+  key?: string;
+  /** When it's done, its goal waits for the user's approval. */
+  checkpoint?: boolean;
+  /** The tier that reviews its branch before it merges. */
+  review?: Tier;
+  /** The goal job this one belongs to, for every job under a goal. */
+  of?: string;
+  /** The job whose branch this one works on (a review's fix) or reviews. */
+  branchOf?: string;
+  /** Factory's own jobs inside a goal go before the rest. */
+  front?: boolean;
+  /** Times it failed twice and moved up a tier. */
+  escalations: number;
+  /** An attempt is under way, maybe paused for an answer or a limit; its agent's session continues. */
+  open: boolean;
 };
 
 export type Worker = Tuning & {
+  /** The preset's id and a slot number, like claude#1. */
+  id: string;
   agent: string;
+  preset: string;
+  pool: string;
   state: "idle" | "working" | "sleeping" | "stopped";
   since: string;
   job?: string;
   until?: string;
   reason?: string;
-  limits: number;
+  /** What the agent does right now, read from its event stream, and its context size in tokens. */
+  activity?: string;
+  context?: number;
 };
+
+/** What one usage limit counts against: an account at a provider. */
+export type Pool = { name: string; limits: number; until?: string; stopped?: string };
 
 /** What status.json holds while a run is on, and after it ended. */
 export type Status = {
@@ -116,9 +235,10 @@ export type Status = {
   run: string;
   until?: string;
   limit: number | null;
-  /** Minutes before an agent is killed. */
-  timeout: number;
+  /** Minutes without a sign of life before an attempt times out. */
+  idle: number;
   workers: Worker[];
+  pools: Pool[];
 };
 
 /** What the page polls: everything it shows except the candidates themselves. */
@@ -159,8 +279,9 @@ export type Pr = {
   fork: boolean;
 };
 
-/** The PR of the job's latest attempt that linked one. */
+/** The PR factory opened for a goal node, or else the PR of the job's latest attempt that linked one. */
 export const prUrl = (job: Job) =>
+  job.notes.findLast((note) => note.kind === "factory" && note.url?.includes("/pull/"))?.url ??
   job.attempts.findLast((attempt) => attempt.url?.includes("/pull/"))?.url;
 
 /** Merging from the page skips GitHub's own page, so it only goes ahead when nothing argues against it. */
@@ -171,3 +292,66 @@ export const canMerge = (pr: Pr) =>
   (pr.checks === "passing" || pr.checks === "none");
 
 export const canRebase = (pr: Pr) => pr.state === "OPEN" && pr.conflicts === true && !pr.fork;
+
+/** The longest chain of unfinished jobs that wait on each job, itself included. */
+export function chains(jobs: Map<string, Job>): Map<string, number> {
+  const waiting = new Map<string, Job[]>();
+  for (const job of jobs.values())
+    for (const id of job.after) waiting.set(id, [...(waiting.get(id) ?? []), job]);
+  const lengths = new Map<string, number>();
+  const length = (job: Job): number => {
+    const known = lengths.get(job.id);
+    if (known !== undefined) return known;
+    lengths.set(job.id, 0);
+    const unfinished = job.state !== "done" && job.state !== "removed";
+    const next = (waiting.get(job.id) ?? []).map(length);
+    const value = (unfinished ? 1 : 0) + Math.max(0, ...next);
+    lengths.set(job.id, value);
+    return value;
+  };
+  for (const job of jobs.values()) length(job);
+  return lengths;
+}
+
+/** How many dependencies deep each node is, for layered columns. */
+export function depths(nodes: Job[]): Map<string, number> {
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  const depth = new Map<string, number>();
+  const of = (node: Job, seen: Set<string> = new Set()): number => {
+    const known = depth.get(node.id);
+    if (known !== undefined) return known;
+    if (seen.has(node.id)) return 0;
+    seen.add(node.id);
+    const value =
+      Math.max(-1, ...node.after.flatMap((id) => (byId.get(id) ? [of(byId.get(id)!, seen)] : []))) +
+      1;
+    depth.set(node.id, value);
+    return value;
+  };
+  for (const node of nodes) of(node);
+  return depth;
+}
+
+/** The unfinished jobs on a longest chain: what to watch, since the goal can't finish sooner. */
+export function critical(nodes: Job[]): Set<string> {
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  const after = chains(byId);
+  const into = new Map<string, number>();
+  const before = (node: Job): number => {
+    const known = into.get(node.id);
+    if (known !== undefined) return known;
+    into.set(node.id, 0);
+    const unfinished = node.state !== "done" && node.state !== "removed";
+    const value =
+      (unfinished ? 1 : 0) +
+      Math.max(0, ...node.after.flatMap((id) => (byId.has(id) ? [before(byId.get(id)!)] : [])));
+    into.set(node.id, value);
+    return value;
+  };
+  const length = (node: Job) => before(node) + (after.get(node.id) ?? 0) - 1;
+  const unfinished = nodes.filter((node) => node.state !== "done" && node.state !== "removed");
+  const longest = Math.max(0, ...unfinished.map(length));
+  return new Set(
+    unfinished.filter((node) => longest > 0 && length(node) === longest).map((node) => node.id),
+  );
+}

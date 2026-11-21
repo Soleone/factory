@@ -9,6 +9,7 @@ import { agentModels } from "./models.ts";
 import {
   addJobs,
   addNote,
+  answer,
   moveJob,
   queueConflicts,
   queueFollowup,
@@ -141,8 +142,7 @@ export function serve(state: string, port: number, host: string): Server {
       addJobs(state, candidates(body.items), "pick", body.pin),
     "POST /api/jobs/remove": (_, id) => removeJob(state, id),
     "POST /api/jobs/retry": (_, id) => retryJob(state, id),
-    "POST /api/jobs/answer": (body: { text: string }, id) =>
-      addNote(state, id, { kind: "answer", text: body.text }),
+    "POST /api/jobs/answer": (body: { text: string }, id) => answer(state, id, body.text),
     "POST /api/jobs/followup": (body: { task: string }, id) => queueFollowup(state, id, body.task),
     "POST /api/jobs/review": (body: { agent: string }, id) => queueReview(state, id, body.agent),
     "POST /api/jobs/move": (body: { index: number }, id) => moveJob(state, id, body.index),

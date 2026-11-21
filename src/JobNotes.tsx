@@ -5,12 +5,15 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
-export const KIND = {
+export const KIND: Record<Note["kind"], string> = {
   note: "note",
   ask: "asked",
+  assume: "assumed",
   answer: "you answered",
   result: "result",
+  step: "step",
   train: "merge train",
+  factory: "factory",
 };
 
 /** What the agent reported last, and the follow-ups worth their own job. */
