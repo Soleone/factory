@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.3](https://github.com/Soleone/factory/compare/v0.3.2...v0.3.3) (2026-11-21)
+
+### Features
+
+* **queue:** start a job of your own from the page, and say what approving a goal does ([985a758](https://github.com/Soleone/factory/commit/985a7587923bcfa9f07136194b7ad60e00447c16))
+
 ## [0.3.2](https://github.com/Soleone/factory/compare/v0.3.1...v0.3.2) (2026-11-21)
 
 ### Bug Fixes
