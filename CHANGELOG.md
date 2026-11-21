@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2](https://github.com/Soleone/factory/compare/v0.3.1...v0.3.2) (2026-11-21)
+
+### Bug Fixes
+
+* **goals:** approve a goal from its status, not before its plan exists ([5b8b162](https://github.com/Soleone/factory/commit/5b8b162506b7376ab459ef51ca56a0d249e40401))
+* **goals:** keep the goal memory through reviews, and a clearer goal page ([b3ca3e5](https://github.com/Soleone/factory/commit/b3ca3e5b6f72cac62dd055fc35b525fc13a64b30))
+
 ## [0.3.1](https://github.com/Soleone/factory/compare/v0.3.0...v0.3.1) (2026-11-21)
 
 ### Features
