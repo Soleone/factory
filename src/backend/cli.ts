@@ -78,7 +78,7 @@ const USAGE = `factory: works workwork candidates and long goals with headless c
 
 Goals: one large task as a graph of jobs on its own integration branch
   factory goal new "<title>" --repo DIR|--project NAME [--brief FILE]
-                               queue a decomposer; the goal waits at a checkpoint for its plan;
+                               queue a decomposer; the goal waits for approval once its plan is in;
                                --project creates $SRC/NAME and a private GitHub repo for it
   factory goal import PLAN     validate and import a plan (JSON or YAML); waits for approval
   factory goal check PLAN      validate only, listing every problem

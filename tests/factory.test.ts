@@ -1060,6 +1060,8 @@ esac`,
 if [ $n = 1 ]; then echo '{"format":"factory-plan/1","nodes":[]}' > .factory/demo-goal.plan.json; else echo '${JSON.stringify(valid)}' > .factory/demo-goal.plan.json; fi; ${RESULT}`,
     });
     const goal = await newGoal(state, "Demo goal", repo, "Make a demo.");
+    // Nothing to approve until the plan is in.
+    expect(readJobs(state).find((job) => job.id === goal.id)?.blocked).toBeUndefined();
     const jobs = await work(options(base), (jobs) => jobs.some((job) => job.key === "b"));
     const decompose = jobs.find((job) => job.item.play === "decompose")!;
     expect(decompose).toMatchObject({ state: "done", tier: "communicator" });

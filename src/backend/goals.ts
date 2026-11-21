@@ -312,7 +312,7 @@ async function commitFiles(
   }
 }
 
-/** `factory goal new`: a goal at a checkpoint with one job for the communicator, to decompose it. */
+/** `factory goal new`: a goal with one job for the communicator, to decompose it; it waits for approval once the plan is in. */
 export async function newGoal(
   state: string,
   title: string,
@@ -339,7 +339,6 @@ export async function newGoal(
     source: "goal",
     goal,
   });
-  record(state, { type: "block", id: job.id, reason: "checkpoint" });
   await createBranch(goal);
   await commitFiles(goal, `factory: goal ${title}`, {
     [memoryPath(slug)]: `# ${title}\n\n${summary}\n\n## Decisions\n`,
@@ -539,6 +538,8 @@ async function delivered(
       id: goalJob.id,
       change: { goal: { ...goal, summary, gates, budget, allowUp: allowUp ?? false, replanTier } },
     });
+    // Before the nodes land, so none of them starts before the user approves.
+    record(state, { type: "block", id: goalJob.id, reason: "checkpoint" });
     await importPlan(state, plan, goalJob);
     record(state, { type: "merged", id: job.id });
     record(state, {

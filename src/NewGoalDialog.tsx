@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { Spinner } from "@/components/ui/spinner";
 import {
   Select,
   SelectContent,
@@ -44,8 +45,7 @@ export function NewGoalDialog({
         <DialogHeader>
           <DialogTitle>New goal</DialogTitle>
           <DialogDescription>
-            A goal is one large task, planned into a graph of jobs. Nothing runs until you approve
-            the plan.
+            A goal is one large task, planned into jobs. Nothing runs until you approve the plan.
           </DialogDescription>
         </DialogHeader>
         <Tabs defaultValue="brief">
@@ -156,12 +156,18 @@ function BriefForm({ act, onCreated }: { act: Act; onCreated: (id: string) => vo
           onChange={(event) => setBrief(event.target.value)}
         />
         <FieldDescription>
-          Markdown. A communicator plans it into a graph, which waits for your approval here.
+          Markdown. A communicator plans it into jobs, which wait for your approval here.
         </FieldDescription>
       </Field>
       <DialogFooter>
         <Button disabled={!ready || busy} onClick={submit}>
-          Plan it
+          {busy ? (
+            <>
+              <Spinner /> {creating ? "Creating the repo…" : "Setting up the branch…"}
+            </>
+          ) : (
+            "Plan it"
+          )}
         </Button>
       </DialogFooter>
     </FieldGroup>
@@ -199,7 +205,13 @@ function PlanForm({ act, onCreated }: { act: Act; onCreated: (id: string) => voi
       </Field>
       <DialogFooter>
         <Button disabled={!plan.trim() || busy} onClick={submit}>
-          Import
+          {busy ? (
+            <>
+              <Spinner /> Importing…
+            </>
+          ) : (
+            "Import"
+          )}
         </Button>
       </DialogFooter>
     </FieldGroup>

@@ -31,12 +31,19 @@ import { StateIcon, StatePill, TaskDetails } from "@/TaskDetails";
 
 const TIER_SHORT: Record<Tier, string> = { communicator: "comm", builder: "build", grunt: "grunt" };
 
-/** How a goal's own state reads: an active goal is working, not queued. */
-const goalLabel = (goal: Job) =>
-  goal.blocked ? BLOCKED[goal.blocked] : goal.state === "queued" ? "working" : undefined;
+/** How a goal's own state reads: planning until its plan is in, then working, not queued. */
+function goalLabel(goal: Job, nodes: Job[]): string | undefined {
+  if (goal.blocked) return BLOCKED[goal.blocked];
+  if (goal.state !== "queued") return undefined;
+  const planning = nodes.some(
+    (node) =>
+      node.item.play === "decompose" && (node.state === "queued" || node.state === "running"),
+  );
+  return planning ? "planning" : "working";
+}
 
 const BLOCKED: Record<string, string> = {
-  checkpoint: "waiting for your approval",
+  checkpoint: "needs your approval",
   paused: "paused",
   red: "integration branch red",
   asked: "waiting for you",
@@ -66,11 +73,16 @@ export function GoalsView({ snapshot, act }: { snapshot: Snapshot; act: Act }) {
   const shown = goals.find((goal) => goal.id === open);
   if (shown)
     return <GoalView goal={shown} snapshot={snapshot} act={act} onBack={() => setOpen("")} />;
-  const newGoal = (
+  // One dialog for both the empty page and the list, so the goal appearing mid-create doesn't remount it.
+  return (
     <>
-      <Button variant="outline" onClick={() => setCreating(true)}>
-        <PlusIcon /> New goal
-      </Button>
+      <GoalList
+        goals={goals}
+        snapshot={snapshot}
+        act={act}
+        onNew={() => setCreating(true)}
+        onOpen={setOpen}
+      />
       <NewGoalDialog
         act={act}
         open={creating}
@@ -82,13 +94,33 @@ export function GoalsView({ snapshot, act }: { snapshot: Snapshot; act: Act }) {
       />
     </>
   );
+}
+
+function GoalList({
+  goals,
+  snapshot,
+  act,
+  onNew,
+  onOpen,
+}: {
+  goals: Job[];
+  snapshot: Snapshot;
+  act: Act;
+  onNew: () => void;
+  onOpen: (id: string) => void;
+}) {
+  const newGoal = (
+    <Button variant="outline" onClick={onNew}>
+      <PlusIcon /> New goal
+    </Button>
+  );
   if (goals.length === 0)
     return (
       <Empty>
         <EmptyHeader>
           <EmptyTitle>No goals yet</EmptyTitle>
           <EmptyDescription>
-            A goal is one large task, planned into a graph of jobs that run on their own branch.
+            A goal is one large task, planned into jobs that run on their own branch.
           </EmptyDescription>
         </EmptyHeader>
         <EmptyContent>{newGoal}</EmptyContent>
@@ -112,14 +144,14 @@ export function GoalsView({ snapshot, act }: { snapshot: Snapshot; act: Act }) {
                 <button
                   type="button"
                   className="text-left hover:underline"
-                  onClick={() => setOpen(goal.id)}
+                  onClick={() => onOpen(goal.id)}
                 >
                   {goal.item.title}
                 </button>
               }
               meta={
                 <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                  <StatePill state={goal.state} label={goalLabel(goal)} />
+                  <StatePill state={goal.state} label={goalLabel(goal, nodes)} />
                   <span>
                     {done}/{nodes.length} done
                   </span>
@@ -140,11 +172,12 @@ export function GoalsView({ snapshot, act }: { snapshot: Snapshot; act: Act }) {
                 </span>
               }
             >
+              {goal.blocked === "checkpoint" && <Approve goal={goal} act={act} />}
               <Button
                 variant="ghost"
                 size="icon-sm"
                 aria-label="Open goal"
-                onClick={() => setOpen(goal.id)}
+                onClick={() => onOpen(goal.id)}
               >
                 <ChevronRightIcon />
               </Button>
@@ -192,8 +225,9 @@ function GoalView({
           <ArrowLeftIcon />
         </Button>
         <h2 className="font-heading text-lg font-semibold">{goal.item.title}</h2>
-        <StatePill state={goal.state} label={goalLabel(goal)} />
+        <StatePill state={goal.state} label={goalLabel(goal, nodes)} />
         <span className="ml-auto flex gap-1">
+          {goal.blocked === "checkpoint" && <Approve goal={goal} act={act} />}
           {goal.blocked === "paused" ? (
             <Button
               variant="outline"
@@ -249,13 +283,8 @@ function GoalView({
         )}
       </div>
 
-      {goal.blocked === "checkpoint" && (
-        <div className="flex flex-wrap items-center gap-3 rounded-md border border-warning/50 bg-warning/10 p-3 text-sm">
-          <span className="flex-1">{factorySaid?.text ?? "Waiting for your approval."}</span>
-          <Button size="sm" onClick={() => act(() => api.goal(goal.id, "approve"))}>
-            Approve
-          </Button>
-        </div>
+      {goal.blocked === "checkpoint" && factorySaid && (
+        <p className="-mt-4 text-sm text-warning">{factorySaid.text}</p>
       )}
       {red && factorySaid && (
         <p className="rounded-md border border-destructive/40 p-3 text-sm text-destructive">
@@ -294,7 +323,7 @@ function GoalView({
         </Section>
       )}
 
-      <Section title="Graph">
+      <Section title="Plan">
         <Columns
           nodes={nodes.filter((node) => !node.parent)}
           all={nodes}
@@ -308,7 +337,7 @@ function GoalView({
 }
 
 /**
- * The graph as columns by dependency depth, left to right. A milestone is one card holding its own
+ * The plan as columns by dependency depth, left to right. A milestone is one card holding its own
  * columns, collapsed once it's done. Factory's helpers sit in the column of the node they serve.
  */
 function Columns({
@@ -345,7 +374,8 @@ function Columns({
                 snapshot,
                 act,
                 status,
-                onPath: path.has(node.id),
+                // One node is trivially on the path, so it says nothing then.
+                onPath: path.size > 1 && path.has(node.id),
                 dependency: highlighted.has(node.id),
                 onHover: setHovered,
               };
@@ -415,7 +445,7 @@ function NodeCard({ node, snapshot, act, status, onPath, dependency, onHover }: 
     >
       <div className="flex items-start gap-2">
         <StateIcon state={node.state} />
-        <span className="min-w-0 flex-1 wrap-anywhere">
+        <span className="min-w-0 flex-1 wrap-anywhere [&_button]:whitespace-normal">
           <TaskDetails item={node.item} job={node} snapshot={snapshot} act={act} bare />
         </span>
       </div>
@@ -493,6 +523,14 @@ function Assumption({
         </Button>
       </form>
     </li>
+  );
+}
+
+function Approve({ goal, act }: { goal: Job; act: Act }) {
+  return (
+    <Button size="sm" onClick={() => act(() => api.goal(goal.id, "approve"))}>
+      Approve
+    </Button>
   );
 }
 
