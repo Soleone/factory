@@ -129,8 +129,24 @@ export function checkPlan(raw: unknown): string[] {
       problems.push(`${node.key}: parent names no node ${node.parent}`);
     if (node.parent === node.key) problems.push(`${node.key}: is its own parent`);
   }
-  if (problems.length === 0) problems.push(...cycles(plan.nodes));
+  if (problems.length === 0) problems.push(...cycles(plan.nodes), ...waitsOnItsGroup(plan.nodes));
   return problems;
+}
+
+/** A node can't come after one of its own milestones: a milestone is done only when its nodes are. */
+function waitsOnItsGroup(nodes: PlanNode[]): string[] {
+  const byKey = new Map(nodes.map((node) => [node.key, node]));
+  return nodes.flatMap((node) => {
+    const above: string[] = [];
+    for (let up = node.parent; up && !above.includes(up); up = byKey.get(up)?.parent)
+      above.push(up);
+    return node.after
+      .filter((key) => above.includes(key))
+      .map(
+        (key) =>
+          `${node.key} comes after ${key}, which contains it; drop it (a milestone's nodes already wait for what the milestone comes after)`,
+      );
+  });
 }
 
 function cycles(nodes: PlanNode[]): string[] {
@@ -355,7 +371,7 @@ const PLAN_SPEC = `A plan is JSON:
     "after": [keys it depends on], "touches": [globs of files it changes; empty means anything, so it runs alone],
     "gates": [commands run in its worktree before it merges], "needs"?: ["display" | "gpu" | ...],
     "checkpoint"?: true to pause the goal for the user's approval once it's done,
-    "parent"?: a key, which makes milestones, "review"?: a tier that reviews it before it merges
+    "parent"?: a key, which makes milestones (a milestone's nodes wait for what it comes after; never list your own milestone in after), "review"?: a tier that reviews it before it merges
   }]
 }
 Rules: keys unique, no cycles, every reference resolves, every node has touches and gates (may be empty lists), non-empty prompts. Nodes whose touches overlap never run at the same time, so precise touches buy parallelism. Each node should fit comfortably in one session of its tier (under about 200k tokens of context).`;

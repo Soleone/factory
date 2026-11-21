@@ -319,6 +319,8 @@ export function ready(job: Job, jobs: Job[]): boolean {
     // Factory's own jobs work a goal that waits for approval or a fix: the decomposer, conflicts, fixes.
     const through = job.front && (above.blocked === "checkpoint" || above.blocked === "red");
     if (above.state === "blocked" && !through) return false;
+    // A milestone's children wait for what the milestone comes after.
+    if (!above.goal && !above.after.every((id) => byId.get(id)?.state === "done")) return false;
     up = above.parent ?? (above.goal ? undefined : above.of);
   }
   return !jobs.some(

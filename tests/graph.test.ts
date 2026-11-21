@@ -1,8 +1,8 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vite-plus/test";
-import { showGoal } from "../src/backend/goals.ts";
+import { checkPlan, showGoal } from "../src/backend/goals.ts";
 import {
   addJob,
   addNote,
@@ -118,12 +118,15 @@ describe("the graph", () => {
     expect([isReady("x"), isReady("fix")]).toEqual([true, true]);
   });
 
-  test("a group is done when its children are, and what comes after it waits for that", () => {
+  test("a group is done when its children are, waits for what it comes after, and so do they", () => {
     const { state, add, byId, isReady } = graph();
-    add("m");
+    add("first");
+    add("m", { after: ["first"] });
     add("m1", { parent: "m" });
     add("m2", { parent: "m" });
     add("next", { after: ["m"] });
+    expect([isReady("m1"), isReady("next")]).toEqual([false, false]);
+    record(state, { type: "merged", id: "first" });
     expect([isReady("m"), isReady("m1"), isReady("next")]).toEqual([false, true, false]);
     for (const id of ["m1", "m2"]) record(state, { type: "merged", id });
     expect(byId("m").state).toBe("done");
@@ -258,4 +261,32 @@ test("goal show: layers by dependency depth, tiers, the critical path, and what 
   );
   expect(text).toContain("estimate: 1 communicator, 1 builder, 2 grunt attempts to go");
   expect(text).toContain("port: assumed yes, asked keep the old API?");
+});
+
+test("a plan can't make a node wait for the milestone that contains it", () => {
+  const repo = mkdtempSync(join(scratch, "repo-"));
+  mkdirSync(join(repo, ".git"));
+  const node = (key: string, rest: object = {}) => ({
+    key,
+    title: key,
+    tier: "grunt",
+    prompt: "p",
+    after: [],
+    touches: [],
+    gates: [],
+    ...rest,
+  });
+  const problems = checkPlan({
+    format: "factory-plan/1",
+    goal: { title: "t", repo, summary: "s", gates: [] },
+    nodes: [
+      node("m"),
+      node("a", { parent: "m", after: ["m"] }),
+      node("b", { parent: "a", after: ["m"] }),
+    ],
+  });
+  expect(problems).toEqual([
+    "a comes after m, which contains it; drop it (a milestone's nodes already wait for what the milestone comes after)",
+    "b comes after m, which contains it; drop it (a milestone's nodes already wait for what the milestone comes after)",
+  ]);
 });

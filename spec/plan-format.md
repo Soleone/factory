@@ -77,7 +77,7 @@ Each node should fit comfortably in one session of its tier, well under the tier
 `factory goal check` and every import and replan apply these, listing every problem at once:
 
 - `format` is `factory-plan/1`; the goal has a title, a summary, gates, and a repo that is a git repository.
-- Keys are unique; `after` and `parent` name existing keys; neither forms a cycle.
+- Keys are unique; `after` and `parent` name existing keys; neither forms a cycle; no node comes after a milestone that contains it.
 - Every node has a non-empty title and prompt, a known tier, and `after`, `touches` and `gates` lists (they may be empty).
 - A replan keeps every node that is done, running or waiting to merge exactly as it is (prompt, tier, after).
 
