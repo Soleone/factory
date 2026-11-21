@@ -4,7 +4,7 @@ import { dirname, extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AGENT_NAMES } from "./agents.ts";
 import { chat } from "./chat.ts";
-import { clonableRepos, cloneRepo, localRepos } from "./repos.ts";
+import { clonableRepos, cloneRepo, createRepo, localRepos, sourceRoot } from "./repos.ts";
 import { agentModels } from "./models.ts";
 import {
   addJobs,
@@ -21,7 +21,16 @@ import {
 } from "./jobs.ts";
 import { turnOff, turnOn } from "./power.ts";
 import { closePr, mergePr, prCache, readPrDetails, rebasePr } from "./review.ts";
-import { approveGoal, cancelGoal, findGoal, pauseGoal, queueReplan, resumeGoal } from "./goals.ts";
+import {
+  approveGoal,
+  cancelGoal,
+  findGoal,
+  importPlanText,
+  newGoal,
+  pauseGoal,
+  queueReplan,
+  resumeGoal,
+} from "./goals.ts";
 import { mirrorTasks } from "./tasksStore.ts";
 import { mergeTrain } from "./train.ts";
 import {
@@ -121,7 +130,7 @@ export function serve(state: string, port: number, host: string): Server {
       const cached = readCandidates(state);
       const items = cached?.items ?? [];
       const repos = [...new Set([...localRepos(), ...items.map((item) => item.repo)])].sort();
-      return { at: cached?.at ?? null, items, repos };
+      return { at: cached?.at ?? null, items, repos, root: sourceRoot() };
     },
     "POST /api/candidates/refresh": () => {
       void refreshCandidates(state, "workwork").catch((error: Error) =>
@@ -135,6 +144,18 @@ export function serve(state: string, port: number, host: string): Server {
         console.error(`factory: workwork failed: ${error.message}`),
       );
     },
+    /** A goal from a brief, in a repo under $SRC or, with `project`, a new one. */
+    "POST /api/goals": async (body: {
+      title: string;
+      brief: string;
+      repo?: string;
+      project?: string;
+    }) => {
+      const repo = body.project ? await createRepo(body.project) : body.repo;
+      if (!body.title?.trim() || !repo) throw new Error("a goal wants a title and a repo");
+      return newGoal(state, body.title.trim(), repo, body.brief ?? "");
+    },
+    "POST /api/goals/import": (body: { plan: string }) => importPlanText(state, body.plan),
     // Read fresh each time: it's quick, and the user may have just edited a play of their own.
     "GET /api/plays": async (): Promise<Play[]> =>
       JSON.parse(await output("workwork", ["plays", "--json"], process.cwd())),

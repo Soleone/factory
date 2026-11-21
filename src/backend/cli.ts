@@ -32,6 +32,7 @@ import {
   type Plan,
 } from "./goals.ts";
 import { run, type RunOptions } from "./loop.ts";
+import { createRepo } from "./repos.ts";
 import { logPath, turnOff, turnOn } from "./power.ts";
 import { output, pidPath, readSettings, runningPid, STATE, writeSettings } from "./state.ts";
 import {
@@ -76,8 +77,9 @@ const USAGE = `factory: works workwork candidates and long goals with headless c
                                a web page to watch, browse candidates, queue them and turn it on or off
 
 Goals: one large task as a graph of jobs on its own integration branch
-  factory goal new "<title>" --repo DIR [--brief FILE]
-                               queue a decomposer; the goal waits at a checkpoint for its plan
+  factory goal new "<title>" --repo DIR|--project NAME [--brief FILE]
+                               queue a decomposer; the goal waits at a checkpoint for its plan;
+                               --project creates $SRC/NAME and a private GitHub repo for it
   factory goal import PLAN     validate and import a plan (JSON or YAML); waits for approval
   factory goal check PLAN      validate only, listing every problem
   factory goal show [GOAL] [--json]
@@ -119,6 +121,7 @@ async function main(): Promise<void> {
       timeout: { type: "string" },
       idle: { type: "string" },
       repo: { type: "string" },
+      project: { type: "string" },
       prompt: { type: "string" },
       tier: { type: "string" },
       title: { type: "string" },
@@ -334,13 +337,15 @@ function step(
 
 async function goal(
   args: string[],
-  values: { repo?: string; brief?: string; json?: boolean },
+  values: { repo?: string; project?: string; brief?: string; json?: boolean },
 ): Promise<void> {
   const [sub, target, why] = args;
   if (sub === "new") {
-    if (!target || !values.repo) throw new Error('factory goal new wants "<title>" --repo DIR');
+    if (!target || !(values.repo || values.project))
+      throw new Error('factory goal new wants "<title>" --repo DIR or --project NAME');
     const brief = values.brief ? readFileSync(values.brief, "utf8") : "";
-    const job = await newGoal(STATE, target, resolve(values.repo), brief);
+    const repo = values.project ? await createRepo(values.project) : resolve(values.repo!);
+    const job = await newGoal(STATE, target, repo, brief);
     return console.log(
       `goal ${job.goal!.slug} (${job.id}): the decomposer is queued; approve its plan with factory goal approve ${job.goal!.slug}`,
     );

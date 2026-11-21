@@ -1,9 +1,9 @@
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { output } from "./state.ts";
 
 /** Where workwork --all looks for repos, with the same fallback. */
-const sourceRoot = () => resolve(process.env.SRC ?? process.cwd());
+export const sourceRoot = () => resolve(process.env.SRC ?? process.cwd());
 
 /** Local repos are available as filters even when workwork finds no candidates in them. */
 export function localRepos(): string[] {
@@ -54,6 +54,23 @@ export async function cloneRepo(name: string): Promise<string> {
   const path = join(root, name.split("/")[1]);
   if (existsSync(path)) throw new Error(`${path} already exists`);
   await output("gh", ["repo", "clone", name, path], root);
+  return path;
+}
+
+/**
+ * A new project: $SRC/<name> with a first commit, pushed to a new private GitHub repo of the same
+ * name, since a goal's integration branch lives on origin. Returns its path.
+ */
+export async function createRepo(name: string): Promise<string> {
+  if (!/^[\w.-]+$/.test(name)) throw new Error(`${name} isn't a repo name: letters, digits, . _ -`);
+  const path = join(sourceRoot(), name);
+  if (existsSync(path)) throw new Error(`${path} already exists`);
+  mkdirSync(path, { recursive: true });
+  writeFileSync(join(path, "README.md"), `# ${name}\n`);
+  await output("git", ["init", "-b", "main"], path);
+  await output("git", ["add", "README.md"], path);
+  await output("git", ["commit", "-m", "init"], path);
+  await output("gh", ["repo", "create", name, "--private", "--source", ".", "--push"], path);
   return path;
 }
 

@@ -33,11 +33,12 @@ Needs node 22+, git, [workwork](https://github.com/Soleone/workwork) with `--jso
 ### Goals
 
 ```sh
-factory goal new "GPUI client for Tasks" --repo ~/src/tasks --brief brief.md
+factory goal new "GPUI client for Tasks" --repo ~/src/tasks --brief brief.md   # or --project NAME
 factory goal show gpui-client       # the graph before anything runs: tiers, critical path, estimate
 factory goal approve gpui-client
 ```
 
+- **Starting one:** **New goal** on the Goals tab takes a title, a repo and a brief, or a plan to import. **New project...** in its repo list creates `$SRC/<name>` and a private GitHub repo of the same name (`goal new --project NAME` on the command line). The Live Agent can work out the brief with you and start the goal too; approving its plan stays with you.
 - **Planning:** `goal new` queues a communicator to decompose the goal into a plan, which factory validates and imports, then waits for your approval. `goal import plan.json` takes a plan you wrote, with someone or something else; [spec/plan-format.md](spec/plan-format.md) describes the format (JSON or YAML) and `goal check` validates one.
 - **Branches:** the goal gets `goal/<slug>` on origin. Each node works on `node/<slug>/<key>`, started from the integration branch's head; it commits and pushes but never opens a PR. Factory runs its gates, rebases it onto the integration branch, opens the PR and merges it, then runs the goal's own gates. A conflict queues a job to resolve it; a red integration branch pauses the goal and queues a fix.
 - **Memory:** `.factory/<slug>.md` on the integration branch holds the goal's summary and the decisions each node leaves for the next. Prompts carry the goal summary, what a node's dependencies delivered, and a pointer to the memory.

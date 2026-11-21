@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ArrowLeftIcon, ChevronRightIcon, FlameIcon, GitBranchIcon } from "lucide-react";
+import { ArrowLeftIcon, ChevronRightIcon, FlameIcon, GitBranchIcon, PlusIcon } from "lucide-react";
 import { api, type Act } from "@/api";
 import {
   critical,
@@ -13,12 +13,19 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
 import { ItemGroup } from "@/components/ui/item";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/tooltip/tooltip";
 import { ago, minutesSince } from "@/format";
 import { useQueryParam } from "@/hooks/use-query-param";
+import { NewGoalDialog } from "@/NewGoalDialog";
 import { Row, Section } from "@/Row";
 import { StateIcon, StatePill, TaskDetails } from "@/TaskDetails";
 
@@ -54,79 +61,98 @@ function lastActivity(nodes: Job[], goal: Job): string {
 /** Goals: large tasks as graphs of jobs, each on its own integration branch. */
 export function GoalsView({ snapshot, act }: { snapshot: Snapshot; act: Act }) {
   const [open, setOpen] = useQueryParam("goal", "");
+  const [creating, setCreating] = useState(false);
   const goals = snapshot.jobs.filter((job) => job.goal && job.state !== "removed");
   const shown = goals.find((goal) => goal.id === open);
   if (shown)
     return <GoalView goal={shown} snapshot={snapshot} act={act} onBack={() => setOpen("")} />;
+  const newGoal = (
+    <>
+      <Button variant="outline" onClick={() => setCreating(true)}>
+        <PlusIcon /> New goal
+      </Button>
+      <NewGoalDialog
+        act={act}
+        open={creating}
+        onOpenChange={setCreating}
+        onCreated={(id) => {
+          setCreating(false);
+          setOpen(id);
+        }}
+      />
+    </>
+  );
   if (goals.length === 0)
     return (
       <Empty>
         <EmptyHeader>
           <EmptyTitle>No goals yet</EmptyTitle>
           <EmptyDescription>
-            A goal is one large task split into a graph of jobs. Start one with{" "}
-            <code>factory goal new "title" --repo DIR</code>, or import a plan with{" "}
-            <code>factory goal import plan.json</code>.
+            A goal is one large task, planned into a graph of jobs that run on their own branch.
           </EmptyDescription>
         </EmptyHeader>
+        <EmptyContent>{newGoal}</EmptyContent>
       </Empty>
     );
   return (
-    <ItemGroup>
-      {goals.map((goal) => {
-        const nodes = nodesOf(snapshot.jobs, goal);
-        const done = nodes.filter((node) => node.state === "done").length;
-        const used = nodes.reduce((sum, node) => sum + node.attempts.length, 0);
-        const budget = goal.goal!.budget?.attempts;
-        return (
-          <Row
-            key={goal.id}
-            leading={<StateIcon state={goal.state} />}
-            progress={nodes.length ? done / nodes.length : 0}
-            title={
-              <button
-                type="button"
-                className="text-left hover:underline"
+    <div className="flex flex-col gap-4 pt-2">
+      <div className="flex justify-end">{newGoal}</div>
+      <ItemGroup>
+        {goals.map((goal) => {
+          const nodes = nodesOf(snapshot.jobs, goal);
+          const done = nodes.filter((node) => node.state === "done").length;
+          const used = nodes.reduce((sum, node) => sum + node.attempts.length, 0);
+          const budget = goal.goal!.budget?.attempts;
+          return (
+            <Row
+              key={goal.id}
+              leading={<StateIcon state={goal.state} />}
+              progress={nodes.length ? done / nodes.length : 0}
+              title={
+                <button
+                  type="button"
+                  className="text-left hover:underline"
+                  onClick={() => setOpen(goal.id)}
+                >
+                  {goal.item.title}
+                </button>
+              }
+              meta={
+                <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <StatePill state={goal.state} label={goalLabel(goal)} />
+                  <span>
+                    {done}/{nodes.length} done
+                  </span>
+                  {TIERS.map((tier) => {
+                    const of = nodes.filter((node) => node.tier === tier);
+                    return of.length ? (
+                      <span key={tier}>
+                        {TIER_SHORT[tier]} {of.filter((node) => node.state === "done").length}/
+                        {of.length}
+                      </span>
+                    ) : null;
+                  })}
+                  <span>
+                    {used}
+                    {budget ? `/${budget}` : ""} attempts
+                  </span>
+                  <span>{ago(lastActivity(nodes, goal))}</span>
+                </span>
+              }
+            >
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Open goal"
                 onClick={() => setOpen(goal.id)}
               >
-                {goal.item.title}
-              </button>
-            }
-            meta={
-              <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                <StatePill state={goal.state} label={goalLabel(goal)} />
-                <span>
-                  {done}/{nodes.length} done
-                </span>
-                {TIERS.map((tier) => {
-                  const of = nodes.filter((node) => node.tier === tier);
-                  return of.length ? (
-                    <span key={tier}>
-                      {TIER_SHORT[tier]} {of.filter((node) => node.state === "done").length}/
-                      {of.length}
-                    </span>
-                  ) : null;
-                })}
-                <span>
-                  {used}
-                  {budget ? `/${budget}` : ""} attempts
-                </span>
-                <span>{ago(lastActivity(nodes, goal))}</span>
-              </span>
-            }
-          >
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Open goal"
-              onClick={() => setOpen(goal.id)}
-            >
-              <ChevronRightIcon />
-            </Button>
-          </Row>
-        );
-      })}
-    </ItemGroup>
+                <ChevronRightIcon />
+              </Button>
+            </Row>
+          );
+        })}
+      </ItemGroup>
+    </div>
   );
 }
 

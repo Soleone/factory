@@ -1147,3 +1147,12 @@ export function readPlan(file: string): unknown {
   if (!existsSync(file) || !statSync(file).isFile()) throw new Error(`no plan file ${file}`);
   return parsePlan(readFileSync(file, "utf8"), file);
 }
+
+/** A pasted plan, JSON or YAML (YAML reads both), imported once it's valid. */
+export async function importPlanText(state: string, text: string): Promise<Job> {
+  const plan = parseYaml(text);
+  const problems = checkPlan(plan);
+  if (problems.length)
+    throw new Error(`the plan has problems:\n${problems.map((each) => `- ${each}`).join("\n")}`);
+  return importPlan(state, plan as Plan);
+}

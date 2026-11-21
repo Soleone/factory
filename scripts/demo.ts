@@ -338,7 +338,11 @@ function dispatch(snapshot: Snapshot, route: string, body: unknown): unknown {
         at: snapshot.candidates.at,
         items,
         repos: [...new Set(items.map((item) => item.repo))].sort(),
+        root: "/home/me/src",
       };
+    case "POST /api/goals":
+    case "POST /api/goals/import":
+      throw new Error("The demo doesn't plan or import goals.");
     case "POST /api/candidates/refresh":
       snapshot.candidates.at = new Date().toISOString();
       return null;

@@ -23,7 +23,14 @@ import {
   retryJob,
   startJob,
 } from "../src/backend/jobs.ts";
-import { approveGoal, importPlan, newGoal, type Plan } from "../src/backend/goals.ts";
+import {
+  approveGoal,
+  importPlan,
+  importPlanText,
+  newGoal,
+  type Plan,
+} from "../src/backend/goals.ts";
+import { stringify as toYaml } from "yaml";
 import { makeSlots, piSettingsWarnings, run, type RunOptions } from "../src/backend/loop.ts";
 import { agentModels } from "../src/backend/models.ts";
 import { readSettings, writeSettings } from "../src/backend/state.ts";
@@ -1030,6 +1037,20 @@ esac`,
     expect(sh(repo, "git", "show", "origin/goal/demo:a.txt")).toBe("A\n");
   });
 
+  test("a pasted plan imports from YAML, and one with problems lists them and changes nothing", async () => {
+    const { repo, state } = goalRepo();
+    await expect(
+      importPlanText(state, toYaml(plan(repo, [{ key: "a", after: ["x"] }]))),
+    ).rejects.toThrow(/problems:\n- .*x/);
+    expect(readJobs(state)).toEqual([]);
+    const goal = await importPlanText(state, toYaml(plan(repo, [{ key: "a" }])));
+    expect(
+      readJobs(state)
+        .filter((job) => job.of === goal.id)
+        .map((job) => job.key),
+    ).toEqual(["a"]);
+  });
+
   test("goal new: the decomposer writes a plan, gets a follow-up while it's invalid, and the goal waits with it", async () => {
     const { repo, state, base } = goalRepo();
     const turns = join(mkdtempSync(join(scratch, "turns-")), "n");
@@ -1127,7 +1148,7 @@ esac`,
     const url = `http://127.0.0.1:${port}/api`;
     const candidates = async () => (await fetch(`${url}/candidates`)).json();
     try {
-      expect(await candidates()).toEqual({ at: null, items: [], repos: [] });
+      expect(await candidates()).toEqual({ at: null, items: [], repos: [], root: source });
       const response = await fetch(`${url}/repos/clone`, {
         method: "POST",
         body: JSON.stringify({ name: "owner/new-app" }),
@@ -1135,7 +1156,38 @@ esac`,
       expect(response.status).toBe(200);
       const repos = [join(source, "new-app")];
       expect(await candidates()).toMatchObject({ items: [], repos });
-      await expect.poll(candidates).toEqual({ at: expect.any(String), items: [], repos });
+      await expect
+        .poll(candidates)
+        .toEqual({ at: expect.any(String), items: [], repos, root: source });
+    } finally {
+      server.close();
+      if (previousSource === undefined) delete process.env.SRC;
+      else process.env.SRC = previousSource;
+    }
+  });
+
+  test("serve starts a goal in a new project: the repo under $SRC, pushed to a new origin", async () => {
+    const source = mkdtempSync(join(scratch, "src-"));
+    const state = mkdtempSync(join(scratch, "state-"));
+    const origin = join(mkdtempSync(join(scratch, "origin-")), "units.git");
+    sh(scratch, "git", "init", "-q", "--bare", origin);
+    const bin = mkdtempSync(join(scratch, "bin-"));
+    script(bin, "gh", `git remote add origin '${origin}' && git push -q -u origin main`);
+    process.env.PATH = `${bin}:${process.env.PATH}`;
+    const previousSource = process.env.SRC;
+    process.env.SRC = source;
+    const server = serve(state, 0, "127.0.0.1");
+    await once(server, "listening");
+    const { port } = server.address() as AddressInfo;
+    const post = (body: object) =>
+      fetch(`http://127.0.0.1:${port}/api/goals`, { method: "POST", body: JSON.stringify(body) });
+    try {
+      const response = await post({ title: "Units", brief: "Convert units.", project: "units" });
+      expect(response.status).toBe(200);
+      const goal = readJobs(state).find((job) => job.goal)!;
+      expect(goal.goal).toMatchObject({ repo: join(source, "units"), summary: "Convert units." });
+      expect(sh(origin, "git", "log", "--format=%s", "main")).toBe("init\n");
+      expect((await post({ title: "Again", brief: "", project: "units" })).status).toBe(400);
     } finally {
       server.close();
       if (previousSource === undefined) delete process.env.SRC;

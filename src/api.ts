@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type { Candidates, Model, Play, Preset, Snapshot } from "./backend/types.ts";
+import type { Candidates, Job, Model, Play, Preset, Snapshot } from "./backend/types.ts";
 import type { clonableRepos } from "./backend/repos.ts";
 import type { DialogAnswer } from "./pi";
 
@@ -15,7 +15,7 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
 
 export const api = {
   candidates: () =>
-    call<{ at: string | null; items: Candidates["items"]; repos: string[] }>(
+    call<{ at: string | null; items: Candidates["items"]; repos: string[]; root: string }>(
       "GET",
       "/api/candidates",
     ),
@@ -38,6 +38,10 @@ export const api = {
   /** A goal's approve, pause, resume or cancel. */
   goal: (id: string, action: "approve" | "pause" | "resume" | "cancel") =>
     call("POST", `/api/jobs/${id}/${action}`),
+  /** Without `repo`, `project` names a new one to create. */
+  newGoal: (goal: { title: string; brief: string; repo?: string; project?: string }) =>
+    call<Job>("POST", "/api/goals", goal),
+  importPlan: (plan: string) => call<Job>("POST", "/api/goals/import", { plan }),
   replan: (id: string, why: string) => call("POST", `/api/jobs/${id}/replan`, { why }),
   /** The user checked what the job couldn't; without a need, all of it. */
   verify: (id: string, need?: string) => call("POST", `/api/jobs/${id}/verify`, { need }),
