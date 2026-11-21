@@ -1,38 +1,70 @@
 # factory
 
-Works a queue of coding tasks with headless `claude` and `pi`, until their usage limits run out. You pick tasks from what [workwork](https://github.com/Soleone/workwork) finds across your repos, or let auto mode keep the queue topped up. In the morning, the results list what each agent did, with the PR or issue it opened.
+Works coding tasks with headless `claude` and `pi`, until their usage limits run out. Two modes share one queue:
+
+- **Maintenance:** small independent jobs from what [workwork](https://github.com/Soleone/workwork) finds across your repos. You pick them, or auto mode keeps the queue topped up overnight. In the morning, the results list what each agent did, with the PR it opened.
+- **Goals:** one large task, split into a graph of jobs that run in dependency order, several at once where they don't touch the same files, each building on the last, across usage resets. Every job merges into the goal's own integration branch; the final PR into main is yours to merge.
 
 ```sh
 npm install -g @soleone/factory
 factory serve    # http://127.0.0.1:7040
 ```
 
-Needs node 22+, git, [workwork](https://github.com/Soleone/workwork) with `--json` support, and whichever of `claude` and `pi` you use, logged in.
+Needs node 22+, git, [workwork](https://github.com/Soleone/workwork) with `--json` support, `gh`, and whichever of `claude` and `pi` you use, logged in.
 
 ## How it works
 
-- **Repos** are yours on GitHub, cloned under `$SRC`, which is where workwork looks. In the Candidates tab, choose **Clone project...** from the repo dropdown to see the ones you haven't cloned yet, newest first, and clone one directly into `$SRC`.
-- **Jobs** are workwork candidates in the queue. Your picks always go first, in the order you give them; auto jobs follow. A job can name its agent, model and effort. Once an agent has started a job, the job stays with that agent.
-- **Auto mode** only fills the queue: while the factory is on, it keeps up to 5 of its jobs per agent queued, cheapest attention first, with repos taking turns. It never re-queues a candidate that already had a job. You can limit it to some levels and plays.
-- **The factory** is what works the queue, one worker per agent. With nothing to do it waits, and it picks up new jobs within seconds. Turning it on starts a **run** with its own agents, models, efforts, limit and end time, defaulting to the settings.
-- **Limits:** a limit of 1 (the default) stops an agent at its first usage-limit hit, so only the current allowance gets used. A limit of 2 waits for one reset and stops at the second hit. "None" always waits for the reset, which it logs. Once every agent has stopped, the factory turns itself off. Three quick failures in a row also count as a limit hit, so a broken login can't burn through the queue.
-- **Failures:** a failed or timed-out job gets one more try by the same agent. After that it waits for you to retry it.
-- **Agents report back** through the CLI, which factory names in each prompt: `note` for what's worth knowing later, `result` for a summary with a confidence, follow-up tasks and the PR link, and `ask` for the rare decision only you can make; the prompt tells agents to decide everything else themselves and note the call. A job whose agent asked waits for your answer, on the page or with `factory answer`. Then it goes back in the queue, and the next attempt gets the earlier notes, your answer and the branch with the earlier work. Retries get the same.
-- **Jobs can wait on each other:** `--after <job>` holds one until the other is done, and drops it if the other fails or is removed (a retry brings it back). **Review with** queues a review of a job's PR by another agent, which posts its findings as a PR comment.
+- **Jobs** are what the agents work. A model only ever does one job, as a child process that exits. Scheduling, checks, merges, limits and retries are plain code.
+- **Sessions:** an attempt at a job is one agent session. Factory talks to it as often as it needs: when the agent stops without reporting a result, or one of the job's checks (gates) fails, it sends up to two follow-ups in the same session, quoting how the run ended or what failed. After an answered question, a usage reset or a restart it resumes the session. Only a new attempt starts fresh, with the earlier attempts' notes and kept work.
+- **Live:** both runners stream JSON events, so the page shows each worker's current tool call ("editing src/sidebar.rs") and context size without the agent's help, and agents report steps in their own words. An attempt times out only after `idle` minutes (default 10) without a sign of life; a long run that keeps working is never cut off.
+- **Tiers:** a job can ask for `communicator` (taste and writing: decomposition, UX, copy), `builder` (architecture, tricky logic, reviews) or `grunt` (well-specified mechanical work). Settings list each tier's presets in order; a job runs on the first one whose usage limit isn't hit and has a free worker. A job that fails twice moves up a tier.
+- **Pools and workers:** a pool is one account's usage limit (claude, or pi's provider). Each preset can run several workers; a limit hit pauses every worker of the pool until the reset. More workers on one pool spend its allowance sooner; the gain is across pools.
+- **Compaction:** each preset compacts its context at `compactAt` tokens (200k, 90k for Haiku, below their price steps). Claude Code gets `--autocompact`; pi reads it from its own settings, so factory checks those at start-up and prints what to add if they don't match.
+- **Worktrees:** a pool of worktrees per repo, under the state folder, reused from job to job so installed dependencies survive. A job's worktree stays with it while it waits for an answer. Before a new job it's reset; untracked files go, ignored ones stay. Commits or changes an agent leaves unpushed are saved to `factory/<job>-<attempt>`. Your own checkout is never touched.
+- **Touches:** jobs that say which files they change (globs) never run at the same time as another job that may change the same ones.
 
-## Reviewing results
+### Maintenance
 
-Results waiting for your answer come first under **Waiting for you**; a dot marks those that ended since you last looked. **Activity** lists everything that happened, newest first, with what the agents said. The tab, filter and an opened job stay in the URL, so a link opens the same view.
+- Picks go first, in the order you give them; auto jobs follow. While the factory is on, auto mode keeps up to 5 of its jobs per worker queued, cheapest attention first, with repos taking turns, and never re-queues a candidate that already had a job.
+- **Limits:** a limit of 1 (the default) stops a pool at its first usage-limit hit, so only the current allowance gets used. A limit of 2 waits for one reset; "none" always waits. Three quick failures in a row stop a worker, so a broken login can't burn through the queue.
+- **Failures:** a job that fails gets one more attempt; then it waits for you to retry it, and jobs that wait on it are held until then.
+- **Reviewing results:** each result links its PR. From the page you can read its description and diff, merge it, rebase it, or close it, and put several on the **merge train**, which merges them one after another per repo, rebasing as it goes. A rebase that stops on real conflicts queues a job to resolve them.
 
-Each result links the PR or issue the agent opened. From the page you can read a PR's description and diff, merge it, rebase it onto its base when GitHub reports conflicts, or close it. Rebasing never guesses: if git stops on a conflict, nothing is pushed and the page lists the files.
+### Goals
 
-**Merge train:** select several results and merge them in one go. PRs merge one after another per repo, since each merge moves the base under the next one; repos go in parallel. The train waits for checks, rebases a PR that conflicts, and skips one it can't merge, with the reason. What it did with each PR shows on the job and in Activity. When a rebase stops on real conflicts, a job to resolve them goes to the front of the queue, so an agent picks it up on the next run.
+```sh
+factory goal new "GPUI client for Tasks" --repo ~/src/tasks --brief brief.md
+factory goal show gpui-client       # the graph before anything runs: tiers, critical path, estimate
+factory goal approve gpui-client
+```
+
+- **Planning:** `goal new` queues a communicator to decompose the goal into a plan, which factory validates and imports, then waits for your approval. `goal import plan.json` takes a plan you wrote, with someone or something else; [spec/plan-format.md](spec/plan-format.md) describes the format (JSON or YAML) and `goal check` validates one.
+- **Branches:** the goal gets `goal/<slug>` on origin. Each node works on `node/<slug>/<key>`, started from the integration branch's head; it commits and pushes but never opens a PR. Factory runs its gates, rebases it onto the integration branch, opens the PR and merges it, then runs the goal's own gates. A conflict queues a job to resolve it; a red integration branch pauses the goal and queues a fix.
+- **Memory:** `.factory/<slug>.md` on the integration branch holds the goal's summary and the decisions each node leaves for the next. Prompts carry the goal summary, what a node's dependencies delivered, and a pointer to the memory.
+- **Checkpoints:** a node can pause the goal for your approval once it's merged, and so does an attempt budget when it runs out (approving adds the same again). At each milestone (a node with children, done) factory rebases the integration branch onto main and queues a replan; a node that fails for good queues one too. A replan may change only what hasn't started, and one that changes more than a quarter of it waits for you.
+- **Reviews:** a node can ask for a review by another tier before it merges; findings become a fix on its branch.
+- **Needs:** a node that needs something no worker has (`display`, `gpu`, an emulator) still runs, verifies what it can, and lands on the unverified checklist for you.
+- **In Tasks:** with `"store": "tasks"` and `"tasks": { "home": "..." }` in settings, goals and their nodes also show in a Tasks home, kept in step every few seconds. Canceling one there, editing a node that hasn't started, or adding a subtask under a goal (tag it #grunt, #builder or #communicator) comes back to factory.
+
+## Agents report back
+
+Through the CLI, which factory names in each prompt (the job is `$FACTORY_JOB`):
+
+```sh
+factory step "<what you're doing>" [--done N --of M]   # progress; the page shows the latest
+factory note "<text>"                                  # worth knowing later
+factory ask "<question>" --assume "<default>"          # carry on with the default; you answer later
+factory ask "<question>"                               # the job waits for your answer
+factory result "<summary>" --confidence high --url LINK --followup "<task>" --unverified "<what>"
+```
+
+The prompt tells agents to decide what a reasonable engineer would and note the call. An assumption you answer with "fine" closes; any other answer queues a job to change it. A plain question pauses the job until you answer, on the page or with `factory answer`, and the same session picks up from there. `factory report` ends with what waits on you: unverified work and assumptions to confirm.
 
 ## Live Agent
 
 Live Agent, the robot button right of the tabs, is a chat with an agent about what to queue. It reads the candidates, the queue and past results, proposes a few jobs that won't step on each other, and adds them through the CLI once you agree. It never turns the factory on, merges or closes PRs, or changes your repos. That is an instruction to the agent, not a sandbox: it has a shell, like the agents doing jobs. Results that failed, or that the train skipped, have an **Ask** button that starts the chat with the question already written.
 
-Settings > Live Agent picks the agent (Claude Code or Pi), its model and effort. The same model and effort pickers serve runs. Model choices are short lists: Pi's scoped models (`enabledModels` in Pi's settings, the ones Ctrl+P cycles through), and Claude Code's current models (opus, sonnet, fable, haiku). The efforts on offer are the chosen model's. When one of Pi's extensions asks something mid-chat, the page shows the question. The chat survives a restart of `factory serve`: the page shows it again and the agent resumes its own session, so it still knows what was said. New chat starts over.
+Settings > Live Agent picks the agent (Claude Code or Pi), its model and effort. Model choices are short lists: Pi's scoped models (`enabledModels` in Pi's settings) and Claude Code's current models. The chat survives a restart of `factory serve`.
 
 ## Commands
 
@@ -40,41 +72,79 @@ The page and the CLI do the same things on the same state; `serve` is only an in
 
 ```sh
 factory start [run options]   # turn on, in the background (factory run: in the foreground)
-factory stop                  # turn off; jobs in progress go back to the queue
-factory status                # on or off, what each agent does, the queue
-factory add <id>... [--repo DIR] [--agent NAME] [--model M] [--effort E] [--after JOB]
-factory remove <job> | retry <job> | answer <job> "<text>"
+factory stop [--kill]         # turn off; agents at work finish their turn, the next start records it
+factory status                # on or off, each pool and its workers, the queue
+factory add <id>... [--repo DIR] [--agent NAME] [--model M] [--effort E] [--after JOB]...
+factory add --prompt FILE --tier grunt [--repo DIR]   # a job of your own, without workwork
+factory remove <job> | retry <job> | answer <job> "<text>" | verify <job> [NEED]
 factory review <job> --agent pi   # another agent reviews the job's PR once it's done
-factory wait <job> [--timeout MIN] # block until it's done, failed or waiting for you
+factory wait <job> [--timeout MIN]
 factory tail                      # follow every job event, one line each
 factory auto on|off
-factory report [--all]        # the last run (or every run): outcome, agent, PR/issue link or log
+factory report [--all]            # the last run (or every run), then what waits on you
+factory goal new|import|check|show|approve|pause|resume|cancel|replan ...
 factory serve [--port 7040] [--host 127.0.0.1]
 ```
 
-Run options: `--agents claude,pi`, `--limit N|none`, `--until HH:MM` (start nothing new after), `--model claude=opus`, `--effort pi=high` (claude's `--effort`, pi's `--thinking`), `--timeout MIN`.
+Run options: `--agents claude,pi` (a worker each, for jobs without a tier), `--limit N|none` (per pool), `--until HH:MM` (start nothing new after), `--model claude=opus`, `--effort pi=high` (claude's `--effort`, pi's `--thinking`), `--idle MIN`.
 
 `serve` listens on 127.0.0.1. Anyone who can reach it can queue jobs and turn the factory on, and the agents run with full permissions, so it amounts to running commands on your machine. Reach it from a phone through something like `tailscale serve`, not with `--host 0.0.0.0` on a network you don't trust.
 
-## Worktrees
+## Settings
 
-Each agent gets one worktree per repo, under the state folder, reused from job to job so installed dependencies survive. Before every job it's reset to a freshly fetched `origin/HEAD`, and untracked files are removed but ignored ones are kept. Your own checkout is never touched. If an agent leaves commits that aren't on a remote, or uncommitted changes, they're saved to a branch `factory/<job>-<attempt>` in the repo, and the result says so.
+`settings.json` in the state folder, also edited from the page:
+
+```json
+{
+  "agents": { "claude": {}, "pi": {} },
+  "presets": [
+    { "id": "opus", "agent": "claude", "model": "opus", "effort": "high" },
+    {
+      "id": "sol",
+      "agent": "pi",
+      "model": "openai-codex/gpt-6.2-sol",
+      "effort": "high",
+      "workers": 2
+    },
+    {
+      "id": "luna",
+      "agent": "pi",
+      "model": "openai-codex/gpt-6-luna",
+      "effort": "max",
+      "workers": 3
+    },
+    { "id": "haiku", "agent": "claude", "model": "haiku", "workers": 2 }
+  ],
+  "tiers": { "communicator": ["opus"], "builder": ["sol", "opus"], "grunt": ["luna", "haiku"] },
+  "limit": 1,
+  "idle": 10,
+  "capabilities": ["display"],
+  "env": {
+    "/home/me/src/tasks": { "RUSTC_WRAPPER": "sccache", "CARGO_TARGET_DIR": "{worktree}/target" }
+  },
+  "store": "local"
+}
+```
+
+A preset may also set `pool` (default: claude, or pi's provider), `compactAt` and `followups` (default 2). `env` applies per repo to agents and gates; `{worktree}` becomes the worktree's path. A tier without presets runs on the run's agents.
 
 ## State
 
 In `$DATA/apps/factory/` when `DATA` is set, otherwise `~/.local/share/factory/`:
 
-- `settings.json`: registered agents with their model and effort, the agent Live Agent uses, limit, until, timeout, auto mode (on, levels, plays, repos)
-- `jobs.jsonl`: append-only events (add, remove, move, start, attempt, requeue, retry), so the CLI, the factory and the page never overwrite each other
-- `candidates.json`: the cached `workwork --all --json`, which takes minutes; refreshed from the page, or by auto mode when older than 6 hours
-- `runs/<run>/<job>-<attempt>/`: `prompt.md` and `agent.log`
-- `chat.json`, `chat.jsonl`, `chat-sessions/`: the Live Agent session, what the page shows, and Pi's session files (Claude Code keeps its own)
-- `worktrees/<agent>/<repo>/`
-- `status.json`, `factory.pid`, `factory.log`: the current run
+- `settings.json`
+- `jobs.jsonl`: append-only events, so the CLI, the factory and the page never overwrite each other; the queue, goals and results are what replaying it gives
+- `candidates.json`: the cached `workwork --all --json`, refreshed from the page, or by auto mode when older than 6 hours
+- `runs/<run>/<job>-<attempt>/`: `prompt.md`, `turn-N.md` for each later turn, and `agent.log` with the runner's event stream
+- `running/<job>.json`: an attempt in progress or paused: its session, worktree and turn
+- `sessions/`: pi's session files for job attempts (Claude Code keeps its own)
+- `chat.json`, `chat.jsonl`, `chat-sessions/`: the Live Agent
+- `worktrees/<repo>/<n>/`
+- `status.json`, `factory.pid`, `factory.log`: the current run, its pools and workers
 
 ## Why not an LLM loop
 
-This replaces an assistant that ran the night from inside chat turns. It stopped whenever a turn ended, built its own queue, guards and "authorization" out of prompts, then got blocked by them, and rewrote its own instructions after every failure. The tasks themselves went fine. So here the loop is plain code, and a model only ever does one task, as a child process that exits. Nothing a model says decides what runs next, who gets it, or whether to keep going.
+This replaces an assistant that ran the night from inside chat turns. It stopped whenever a turn ended, built its own queue, guards and "authorization" out of prompts, then got blocked by them, and rewrote its own instructions after every failure. The tasks themselves went fine. So here the loop is plain code, and a model only ever does one task, as a child process that exits. Nothing a model says decides what runs next, except through a plan that code validates.
 
 ## Development
 
@@ -84,11 +154,11 @@ pn dev
 vp check && vp test run && kit check
 ```
 
-The page is built on the [kit](https://github.com/Soleone/kit) web stack: Vite+, React, shadcn base-nova and the @soleone theme. `src/backend/` holds the CLI, the factory and the server; `src/` the page. `pn dev` runs Vite with hot reload at http://localhost:7040 in front of `factory serve` on 7041, which restarts when `src/backend/` changes. It uses your real state folder, so Turn on starts real agents. `pn build` bundles the CLI to `dist/cli.mjs` and the page to `dist/web/`.
+The page is built on the [kit](https://github.com/Soleone/kit) web stack: Vite+, React, shadcn base-nova and the @soleone theme. `src/backend/` holds the CLI, the factory and the server; `src/` the page. `pn dev` runs Vite with hot reload at http://localhost:7040 in front of `factory serve` on 7041, which restarts when `src/backend/` changes. It uses your real state folder, so Turn on starts real agents. `pn build` bundles the CLI to `dist/cli.mjs` and the page to `dist/web/`. The Tasks store test runs against Tasks' own checkout (`$SRC/products/tasks/bin/tasks-cli`, or `TASKS_CLI`) and is skipped without it.
 
 ### Try the UI with dummy data
 
-Run `pnpm dev:demo` and open [factory (demo)](http://localhost:7042). Browse sample candidates, reorder the queue, retry a failed job, review sample PRs, or try the run and settings controls. Turn on shows simulated workers without executing any jobs.
+Run `pnpm dev:demo` and open [factory (demo)](http://localhost:7042). Browse sample candidates, reorder the queue, retry a failed job, review sample PRs, open the sample goal's graph, or try the run and settings controls. Turn on shows simulated workers without executing any jobs.
 
 The demo does not start `factory serve`, call `workwork` or GitHub, or read or write your real Factory state. Changes are shared across tabs and reset when you restart the demo server.
 
