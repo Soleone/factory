@@ -142,6 +142,19 @@ export function QueueView({
                                 {tier}
                               </Badge>
                             ))}
+                            {worker.preset === worker.agent && (
+                              <Tooltip>
+                                <TooltipTrigger
+                                  render={<Badge variant="outline" className="ml-1" />}
+                                >
+                                  untiered
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  The run's own {worker.agent} worker, for jobs without a tier, like
+                                  maintenance picks.
+                                </TooltipContent>
+                              </Tooltip>
+                            )}
                           </>
                         }
                         meta={

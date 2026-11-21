@@ -20,6 +20,9 @@ export type Preset = Tuning & {
 
 /** What kind of intelligence a job needs, highest first. */
 export const TIERS = ["communicator", "builder", "grunt"] as const;
+
+/** The plays of factory's own jobs that write a goal's plan. */
+export const PLANNING = ["decompose", "replan"] as const;
 export type Tier = (typeof TIERS)[number];
 
 export const presetId = (preset: Preset) =>
@@ -179,6 +182,8 @@ export type Job = Tuning & {
   tier?: Tier;
   state: "queued" | "running" | "blocked" | "done" | "failed" | "removed";
   blocked?: Blocked;
+  /** What a goal's checkpoint waits for, in factory's words. */
+  why?: string;
   attempts: Attempt[];
   notes: Note[];
   /** For jobs that aren't workwork's, which asks workwork for the rest. */

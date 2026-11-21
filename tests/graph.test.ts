@@ -118,6 +118,26 @@ describe("the graph", () => {
     expect([isReady("x"), isReady("fix")]).toEqual([true, true]);
   });
 
+  test("a checkpoint says why it waits, until it's approved", () => {
+    const { state, byId } = graph();
+    record(state, { type: "block", id: "g", reason: "checkpoint", why: "checkpoint after core" });
+    expect(byId("g")).toMatchObject({ blocked: "checkpoint", why: "checkpoint after core" });
+    record(state, { type: "unblock", id: "g" });
+    expect(byId("g").why).toBeUndefined();
+  });
+
+  test("what a plan writer couldn't check stays in its result; a node's goes on the checklist", () => {
+    const { state, add, byId } = graph();
+    add("plan", { item: { ...item("plan"), play: "replan" }, front: true });
+    add("node");
+    for (const id of ["plan", "node"]) {
+      startJob(state, id, "claude");
+      addNote(state, id, { kind: "result", text: "done", unverified: ["the gate"] });
+      endJob(state, id, attempt("done"));
+    }
+    expect([byId("plan").unverified, byId("node").unverified]).toEqual([[], ["the gate"]]);
+  });
+
   test("a group is done when its children are, waits for what it comes after, and so do they", () => {
     const { state, add, byId, isReady } = graph();
     add("first");
@@ -288,5 +308,29 @@ test("a plan can't make a node wait for the milestone that contains it", () => {
   expect(problems).toEqual([
     "a comes after m, which contains it; drop it (a milestone's nodes already wait for what the milestone comes after)",
     "b comes after m, which contains it; drop it (a milestone's nodes already wait for what the milestone comes after)",
+  ]);
+});
+
+test("a milestone needs only a key, a title and after; a node that runs needs the rest", () => {
+  const repo = mkdtempSync(join(scratch, "repo-"));
+  mkdirSync(join(repo, ".git"));
+  const plan = (nodes: object[]) =>
+    checkPlan({
+      format: "factory-plan/1",
+      goal: { title: "t", repo, summary: "s", gates: [] },
+      nodes,
+    });
+  const runs = { key: "a", title: "a", parent: "m", after: [] };
+  expect(
+    plan([
+      { key: "m", title: "m", after: [] },
+      { ...runs, tier: "grunt", prompt: "p", touches: [], gates: [] },
+    ]),
+  ).toEqual([]);
+  expect(plan([{ key: "m", title: "m", after: [] }, runs])).toEqual([
+    "nodes[1] (a): prompt is empty",
+    "nodes[1] (a): tier must be one of communicator, builder, grunt",
+    "nodes[1] (a): touches must be a list of globs (empty: anything)",
+    "nodes[1] (a): gates must be a list of commands",
   ]);
 });

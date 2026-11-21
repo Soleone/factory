@@ -7,6 +7,7 @@ import {
   chains,
   itemKey,
   prUrl,
+  PLANNING,
   TIERS,
   type Attempt,
   type Blocked,
@@ -29,7 +30,7 @@ export type Event = { at: string } & (
   | { type: "note"; id: string; note: NoteBody }
   /** The open attempt waits: for the user's answer, or for its pool's limit to reset. */
   | { type: "pause"; id: string; reason: "asked" | "limited" }
-  | { type: "block"; id: string; reason: Blocked }
+  | { type: "block"; id: string; reason: Blocked; why?: string }
   /** A replan's change to a job that hasn't started. */
   | { type: "update"; id: string; change: Change }
   /** The user checked a need it couldn't verify; no need: all of them. */
@@ -141,10 +142,12 @@ export function replay(events: Event[]): Job[] {
     if (event.type === "requeue" || event.type === "unblock") {
       job.state = "queued";
       job.blocked = undefined;
+      job.why = undefined;
     }
     if (event.type === "retry") {
       job.state = "queued";
       job.blocked = undefined;
+      job.why = undefined;
       failures.set(job.id, 0);
     }
     if (event.type === "move") {
@@ -165,10 +168,12 @@ export function replay(events: Event[]): Job[] {
     if (event.type === "block") {
       job.state = "blocked";
       job.blocked = event.reason;
+      job.why = event.why;
     }
     if (event.type === "merged") {
       job.state = "done";
       job.blocked = undefined;
+      job.why = undefined;
     }
     if (event.type === "update") Object.assign(job, event.change);
     if (event.type === "verify")
@@ -198,7 +203,9 @@ export function replay(events: Event[]): Job[] {
         (note) => note.kind === "result" && note.attempt === number,
       )?.unverified;
       const lacking = [...(unverified ?? []), ...(event.attempt.missing ?? [])];
-      if (outcome === "done" && lacking.length)
+      // A plan has nothing to check by hand; what its writer was unsure of stays in its result.
+      const planning = (PLANNING as readonly string[]).includes(job.item.play);
+      if (outcome === "done" && lacking.length && !planning)
         job.unverified = [...new Set([...job.unverified, ...lacking])];
       if (asked) {
         // Old logs: the attempt ended with the question.

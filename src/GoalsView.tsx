@@ -4,6 +4,7 @@ import { api, type Act } from "@/api";
 import {
   critical,
   depths,
+  PLANNING,
   prUrl,
   TIERS,
   type Job,
@@ -50,6 +51,8 @@ const BLOCKED: Record<string, string> = {
   held: "held by a failure",
   review: "merging",
 };
+
+const sentence = (text: string) => text.charAt(0).toUpperCase() + text.slice(1) + ".";
 
 /** Everything under a goal, in the order the queue takes it. */
 const nodesOf = (jobs: Job[], goal: Job) =>
@@ -208,6 +211,7 @@ function GoalView({
   const red = goal.blocked === "red";
   const factorySaid = goal.notes.findLast((note) => note.kind === "factory");
   const final = prUrl(goal);
+  const planning = nodes.filter((node) => (PLANNING as readonly string[]).includes(node.item.play));
   const unverified = nodes.flatMap((node) => node.unverified.map((need) => ({ node, need })));
   const assumed = nodes.flatMap((node) =>
     node.notes.flatMap((note, index) =>
@@ -283,8 +287,10 @@ function GoalView({
         )}
       </div>
 
-      {goal.blocked === "checkpoint" && factorySaid && (
-        <p className="-mt-4 text-sm text-warning">{factorySaid.text}</p>
+      {goal.blocked === "checkpoint" && (
+        <p className="rounded-md border border-warning/50 bg-warning/10 p-3 text-sm">
+          {sentence(goal.why ?? factorySaid?.text ?? "waiting for your approval")}
+        </p>
       )}
       {red && factorySaid && (
         <p className="rounded-md border border-destructive/40 p-3 text-sm text-destructive">
@@ -323,14 +329,35 @@ function GoalView({
         </Section>
       )}
 
+      {planning.length > 0 && (
+        <Section title="Planning">
+          <div className="flex flex-wrap gap-2">
+            {planning.map((node) => (
+              <NodeCard
+                key={node.id}
+                node={node}
+                snapshot={snapshot}
+                act={act}
+                status={status}
+                onPath={false}
+                dependency={false}
+                onHover={() => {}}
+              />
+            ))}
+          </div>
+        </Section>
+      )}
+
       <Section title="Plan">
-        <Columns
-          nodes={nodes.filter((node) => !node.parent)}
-          all={nodes}
-          snapshot={snapshot}
-          act={act}
-          status={status}
-        />
+        <div className="overflow-x-auto pb-2">
+          <Columns
+            nodes={nodes.filter((node) => !node.parent && !planning.includes(node))}
+            all={nodes}
+            snapshot={snapshot}
+            act={act}
+            status={status}
+          />
+        </div>
       </Section>
     </div>
   );
@@ -362,9 +389,9 @@ function Columns({
   const highlighted = new Set(all.find((node) => node.id === hovered)?.after ?? []);
   const layers = [...new Set(depth.values())].sort((a, b) => a - b);
   return (
-    <div className="flex gap-3 overflow-x-auto pb-2">
+    <div className="flex w-max gap-3">
       {layers.map((layer) => (
-        <div key={layer} className="flex w-60 shrink-0 flex-col gap-2">
+        <div key={layer} className="flex flex-col gap-2">
           {nodes
             .filter((node) => depth.get(node.id) === layer)
             .map((node) => {
@@ -405,7 +432,7 @@ function Milestone({ members, all, ...props }: CardProps & { members: Job[]; all
   const { node, snapshot, act, status } = props;
   const done = members.filter((member) => member.state === "done").length;
   return (
-    <div className="rounded-md border border-dashed p-2">
+    <div className="min-w-60 rounded-md border border-dashed p-2">
       <Collapsible defaultOpen={node.state !== "done"}>
         <CollapsibleTrigger
           render={
@@ -439,7 +466,7 @@ function NodeCard({ node, snapshot, act, status, onPath, dependency, onHover }: 
   const ring = dependency ? "ring-2 ring-accent" : onPath ? "border-primary/60" : "";
   return (
     <div
-      className={`flex flex-col gap-1 rounded-md border bg-card p-2 text-sm ${ring}`}
+      className={`flex w-60 flex-col gap-1 rounded-md border bg-card p-2 text-sm ${ring}`}
       onMouseEnter={() => onHover(node.id)}
       onMouseLeave={() => onHover(undefined)}
     >

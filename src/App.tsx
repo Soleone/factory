@@ -74,12 +74,15 @@ function Factory({
     on && status
       ? [
           `since ${clock(runStart(status.run))}`,
-          status.limit === null
-            ? "always waits for usage resets"
-            : status.limit === 1
-              ? "stops at usage limits"
-              : `waits for ${status.limit - 1} usage reset${status.limit > 2 ? "s" : ""}`,
           status.until && `until ${clock(status.until)}`,
+          // Only what's happening now; the limit setting itself lives in Settings.
+          ...status.pools.map((pool) =>
+            pool.stopped
+              ? `${pool.name} out of limits`
+              : pool.until
+                ? `${pool.name} sleeps until ${clock(pool.until)}`
+                : undefined,
+          ),
         ]
           .filter(Boolean)
           .join(" · ")

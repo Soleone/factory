@@ -5,8 +5,8 @@ import { clock } from "@/format";
 import { KIND } from "@/JobNotes";
 import { TaskDetails } from "@/TaskDetails";
 
-/** `ended` is the attempt an entry ends. */
-type Entry = { at: string; job: Job; text: string; tone?: string; ended?: Attempt };
+/** `ended` is the attempt an entry ends; `step` the number a step has within its attempt. */
+type Entry = { at: string; job: Job; text: string; tone?: string; ended?: Attempt; step?: string };
 
 const SHOWN = 200;
 
@@ -44,12 +44,31 @@ export function jobEntries(job: Job): Entry[] {
         ended: attempt,
       },
     ]),
-    ...job.notes.map((note) => ({
-      at: note.at,
-      job,
-      text: `${KIND[note.kind]}: ${note.text}`,
-      tone: note.kind === "ask" ? "text-foreground font-medium" : undefined,
-    })),
+    ...job.notes.map((note): Entry => {
+      if (note.kind !== "step")
+        return {
+          at: note.at,
+          job,
+          text: `${KIND[note.kind]}: ${note.text}`,
+          tone:
+            note.kind === "ask"
+              ? "text-foreground font-medium"
+              : note.kind === "result"
+                ? "text-foreground"
+                : undefined,
+        };
+      // Agents don't know their step count up front, so steps are numbered as they come.
+      const number = job.notes.filter(
+        (other) => other.kind === "step" && other.attempt === note.attempt && other.at <= note.at,
+      ).length;
+      return {
+        at: note.at,
+        job,
+        text: note.text,
+        tone: "text-foreground",
+        step: note.of ? `${note.done ?? number}/${note.of}` : String(number),
+      };
+    }),
   ];
 }
 
@@ -60,6 +79,15 @@ function entries(jobs: Job[]): Entry[] {
     .flatMap(jobEntries)
     .sort((a, b) => b.at.localeCompare(a.at))
     .slice(0, SHOWN);
+}
+
+/** A step's number within its attempt, as a small pill before its text. */
+export function StepNumber({ step }: { step: string }) {
+  return (
+    <span className="mr-2 inline-flex min-w-5 justify-center rounded-full bg-primary/15 px-1.5 text-xs font-medium text-primary tabular-nums">
+      {step}
+    </span>
+  );
 }
 
 export const dayOf = (iso: string) =>
@@ -104,6 +132,7 @@ export function ActivityView({ snapshot, act }: { snapshot: Snapshot; act: Act }
                 <span
                   className={`col-start-2 wrap-anywhere sm:col-start-3 ${entry.tone ?? "text-muted-foreground"}`}
                 >
+                  {entry.step && <StepNumber step={entry.step} />}
                   {entry.text}
                 </span>
               </li>

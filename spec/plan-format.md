@@ -60,7 +60,9 @@ A plan describes one goal as a graph of nodes, for `factory goal import` (or `fa
 | `needs`      | Optional: capabilities to verify with, like `display`, `gpu` or `android-emulator`. A node whose needs no worker has still runs, and lands on the unverified checklist. |
 | `checkpoint` | Optional: once this node merges, the goal waits for the user's approval.                                                                                                |
 | `parent`     | Optional key: makes the parent a milestone. A milestone done rebases the integration branch onto main and queues a replan.                                              |
-| `review`     | Optional tier: before the node merges, an agent of that tier reviews its branch; findings become a fix on it.                                                           |
+
+A milestone (a node some other node names as `parent`) never runs itself, so it needs only `key`, `title` and `after`; `tier`, `prompt`, `touches` and `gates` are for nodes that run.
+| `review` | Optional tier: before the node merges, an agent of that tier reviews its branch; findings become a fix on it. |
 
 ## Tiers
 
@@ -78,7 +80,7 @@ Each node should fit comfortably in one session of its tier, well under the tier
 
 - `format` is `factory-plan/1`; the goal has a title, a summary, gates, and a repo that is a git repository.
 - Keys are unique; `after` and `parent` name existing keys; neither forms a cycle; no node comes after a milestone that contains it.
-- Every node has a non-empty title and prompt, a known tier, and `after`, `touches` and `gates` lists (they may be empty).
+- Every node has a non-empty title and an `after` list; every node that runs (not a milestone) also has a non-empty prompt, a known tier, and `touches` and `gates` lists (they may be empty).
 - A replan keeps every node that is done, running or waiting to merge exactly as it is (prompt, tier, after).
 
 A rejected plan changes nothing.
@@ -116,7 +118,7 @@ A rejected plan changes nothing.
       "minItems": 1,
       "items": {
         "type": "object",
-        "required": ["key", "title", "tier", "prompt", "after", "touches", "gates"],
+        "required": ["key", "title", "after"],
         "properties": {
           "key": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*$" },
           "title": { "type": "string", "minLength": 1 },

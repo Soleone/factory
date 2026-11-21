@@ -262,7 +262,7 @@ function PresetFields({
             aria-label="Workers"
             type="number"
             min={0}
-            className="w-16"
+            className="w-24"
             placeholder="workers"
             value={preset.workers ?? ""}
             onChange={(event) =>

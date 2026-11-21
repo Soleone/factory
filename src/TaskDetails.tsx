@@ -12,7 +12,7 @@ import {
 import Markdown from "markdown-to-jsx/react";
 import { useEffect, useState, type ReactNode } from "react";
 import { api, type Act } from "@/api";
-import { dayOf, jobEntries } from "@/ActivityView";
+import { dayOf, jobEntries, StepNumber } from "@/ActivityView";
 import { prUrl, type Item, type Job, type Snapshot } from "@/backend/types.ts";
 import {
   Dialog,
@@ -322,6 +322,7 @@ function Story({ job, snapshot, act }: { job: Job; snapshot: Snapshot; act: Act 
                     <span className="relative mt-1.5 size-2 rounded-full border-2 border-current bg-popover" />
                   </span>
                   <span className={`pb-3 wrap-anywhere ${entry.tone ?? ""}`}>
+                    {entry.step && <StepNumber step={entry.step} />}
                     {entry.text}{" "}
                     {entry.ended && (
                       <AttemptFile log={entry.ended.log} agent={entry.ended.agent} kind="log" />

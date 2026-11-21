@@ -33,7 +33,7 @@ const DEMO_NOTES: Record<number, Omit<Job["notes"][number], "at" | "attempt">[]>
 /** What a fresh job has besides its item. */
 const BLANK = { after: [], gates: [], needs: [], unverified: [], escalations: 0, open: false };
 
-/** A goal part way through: a foundation merged, two nodes side by side, the rest waiting. */
+/** A goal part way through: planned, its core merged, a checkpoint after one format, the rest waiting. */
 function demoGoal(at: string, run: string): Job[] {
   const repo = "/demo/atlas";
   const item = (id: string, title: string) => ({
@@ -79,6 +79,10 @@ function demoGoal(at: string, run: string): Job[] {
     prompt: `Build ${title.toLowerCase()}.`,
     ...rest,
   });
+  const earlier = (minutes: number) => new Date(Date.parse(at) - minutes * 60_000).toISOString();
+  // A milestone never runs: no tier, prompt, touches or gates.
+  const milestone = (id: string, title: string, rest: Partial<Job>) =>
+    node(id, title, { gates: [], touches: [], prompt: "", ...rest });
   return [
     {
       ...BLANK,
@@ -86,10 +90,13 @@ function demoGoal(at: string, run: string): Job[] {
       item: { ...item("goal/export", "Export to every format"), play: "goal" },
       source: "goal",
       added: at,
-      state: "queued",
+      state: "blocked",
+      blocked: "checkpoint",
+      why: "checkpoint after JSON format; approve to go on",
       attempts: [],
       notes: [
-        { at, attempt: 0, kind: "factory", text: "the plan has 6 nodes; approve it to start" },
+        { at, attempt: 0, kind: "factory", text: "the plan has 9 nodes; approve it to start" },
+        { at, attempt: 0, kind: "factory", text: "checkpoint after JSON format; approve to go on" },
       ],
       goal: {
         repo,
@@ -100,7 +107,20 @@ function demoGoal(at: string, run: string): Job[] {
         allowUp: true,
       },
     },
+    node("plan", "Decompose: Export to every format", {
+      item: { ...item("plan", "Decompose: Export to every format"), play: "decompose" },
+      tier: "communicator",
+      front: true,
+      state: "done",
+      touches: [],
+      gates: [],
+      attempts: [attempt("done", "opus", 60_000, 0)],
+    }),
+    milestone("core", "Milestone: core", { state: "done" }),
+    milestone("formats", "Milestone: formats", { after: ["core"] }),
+    milestone("finish", "Milestone: menu and docs", { after: ["formats"] }),
     node("writer", "Shared export writer", {
+      parent: "core",
       tier: "builder",
       state: "done",
       attempts: [attempt("done", "sol", 150_000, 1)],
@@ -115,11 +135,13 @@ function demoGoal(at: string, run: string): Job[] {
       ],
     }),
     node("csv", "CSV format", {
+      parent: "formats",
       tier: "grunt",
-      after: ["writer"],
       state: "running",
       notes: [
-        { at, attempt: 1, kind: "step", text: "Quoting rules", done: 2, of: 5 },
+        { at: earlier(6), attempt: 1, kind: "step", text: "Reading the shared writer" },
+        { at: earlier(4), attempt: 1, kind: "step", text: "Header row and column order" },
+        { at, attempt: 1, kind: "step", text: "Quoting rules", done: 3, of: 5 },
         {
           at,
           attempt: 1,
@@ -130,20 +152,17 @@ function demoGoal(at: string, run: string): Job[] {
       ],
     }),
     node("json", "JSON format", {
+      parent: "formats",
       tier: "grunt",
-      after: ["writer"],
       state: "done",
+      checkpoint: true,
       unverified: ["checked in a browser"],
       attempts: [attempt("done", "luna", 260_000, 3)],
       notes: [{ at, attempt: 1, kind: "factory", text: "merged into goal/export" }],
     }),
-    node("xlsx", "XLSX format", { tier: "builder", after: ["writer"], needs: ["display"] }),
-    node("menu", "Export menu and copy", {
-      tier: "communicator",
-      after: ["csv", "json", "xlsx"],
-      checkpoint: true,
-    }),
-    node("docs", "Document the formats", { tier: "grunt", after: ["menu"] }),
+    node("xlsx", "XLSX format", { parent: "formats", tier: "builder", needs: ["display"] }),
+    node("menu", "Export menu and copy", { parent: "finish", tier: "communicator" }),
+    node("docs", "Document the formats", { parent: "finish", tier: "grunt", after: ["menu"] }),
   ];
 }
 

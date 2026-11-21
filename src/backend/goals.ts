@@ -17,6 +17,7 @@ import { output } from "./state.ts";
 import {
   critical,
   depths,
+  PLANNING,
   prUrl,
   TIERS,
   type Goal,
@@ -43,14 +44,15 @@ export type Plan = {
   nodes: PlanNode[];
 };
 
+/** A milestone (a node others name as `parent`) never runs, so it needs no tier, prompt, touches or gates. */
 type PlanNode = {
   key: string;
   title: string;
-  tier: Tier;
-  prompt: string;
+  tier?: Tier;
+  prompt?: string;
   after: string[];
-  touches: string[];
-  gates: string[];
+  touches?: string[];
+  gates?: string[];
   needs?: string[];
   checkpoint?: boolean;
   parent?: string;
@@ -58,8 +60,7 @@ type PlanNode = {
 };
 
 /** Factory's own jobs inside a goal, told apart by their play. */
-const DECOMPOSE = "decompose";
-const REPLAN = "replan";
+const [DECOMPOSE, REPLAN] = PLANNING;
 const REVIEW = "review";
 const FIX = "fix";
 const CONFLICTS = "conflicts";
@@ -102,7 +103,9 @@ export function checkPlan(raw: unknown): string[] {
   }
   if (!Array.isArray(plan.nodes) || plan.nodes.length === 0) return [...problems, "nodes is empty"];
   const keys = new Set<string>();
+  const milestones = new Set(plan.nodes.map((node) => node?.parent));
   for (const [index, node] of plan.nodes.entries()) {
+    const runs = !milestones.has(node?.key);
     const at = `nodes[${index}]${typeof node?.key === "string" ? ` (${node.key})` : ""}`;
     if (typeof node?.key !== "string" || !KEY.test(node.key))
       problems.push(`${at}: key must be lowercase letters, digits, . _ -`);
@@ -110,15 +113,17 @@ export function checkPlan(raw: unknown): string[] {
     else keys.add(node.key);
     if (typeof node?.title !== "string" || !node.title.trim())
       problems.push(`${at}: title is empty`);
-    if (typeof node?.prompt !== "string" || !node.prompt.trim())
+    if (runs && (typeof node?.prompt !== "string" || !node.prompt.trim()))
       problems.push(`${at}: prompt is empty`);
-    if (!isTier(node?.tier)) problems.push(`${at}: tier must be one of ${TIERS.join(", ")}`);
+    if ((runs || node?.tier !== undefined) && !isTier(node?.tier))
+      problems.push(`${at}: tier must be one of ${TIERS.join(", ")}`);
     if (node?.review !== undefined && !isTier(node.review))
       problems.push(`${at}: review must be a tier`);
     if (!strings(node?.after)) problems.push(`${at}: after must be a list of keys`);
-    if (!strings(node?.touches))
+    if ((runs || node?.touches !== undefined) && !strings(node?.touches))
       problems.push(`${at}: touches must be a list of globs (empty: anything)`);
-    if (!strings(node?.gates)) problems.push(`${at}: gates must be a list of commands`);
+    if ((runs || node?.gates !== undefined) && !strings(node?.gates))
+      problems.push(`${at}: gates must be a list of commands`);
     if (node?.needs !== undefined && !strings(node.needs))
       problems.push(`${at}: needs must be a list`);
   }
@@ -227,7 +232,7 @@ export async function importPlan(state: string, plan: Plan, into?: Job): Promise
       goal,
     });
   if (!into) {
-    record(state, { type: "block", id: job.id, reason: "checkpoint" });
+    checkpoint(state, job.id, `the plan has ${plan.nodes.length} nodes; approve it to start`);
     await createBranch(goal);
   }
   await commitFiles(goal, `factory: plan for ${plan.goal.title}`, {
@@ -263,11 +268,11 @@ function nodeFields(goal: Job, node: PlanNode, ids: Map<string, string>): Omit<N
     of: goal.id,
     key: node.key,
     tier: node.tier,
-    prompt: node.prompt,
+    prompt: node.prompt ?? "",
     after: node.after.map((key) => ids.get(key)!),
     parent: node.parent ? ids.get(node.parent) : undefined,
-    gates: node.gates,
-    touches: node.touches,
+    gates: node.gates ?? [],
+    touches: node.touches ?? [],
     needs: node.needs ?? [],
     checkpoint: node.checkpoint || undefined,
     review: node.review,
@@ -370,10 +375,11 @@ const PLAN_SPEC = `A plan is JSON:
     "after": [keys it depends on], "touches": [globs of files it changes; empty means anything, so it runs alone],
     "gates": [commands run in its worktree before it merges], "needs"?: ["display" | "gpu" | ...],
     "checkpoint"?: true to pause the goal for the user's approval once it's done,
-    "parent"?: a key, which makes milestones (a milestone's nodes wait for what it comes after; never list your own milestone in after), "review"?: a tier that reviews it before it merges
+    "parent"?: a key, which makes that node a milestone (a milestone's nodes wait for what it comes after; never list your own milestone in after), "review"?: a tier that reviews it before it merges
   }]
 }
-Rules: keys unique, no cycles, every reference resolves, every node has touches and gates (may be empty lists), non-empty prompts. Nodes whose touches overlap never run at the same time, so precise touches buy parallelism. Each node should fit comfortably in one session of its tier (under about 200k tokens of context).`;
+A milestone never runs: give it only "key", "title" and "after".
+Rules: keys unique, no cycles, every reference resolves; every node that runs has a tier, a non-empty prompt, and touches and gates (may be empty lists). Nodes whose touches overlap never run at the same time, so precise touches buy parallelism. Each node should fit comfortably in one session of its tier (under about 200k tokens of context).`;
 
 function decomposePrompt(title: string, repo: string, slug: string, brief: string): string {
   return `Decompose this goal into a plan of nodes for factory, which runs them with coding agents of three tiers, in parallel where the dependencies allow.
@@ -394,7 +400,7 @@ ${TIER_RUBRIC}
 
 ## What to do
 
-Read the repo enough to plan well. Write the plan to \`${planPath(slug)}\` in this folder, with goal.repo "${repo}" and goal.branch "goal/${slug}". Don't commit it: factory validates it, imports it and shows it to the user for approval. Prefer more, smaller nodes with precise touches over a few big ones, put the foundations first, and give each node gates that prove it works (build, tests, lint).`;
+Read the repo enough to plan well. Write the plan to \`${planPath(slug)}\` in this folder, with goal.repo "${repo}" and goal.branch "goal/${slug}". Don't commit it: factory validates it, imports it and shows it to the user for approval. Prefer more, smaller nodes with precise touches over a few big ones, put the foundations first, and give each node gates that prove it works (build, tests, lint). A plan has nothing for the user to check by hand, so don't pass \`--unverified\`; say what you're unsure of in your result.`;
 }
 
 /** Checks factory itself runs after the agent says it's done, before the job's gates: the plan files. */
@@ -474,7 +480,7 @@ ${job.prompt}
 
 ${goal.summary}
 
-Read \`${memoryPath(goal.slug)}\` first: the goal's memory, with the decisions, conventions and traps earlier nodes left. When you commit, append to it what the next node needs to know. The whole plan is in \`${planPath(goal.slug)}\`.
+Read \`${memoryPath(goal.slug)}\` first: the goal's memory, with the decisions, conventions and traps earlier nodes left. When you commit, append to it what the next node needs to know. The whole plan is in \`${planPath(goal.slug)}\`; read it, but leave it to factory.
 ${deps.length ? `\n## What this builds on\n\n${deps.join("\n")}\n` : ""}
 ## How to deliver
 
@@ -539,17 +545,9 @@ async function delivered(
       change: { goal: { ...goal, summary, gates, budget, allowUp: allowUp ?? false, replanTier } },
     });
     // Before the nodes land, so none of them starts before the user approves.
-    record(state, { type: "block", id: goalJob.id, reason: "checkpoint" });
+    checkpoint(state, goalJob.id, `the plan has ${plan.nodes.length} nodes; approve it to start`);
     await importPlan(state, plan, goalJob);
     record(state, { type: "merged", id: job.id });
-    record(state, {
-      type: "note",
-      id: goalJob.id,
-      note: {
-        kind: "factory",
-        text: `the plan has ${plan.nodes.length} nodes; approve it to start`,
-      },
-    });
     return;
   }
   if (play === REPLAN) return applyReplan(state, job, jobs, goalJob, worktree);
@@ -576,7 +574,7 @@ async function delivered(
         FIX,
         `Fix review findings: ${served.item.title}`,
         served.tier!,
-        `A review of branch \`${nodeBranch(goal, served.key!)}\` found:\n\n${findings.map((each) => `- ${each}`).join("\n")}\n\nFix each one on that branch (it's checked out here), run the checks, commit and push. Don't open a pull request.\n\nThe original task:\n\n${served.prompt}`,
+        `A review of branch \`${nodeBranch(goal, served.key!)}\` found:\n\n${findings.map((each) => `- ${each}`).join("\n")}\n\nFix each one on that branch (it's checked out here), run the checks, commit and push. Don't open a pull request, and keep what the branch added to the goal memory, \`${memoryPath(goal.slug)}\`.\n\nThe original task:\n\n${served.prompt}`,
       ),
     );
     return;
@@ -636,7 +634,7 @@ function reviewPrompt(job: Job, goal: Goal): string {
   return `Review the work on branch \`${nodeBranch(goal, job.key!)}\` (checked out here) against its task below, before factory merges it into \`${integration(goal)}\`. See the change with \`git diff origin/${integration(goal)}...HEAD\`.
 
 1. Run its checks${job.gates.length ? ` (${job.gates.map((gate) => `\`${gate}\``).join(", ")})` : ""} and read the change against the task.
-2. Look for bugs, missed cases and changes nobody asked for. Skip style the linters already cover.
+2. Look for bugs, missed cases and changes nobody asked for. Skip style the linters already cover. Additions to the goal memory, \`${memoryPath(goal.slug)}\`, are expected: every node records its decisions there. A change to the plan, \`${planPath(goal.slug)}\`, is a finding.
 3. Report with \`factory result "<summary>"\`, adding \`--followup "<finding: file, line, why it matters>"\` for each finding worth fixing. No findings: no --followup. Don't change or push anything.
 
 ## The task
@@ -793,14 +791,8 @@ async function afterMerge(
   }
   if (goalJob.state === "blocked" && goalJob.blocked === "red")
     record(state, { type: "unblock", id: goalId });
-  if (node.checkpoint) {
-    record(state, { type: "block", id: goalId, reason: "checkpoint" });
-    record(state, {
-      type: "note",
-      id: goalId,
-      note: { kind: "factory", text: `checkpoint after ${node.item.title}; approve to go on` },
-    });
-  }
+  if (node.checkpoint)
+    checkpoint(state, goalId, `checkpoint after ${node.item.title}; approve to go on`);
   const parent = node.parent && readJobs(state).find((each) => each.id === node.parent);
   if (parent && parent.state === "done") {
     await rebaseOntoMain(state, goalJob, worktree, log);
@@ -939,7 +931,7 @@ Nodes marked heavy compacted their context more than twice: split similar work s
 
 ## What to do
 
-Write the whole plan, as it should be from now on, to \`${replanPath(goal.slug)}\` in this folder (don't commit it). Keep every node that is done, running, or waiting to merge exactly as it is now. You may add nodes and change or drop those that haven't started. Changing or dropping more than a quarter of the unstarted ones stops the goal for the user's approval.
+Write the whole plan, as it should be from now on, to \`${replanPath(goal.slug)}\` in this folder (don't commit it). Keep every node that is done, running, or waiting to merge exactly as it is now. You may add nodes and change or drop those that haven't started. Changing or dropping more than a quarter of the unstarted ones stops the goal for the user's approval. A plan has nothing for the user to check by hand, so don't pass \`--unverified\`; say what you're unsure of in your result.
 
 ${PLAN_SPEC}
 
@@ -956,7 +948,7 @@ function replanProblems(plan: Plan, job: Job, jobs: Job[]): string[] {
     const now = planned.get(node.key!);
     if (!now) return [`${node.key} is ${node.state} and has to stay in the plan`];
     const same =
-      now.prompt === node.prompt &&
+      (now.prompt ?? "") === node.prompt &&
       now.tier === node.tier &&
       JSON.stringify([...now.after].sort()) === JSON.stringify(node.after.map(keyOf).sort());
     return same
@@ -1016,17 +1008,18 @@ function applyReplan(state: string, job: Job, jobs: Job[], goalJob: Job, worktre
   record(state, { type: "merged", id: job.id });
   const note = `replanned: ${plan.nodes.filter((node) => !byKey.has(node.key)).length} new, ${changed} changed or dropped`;
   record(state, { type: "note", id: goalJob.id, note: { kind: "factory", text: note } });
-  if (changed > unstarted.length / 4) {
-    record(state, { type: "block", id: goalJob.id, reason: "checkpoint" });
-    record(state, {
-      type: "note",
-      id: goalJob.id,
-      note: {
-        kind: "factory",
-        text: "the replan changed more than a quarter of what's left; approve it to go on",
-      },
-    });
-  }
+  if (changed > unstarted.length / 4)
+    checkpoint(
+      state,
+      goalJob.id,
+      "the replan changed more than a quarter of what's left; approve it to go on",
+    );
+}
+
+/** Stops the goal for the user's approval, saying why on the goal and in its notes. */
+function checkpoint(state: string, id: string, why: string): void {
+  record(state, { type: "block", id, reason: "checkpoint", why });
+  record(state, { type: "note", id, note: { kind: "factory", text: why } });
 }
 
 /** At its attempt budget a goal waits at a checkpoint; approving gives it the same budget again. */
@@ -1043,15 +1036,11 @@ function checkBudget(state: string, goalId: string): void {
         (note) => note.kind === "factory" && note.text.startsWith("budget raised"),
       ).length);
   if (used < allowed) return;
-  record(state, { type: "block", id: goalId, reason: "checkpoint" });
-  record(state, {
-    type: "note",
-    id: goalId,
-    note: {
-      kind: "factory",
-      text: `budget used: ${used} of ${allowed} attempts; approving adds ${budget} more`,
-    },
-  });
+  checkpoint(
+    state,
+    goalId,
+    `budget used: ${used} of ${allowed} attempts; approving adds ${budget} more`,
+  );
 }
 
 const attemptsUsed = (jobs: Job[], goalId: string) =>
