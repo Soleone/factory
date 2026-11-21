@@ -232,7 +232,7 @@ export async function importPlan(state: string, plan: Plan, into?: Job): Promise
       goal,
     });
   if (!into) {
-    checkpoint(state, job.id, `the plan has ${plan.nodes.length} nodes; approve it to start`);
+    checkpoint(state, job.id, planReady(plan));
     await createBranch(goal);
   }
   await commitFiles(goal, `factory: plan for ${plan.goal.title}`, {
@@ -545,7 +545,7 @@ async function delivered(
       change: { goal: { ...goal, summary, gates, budget, allowUp: allowUp ?? false, replanTier } },
     });
     // Before the nodes land, so none of them starts before the user approves.
-    checkpoint(state, goalJob.id, `the plan has ${plan.nodes.length} nodes; approve it to start`);
+    checkpoint(state, goalJob.id, planReady(plan));
     await importPlan(state, plan, goalJob);
     record(state, { type: "merged", id: job.id });
     return;
@@ -792,7 +792,11 @@ async function afterMerge(
   if (goalJob.state === "blocked" && goalJob.blocked === "red")
     record(state, { type: "unblock", id: goalId });
   if (node.checkpoint)
-    checkpoint(state, goalId, `checkpoint after ${node.item.title}; approve to go on`);
+    checkpoint(
+      state,
+      goalId,
+      `${node.item.title} is merged into ${integration(goal)}, and the plan stops here so you can check it. Approving starts the rest`,
+    );
   const parent = node.parent && readJobs(state).find((each) => each.id === node.parent);
   if (parent && parent.state === "done") {
     await rebaseOntoMain(state, goalJob, worktree, log);
@@ -1016,6 +1020,9 @@ function applyReplan(state: string, job: Job, jobs: Job[], goalJob: Job, worktre
     );
 }
 
+const planReady = (plan: Plan) =>
+  `the plan has ${plan.nodes.length} jobs, shown below. Approving starts them, and nothing runs until then; replan first if it needs changes`;
+
 /** Stops the goal for the user's approval, saying why on the goal and in its notes. */
 function checkpoint(state: string, id: string, why: string): void {
   record(state, { type: "block", id, reason: "checkpoint", why });
@@ -1039,7 +1046,7 @@ function checkBudget(state: string, goalId: string): void {
   checkpoint(
     state,
     goalId,
-    `budget used: ${used} of ${allowed} attempts; approving adds ${budget} more`,
+    `the goal used ${used} of its ${allowed} attempts. Approving gives it ${budget} more; pause or cancel it if it's going nowhere`,
   );
 }
 

@@ -9,6 +9,7 @@ import { agentModels } from "./models.ts";
 import {
   addJobs,
   addNote,
+  addOwnJob,
   answer,
   moveJob,
   queueConflicts,
@@ -54,6 +55,7 @@ import {
   type Settings,
   type Snapshot,
   type Status,
+  type Tier,
 } from "./types.ts";
 
 /** The built page; under pn dev, Vite serves it instead and proxies /api and /runs here. */
@@ -165,6 +167,8 @@ export function serve(state: string, port: number, host: string): Server {
     },
     "POST /api/jobs": (body: { items: { repo: string; id: string }[]; pin?: Preset }) =>
       addJobs(state, candidates(body.items), "pick", body.pin),
+    "POST /api/jobs/own": (body: { repo: string; prompt: string; tier: Tier; title?: string }) =>
+      addOwnJob(state, body),
     "POST /api/jobs/remove": (_, id) => removeJob(state, id),
     "POST /api/jobs/retry": (_, id) => retryJob(state, id),
     "POST /api/jobs/answer": (body: { text: string }, id) => answer(state, id, body.text),

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type { Candidates, Job, Model, Play, Preset, Snapshot } from "./backend/types.ts";
+import type { Candidates, Job, Model, Play, Preset, Snapshot, Tier } from "./backend/types.ts";
 import type { clonableRepos } from "./backend/repos.ts";
 import type { DialogAnswer } from "./pi";
 
@@ -31,6 +31,9 @@ export const api = {
   /** Without a pin, the job goes to whichever agent is free first, on its run's model and effort. */
   queue: (items: { repo: string; id: string }[], pin?: Preset) =>
     call("POST", "/api/jobs", { items, pin }),
+  /** A job of your own: a prompt for a tier, without workwork. */
+  ownJob: (job: { repo: string; prompt: string; tier: Tier; title: string }) =>
+    call<Job>("POST", "/api/jobs/own", job),
   remove: (id: string) => call("POST", `/api/jobs/${id}/remove`),
   retry: (id: string) => call("POST", `/api/jobs/${id}/retry`),
   /** Answers the question a blocked job's agent asked, which picks its session up again, or else its oldest assumption. */

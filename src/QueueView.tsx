@@ -1,6 +1,6 @@
-import { ArrowDownIcon, ArrowUpIcon, XIcon } from "lucide-react";
+import { ArrowDownIcon, ArrowUpIcon, PlusIcon, XIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import type { ReactNode, Ref } from "react";
+import { useState, type ReactNode, type Ref } from "react";
 import { api, type Act } from "@/api";
 import { TIERS, type Job, type Snapshot } from "@/backend/types.ts";
 import { Badge } from "@/components/ui/badge";
@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/empty";
 import { ItemGroup } from "@/components/ui/item";
 import { clock, itemTitle, minutesSince, pinName, tuning, WORKER_BADGE } from "@/format";
+import { NewJobDialog } from "@/NewJobDialog";
 import { Row, Section } from "@/Row";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/tooltip/tooltip";
 import { StateIcon, StatePill, TaskDetails } from "@/TaskDetails";
@@ -60,6 +61,7 @@ export function QueueView({
   act: Act;
   onCandidates: () => void;
 }) {
+  const [creating, setCreating] = useState(false);
   const { jobs, status, on, settings } = snapshot;
   const byId = new Map(jobs.map((job) => [job.id, job]));
   const picks = jobs.filter((job) => job.state === "queued" && job.source === "pick");
@@ -102,8 +104,15 @@ export function QueueView({
     </Tooltip>
   );
 
+  const newJob = (
+    <Button variant="outline" onClick={() => setCreating(true)}>
+      <PlusIcon /> New job
+    </Button>
+  );
+
   return (
     <div className="flex flex-col gap-8 pt-2">
+      <NewJobDialog act={act} open={creating} onOpenChange={setCreating} />
       {on &&
         status &&
         status.pools.map((pool) => {
@@ -205,49 +214,54 @@ export function QueueView({
             <EmptyHeader>
               <EmptyTitle>Nothing picked</EmptyTitle>
               <EmptyDescription>
-                Picks go before anything auto mode queues. Find work under Candidates.
+                Picks go before anything auto mode queues. Find work under Candidates, or write a
+                job of your own.
               </EmptyDescription>
             </EmptyHeader>
-            <EmptyContent>
+            <EmptyContent className="flex-row justify-center">
               <Button variant="outline" onClick={onCandidates}>
                 Browse candidates
               </Button>
+              {newJob}
             </EmptyContent>
           </Empty>
         ) : (
-          <ItemGroup>
-            <AnimatePresence mode="popLayout" initial={false}>
-              {picks.map((job, index) => (
-                <Glide key={job.id}>
-                  <Row
-                    leading={<StateIcon state={job.state} />}
-                    title={details(job, true)}
-                    meta={<Meta job={job} byId={byId} />}
-                  >
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      aria-label="Move up"
-                      disabled={index === 0}
-                      onClick={() => act(() => api.move(job.id, index - 1))}
+          <>
+            <div className="flex justify-end">{newJob}</div>
+            <ItemGroup>
+              <AnimatePresence mode="popLayout" initial={false}>
+                {picks.map((job, index) => (
+                  <Glide key={job.id}>
+                    <Row
+                      leading={<StateIcon state={job.state} />}
+                      title={details(job, true)}
+                      meta={<Meta job={job} byId={byId} />}
                     >
-                      <ArrowUpIcon />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      aria-label="Move down"
-                      disabled={index === picks.length - 1}
-                      onClick={() => act(() => api.move(job.id, index + 1))}
-                    >
-                      <ArrowDownIcon />
-                    </Button>
-                    {remove(job)}
-                  </Row>
-                </Glide>
-              ))}
-            </AnimatePresence>
-          </ItemGroup>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label="Move up"
+                        disabled={index === 0}
+                        onClick={() => act(() => api.move(job.id, index - 1))}
+                      >
+                        <ArrowUpIcon />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label="Move down"
+                        disabled={index === picks.length - 1}
+                        onClick={() => act(() => api.move(job.id, index + 1))}
+                      >
+                        <ArrowDownIcon />
+                      </Button>
+                      {remove(job)}
+                    </Row>
+                  </Glide>
+                ))}
+              </AnimatePresence>
+            </ItemGroup>
+          </>
         )}
       </Section>
 

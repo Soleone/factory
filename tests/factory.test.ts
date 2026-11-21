@@ -1197,6 +1197,30 @@ esac`,
     }
   });
 
+  test("serve queues a job of your own for a tier, titled by its prompt unless given one", async () => {
+    const base = setup([]);
+    const server = serve(base.state, 0, "127.0.0.1");
+    await once(server, "listening");
+    const { port } = server.address() as AddressInfo;
+    const post = (body: object) =>
+      fetch(`http://127.0.0.1:${port}/api/jobs/own`, {
+        method: "POST",
+        body: JSON.stringify({ repo: base.repo, title: "", ...body }),
+      });
+    try {
+      expect((await post({ tier: "builder", prompt: "\n# Compare runs\nRead only." })).status).toBe(
+        200,
+      );
+      expect((await post({ tier: "boss", prompt: "Do it." })).status).toBe(400);
+      expect((await post({ tier: "grunt", prompt: "  " })).status).toBe(400);
+      expect(readJobs(base.state).map((job) => [job.item.title, job.tier, job.source])).toEqual([
+        ["Compare runs", "builder", "pick"],
+      ]);
+    } finally {
+      server.close();
+    }
+  });
+
   test("serve queues cached candidates and shows the results and their logs, nothing outside runs/", async () => {
     const base = setup(["a"]);
     agents({ claude: OK });

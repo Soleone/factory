@@ -92,11 +92,21 @@ function demoGoal(at: string, run: string): Job[] {
       added: at,
       state: "blocked",
       blocked: "checkpoint",
-      why: "checkpoint after JSON format; approve to go on",
+      why: "JSON format is merged into goal/export, and the plan stops here so you can check it. Approving starts the rest",
       attempts: [],
       notes: [
-        { at, attempt: 0, kind: "factory", text: "the plan has 9 nodes; approve it to start" },
-        { at, attempt: 0, kind: "factory", text: "checkpoint after JSON format; approve to go on" },
+        {
+          at,
+          attempt: 0,
+          kind: "factory",
+          text: "the plan has 9 jobs, shown below. Approving starts them, and nothing runs until then; replan first if it needs changes",
+        },
+        {
+          at,
+          attempt: 0,
+          kind: "factory",
+          text: "JSON format is merged into goal/export, and the plan stops here so you can check it. Approving starts the rest",
+        },
       ],
       goal: {
         repo,
@@ -362,6 +372,8 @@ function dispatch(snapshot: Snapshot, route: string, body: unknown): unknown {
     case "POST /api/goals":
     case "POST /api/goals/import":
       throw new Error("The demo doesn't plan or import goals.");
+    case "POST /api/jobs/own":
+      throw new Error("The demo doesn't queue jobs of your own.");
     case "POST /api/candidates/refresh":
       snapshot.candidates.at = new Date().toISOString();
       return null;

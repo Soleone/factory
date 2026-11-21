@@ -4,11 +4,10 @@ import { basename, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { agent } from "./agents.ts";
 import {
-  addJob,
   addJobs,
+  addOwnJob,
   addNote,
   answer,
-  newId,
   openAssumptions,
   queueReview,
   readJobs,
@@ -37,7 +36,6 @@ import { logPath, turnOff, turnOn } from "./power.ts";
 import { output, pidPath, readSettings, runningPid, STATE, writeSettings } from "./state.ts";
 import {
   prUrl,
-  TIERS,
   type Confidence,
   type Item,
   type Job,
@@ -291,34 +289,14 @@ function addOwn(values: {
   title?: string;
   after?: string[];
 }): void {
-  const tier = values.tier as Tier;
-  if (!TIERS.includes(tier))
-    throw new Error(`--tier wants ${TIERS.join(", ")}, got ${values.tier}`);
-  const repo = resolve(values.repo ?? ".");
-  const prompt = readFileSync(values.prompt!, "utf8");
-  const title =
-    values.title ??
-    prompt
-      .split("\n")
-      .find((line) => line.trim())!
-      .replace(/^#+\s*/, "")
-      .slice(0, 100);
-  const job = addJob(STATE, {
-    id: newId(),
-    item: {
-      repo,
-      label: basename(repo),
-      id: `own-${Date.now()}`,
-      play: "own",
-      level: "decide",
-      title,
-    },
-    source: "pick",
-    tier,
-    prompt,
+  const job = addOwnJob(STATE, {
+    repo: resolve(values.repo ?? "."),
+    prompt: readFileSync(values.prompt!, "utf8"),
+    tier: values.tier as Tier,
+    title: values.title,
     after: values.after,
   });
-  console.log(`queued ${job.id}: ${title} (${tier})`);
+  console.log(`queued ${job.id}: ${job.item.title} (${job.tier})`);
 }
 
 function step(

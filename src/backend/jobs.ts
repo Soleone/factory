@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { workworkBranch } from "./review.ts";
 import { LEVELS, output } from "./state.ts";
 import {
@@ -15,6 +15,7 @@ import {
   type Job,
   type Note,
   type Settings,
+  type Tier,
 } from "./types.ts";
 
 /**
@@ -383,6 +384,32 @@ export const newId = () => randomBytes(4).toString("hex");
 export function addJob(state: string, job: NewJob, at = new Date().toISOString()): Job {
   append(state, { at, type: "add", job });
   return fresh(job, at);
+}
+
+/** A job of the user's own, from a prompt for a tier, without workwork. */
+export function addOwnJob(
+  state: string,
+  own: { repo: string; prompt: string; tier: Tier; title?: string; after?: string[] },
+): Job {
+  if (!TIERS.includes(own.tier)) throw new Error(`a tier is ${TIERS.join(", ")}, not ${own.tier}`);
+  const first = own.prompt.split("\n").find((line) => line.trim());
+  if (!first) throw new Error("the prompt is empty");
+  const title = own.title?.trim() || first.replace(/^#+\s*/, "").slice(0, 100);
+  return addJob(state, {
+    id: newId(),
+    item: {
+      repo: own.repo,
+      label: basename(own.repo),
+      id: `own-${Date.now()}`,
+      play: "own",
+      level: "decide",
+      title,
+    },
+    source: "pick",
+    tier: own.tier,
+    prompt: own.prompt,
+    after: own.after,
+  });
 }
 
 /**

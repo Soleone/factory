@@ -82,7 +82,6 @@ export function GoalsView({ snapshot, act }: { snapshot: Snapshot; act: Act }) {
       <GoalList
         goals={goals}
         snapshot={snapshot}
-        act={act}
         onNew={() => setCreating(true)}
         onOpen={setOpen}
       />
@@ -102,13 +101,11 @@ export function GoalsView({ snapshot, act }: { snapshot: Snapshot; act: Act }) {
 function GoalList({
   goals,
   snapshot,
-  act,
   onNew,
   onOpen,
 }: {
   goals: Job[];
   snapshot: Snapshot;
-  act: Act;
   onNew: () => void;
   onOpen: (id: string) => void;
 }) {
@@ -175,7 +172,6 @@ function GoalList({
                 </span>
               }
             >
-              {goal.blocked === "checkpoint" && <Approve goal={goal} act={act} />}
               <Button
                 variant="ghost"
                 size="icon-sm"
@@ -231,7 +227,6 @@ function GoalView({
         <h2 className="font-heading text-lg font-semibold">{goal.item.title}</h2>
         <StatePill state={goal.state} label={goalLabel(goal, nodes)} />
         <span className="ml-auto flex gap-1">
-          {goal.blocked === "checkpoint" && <Approve goal={goal} act={act} />}
           {goal.blocked === "paused" ? (
             <Button
               variant="outline"
@@ -288,9 +283,18 @@ function GoalView({
       </div>
 
       {goal.blocked === "checkpoint" && (
-        <p className="rounded-md border border-warning/50 bg-warning/10 p-3 text-sm">
-          {sentence(goal.why ?? factorySaid?.text ?? "waiting for your approval")}
-        </p>
+        <div className="flex flex-col gap-3 rounded-md border border-warning/50 bg-warning/10 p-3 text-sm sm:flex-row sm:items-center">
+          <p className="flex-1">
+            {sentence(goal.why ?? factorySaid?.text ?? "waiting for your approval")}
+          </p>
+          <Button
+            size="sm"
+            className="self-start sm:self-auto"
+            onClick={() => act(() => api.goal(goal.id, "approve"))}
+          >
+            Approve
+          </Button>
+        </div>
       )}
       {red && factorySaid && (
         <p className="rounded-md border border-destructive/40 p-3 text-sm text-destructive">
@@ -550,14 +554,6 @@ function Assumption({
         </Button>
       </form>
     </li>
-  );
-}
-
-function Approve({ goal, act }: { goal: Job; act: Act }) {
-  return (
-    <Button size="sm" onClick={() => act(() => api.goal(goal.id, "approve"))}>
-      Approve
-    </Button>
   );
 }
 
