@@ -116,7 +116,6 @@ export function ResultsView({
   onAsk: (question: string) => void;
 }) {
   const [filter, setFilter] = useQueryParam("filter", "all");
-  /** One job alone, as a link to it opens it. */
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [dismissing, setDismissing] = useState(false);
   const seen = useLastSeen();
@@ -141,7 +140,8 @@ export function ResultsView({
       </Empty>
     );
 
-  const shown = jobs.filter((job) => (FILTERS[filter] ?? FILTERS.all).shows(job, prs));
+  const { shows } = FILTERS[filter] ?? FILTERS.all;
+  const shown = jobs.filter((job) => shows(job, prs));
   const dismissible = shown.filter(canDismiss);
   const selection = dismissible.filter((job) => selected.has(job.id));
   const allSelected = selection.length === dismissible.length;
@@ -194,7 +194,7 @@ export function ResultsView({
         {dismissible.length > 0 && (
           <NeutralCheckbox
             aria-label={allSelected ? "Clear selection" : "Select all"}
-            checked={selection.length > 0 && allSelected}
+            checked={allSelected}
             disabled={dismissing}
             onCheckedChange={(checked) =>
               setSelected(new Set(checked ? dismissible.map((job) => job.id) : []))
@@ -252,16 +252,14 @@ export function ResultsView({
             job={job}
             snapshot={snapshot}
             act={act}
-            car={train[job.id]}
             onAsk={onAsk}
-            asked={snapshot.settings.chat.agent}
             unread={seen !== "" && job.attempts.at(-1)!.end > seen}
             reviewer={
               job.item.play !== "review" && !reviewed.has(itemKey(job.item))
                 ? agents.find((agent) => agent !== job.agent)
                 : undefined
             }
-            disabled={dismissing && selected.has(job.id)}
+            dismissing={dismissing && selected.has(job.id)}
             selection={
               canDismiss(job) && (
                 <NeutralCheckbox
@@ -283,29 +281,25 @@ function Result({
   job,
   snapshot,
   act,
-  car,
   onAsk,
-  asked,
   unread,
   reviewer,
-  disabled: dismissing,
+  dismissing,
   selection,
 }: {
   job: Job;
   snapshot: Snapshot;
   act: Act;
-  car?: TrainCar;
   onAsk: (question: string) => void;
-  /** The agent the Plan chat talks to. */
-  asked: string;
   /** It ended since the user last looked. */
   unread: boolean;
   /** Another agent to review its PR, unless it has a review already. */
   reviewer?: string;
-  disabled: boolean;
+  dismissing: boolean;
   selection: ReactNode;
 }) {
   const [pending, setPending] = useState<"merge" | "rebase" | "close">();
+  const car = snapshot.train[job.id];
   const last = job.attempts.at(-1)!;
   const url = prUrl(job);
   const pr = url ? snapshot.prs[url] : undefined;
@@ -406,7 +400,7 @@ function Result({
                 )}
                 {question && (
                   <Button variant="outline" size="sm" onClick={() => onAsk(question)}>
-                    Ask {agentName(asked)}
+                    Ask {agentName(snapshot.settings.chat.agent)}
                   </Button>
                 )}
                 {retry}
