@@ -50,8 +50,10 @@ export type Settings = {
   idle: number;
   /** Each tier's presets by id, in the order they're tried. */
   tiers: Record<Tier, string[]>;
-  /** Where goals and everything under them live; workwork jobs always stay local. */
+  /** tasks: goals and everything under them are mirrored into Tasks, both ways; workwork jobs stay out. */
   store: "local" | "tasks";
+  /** The Tasks home and CLI the mirror uses, and the category its goals get. */
+  tasks?: { home: string; cli?: string; category?: string };
   /** What this machine's workers can verify with, like display, gpu or android-emulator. */
   capabilities: string[];
   /** Environment per repo path for the agents and gates that work it. */

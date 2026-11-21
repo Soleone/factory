@@ -20,6 +20,7 @@ import {
 } from "./jobs.ts";
 import { turnOff, turnOn } from "./power.ts";
 import { closePr, mergePr, prCache, readPrDetails, rebasePr } from "./review.ts";
+import { mirrorTasks } from "./tasksStore.ts";
 import { mergeTrain } from "./train.ts";
 import {
   checkSettings,
@@ -64,6 +65,7 @@ export function serve(state: string, port: number, host: string): Server {
     (id, text) => addNote(state, id, { kind: "train", text }),
   );
   const planner = chat(state);
+  let stopMirror = mirrorTasks(state, readSettings(state), console.log);
   // Listing takes a second or two per agent, and the lists rarely change while serve runs.
   const models = new Map<string, Promise<Model[]>>();
   function modelsOf(name: string): Promise<Model[]> {
@@ -179,6 +181,8 @@ export function serve(state: string, port: number, host: string): Server {
       const before = JSON.stringify(readSettings(state).chat);
       writeSettings(state, checkSettings(body));
       if (JSON.stringify(body.chat) !== before) planner.reset();
+      stopMirror();
+      stopMirror = mirrorTasks(state, readSettings(state), console.log);
     },
     "POST /api/on": (body: Pick<Settings, "agents" | "limit" | "until">) => {
       checkSettings({ ...readSettings(state), ...body });
@@ -227,11 +231,13 @@ export function serve(state: string, port: number, host: string): Server {
         .writeHead(400, { "content-type": "application/json" })
         .end(JSON.stringify({ error: (error as Error).message }));
     }
-  }).listen(port, host, () => {
-    console.log(`factory: serving http://${host}:${port}`);
-    if (host !== "127.0.0.1" && host !== "localhost")
-      console.log("factory: anyone who reaches this address can run agents on this machine");
-  });
+  })
+    .on("close", () => stopMirror())
+    .listen(port, host, () => {
+      console.log(`factory: serving http://${host}:${port}`);
+      if (host !== "127.0.0.1" && host !== "localhost")
+        console.log("factory: anyone who reaches this address can run agents on this machine");
+    });
 }
 
 function snapshot(

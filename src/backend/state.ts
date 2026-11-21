@@ -98,6 +98,8 @@ export function checkSettings(raw: Partial<Settings> & { timeout?: number }): Se
   }
   if (settings.store !== "local" && settings.store !== "tasks")
     throw new Error(`store wants local or tasks, got ${String(settings.store)}`);
+  if (settings.store === "tasks" && !settings.tasks?.home)
+    throw new Error("store tasks wants tasks.home, the Tasks home to mirror goals into");
   for (const level of settings.auto.levels)
     if (!LEVELS.includes(level)) throw new Error(`unknown level ${level}`);
   return settings;

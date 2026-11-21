@@ -35,32 +35,32 @@ A plan describes one goal as a graph of nodes, for `factory goal import` (or `fa
 
 ## Goal
 
-| Field | Meaning |
-| --- | --- |
-| `title` | Shown on the page and in the final PR. |
-| `repo` | Absolute path of a git clone with an `origin`. |
-| `branch` | Optional, `goal/<slug>`: the integration branch, created on origin from its default branch. Without it the slug comes from the title. |
-| `summary` | Every node's prompt starts from it. It is also the start of the goal memory, `.factory/<slug>.md`. |
-| `gates` | Commands run on the integration branch after every merge into it. A failing one pauses the goal and queues a fix. |
-| `budget` | Optional. At `attempts` attempts the goal waits for approval; approving adds the same again. |
-| `allowUp` | Optional, default false. A node may run on a higher tier than its own when its own is busy or limited, never on a lower one. |
-| `replanTier` | Optional, default `builder`: the tier replans run on. |
+| Field        | Meaning                                                                                                                               |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `title`      | Shown on the page and in the final PR.                                                                                                |
+| `repo`       | Absolute path of a git clone with an `origin`.                                                                                        |
+| `branch`     | Optional, `goal/<slug>`: the integration branch, created on origin from its default branch. Without it the slug comes from the title. |
+| `summary`    | Every node's prompt starts from it. It is also the start of the goal memory, `.factory/<slug>.md`.                                    |
+| `gates`      | Commands run on the integration branch after every merge into it. A failing one pauses the goal and queues a fix.                     |
+| `budget`     | Optional. At `attempts` attempts the goal waits for approval; approving adds the same again.                                          |
+| `allowUp`    | Optional, default false. A node may run on a higher tier than its own when its own is busy or limited, never on a lower one.          |
+| `replanTier` | Optional, default `builder`: the tier replans run on.                                                                                 |
 
 ## Nodes
 
-| Field | Meaning |
-| --- | --- |
-| `key` | Unique in the plan: lowercase letters, digits, `.`, `_`, `-`. Names the node's branch, `node/<slug>/<key>`. |
-| `title` | One line. |
-| `tier` | `communicator`, `builder` or `grunt` (below). |
-| `prompt` | The task, self-contained. Factory adds the goal summary, the memory file, what the node's dependencies delivered, and how to deliver. |
-| `after` | Keys this node waits for. A key with children (a milestone) is done when they all are. |
-| `touches` | Globs of files the node changes. Nodes whose globs overlap never run at the same time. An empty list means it may touch anything, so it runs alone. |
-| `gates` | Commands run in the node's worktree when its agent stops; it only counts as done when they pass. A failing gate goes back to the agent, up to two times. |
-| `needs` | Optional: capabilities to verify with, like `display`, `gpu` or `android-emulator`. A node whose needs no worker has still runs, and lands on the unverified checklist. |
-| `checkpoint` | Optional: once this node merges, the goal waits for the user's approval. |
-| `parent` | Optional key: makes the parent a milestone. A milestone done rebases the integration branch onto main and queues a replan. |
-| `review` | Optional tier: before the node merges, an agent of that tier reviews its branch; findings become a fix on it. |
+| Field        | Meaning                                                                                                                                                                 |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `key`        | Unique in the plan: lowercase letters, digits, `.`, `_`, `-`. Names the node's branch, `node/<slug>/<key>`.                                                             |
+| `title`      | One line.                                                                                                                                                               |
+| `tier`       | `communicator`, `builder` or `grunt` (below).                                                                                                                           |
+| `prompt`     | The task, self-contained. Factory adds the goal summary, the memory file, what the node's dependencies delivered, and how to deliver.                                   |
+| `after`      | Keys this node waits for. A key with children (a milestone) is done when they all are.                                                                                  |
+| `touches`    | Globs of files the node changes. Nodes whose globs overlap never run at the same time. An empty list means it may touch anything, so it runs alone.                     |
+| `gates`      | Commands run in the node's worktree when its agent stops; it only counts as done when they pass. A failing gate goes back to the agent, up to two times.                |
+| `needs`      | Optional: capabilities to verify with, like `display`, `gpu` or `android-emulator`. A node whose needs no worker has still runs, and lands on the unverified checklist. |
+| `checkpoint` | Optional: once this node merges, the goal waits for the user's approval.                                                                                                |
+| `parent`     | Optional key: makes the parent a milestone. A milestone done rebases the integration branch onto main and queues a replan.                                              |
+| `review`     | Optional tier: before the node merges, an agent of that tier reviews its branch; findings become a fix on it.                                                           |
 
 ## Tiers
 

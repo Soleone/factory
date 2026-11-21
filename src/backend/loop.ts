@@ -15,6 +15,7 @@ import { basename, join } from "node:path";
 import { agent as makeAgent, classify, resetTime, type Agent } from "./agents.ts";
 import { keepWork, release } from "./git.ts";
 import { piWindows } from "./models.ts";
+import { mirrorTasks } from "./tasksStore.ts";
 import { afterAttempt, builtinCheck, prepare } from "./goals.ts";
 import { addJobs, autoPicks, endJob, ready, readJobs, record, startJob } from "./jobs.ts";
 import { findPr } from "./review.ts";
@@ -626,6 +627,7 @@ export async function run(options: RunOptions): Promise<string> {
   process.on("SIGTERM", handOff);
   process.on("SIGINT", kill);
   options.signal?.addEventListener("abort", aborted);
+  const stopMirror = mirrorTasks(state, settings, log);
   writeStatus();
   try {
     await Promise.all(slots.map((slot) => work(slot, handed.get(slot))));
@@ -636,6 +638,7 @@ export async function run(options: RunOptions): Promise<string> {
     process.off("SIGTERM", handOff);
     process.off("SIGINT", kill);
     options.signal?.removeEventListener("abort", aborted);
+    stopMirror();
     await topping;
     writeStatus();
   }
