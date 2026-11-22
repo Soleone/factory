@@ -36,7 +36,8 @@ export function Row({
         />
       )}
       {leading && <ItemMedia>{leading}</ItemMedia>}
-      <ItemContent>
+      {/* min-w-0 lets long text truncate instead of wrapping the content under the icon. */}
+      <ItemContent className="min-w-0">
         <ItemTitle>{title}</ItemTitle>
         <ItemDescription>{meta}</ItemDescription>
         {below}

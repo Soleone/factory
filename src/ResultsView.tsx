@@ -417,7 +417,7 @@ function Result({
         </>
       }
       meta={
-        <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <span className="flex min-w-0 items-center gap-2">
           <StatePill
             state={state}
             label={state === "failed" && last.outcome !== "failed" ? last.outcome : undefined}
@@ -470,7 +470,7 @@ function Facts({
   car?: TrainCar;
 }) {
   const result = job.notes.findLast((note) => note.kind === "result");
-  const checks = pr?.state === "OPEN" && CHECKS[pr.checks];
+  const checks = pr?.state === "OPEN" && pr.checks !== "none" && CHECKS[pr.checks];
   const facts: ReactNode[] = url
     ? [
         pr?.state === "OPEN" && (pr.attention ?? job.item.attention),
