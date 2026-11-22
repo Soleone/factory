@@ -11,6 +11,7 @@ import { api, type Act } from "@/api";
 import {
   presetId,
   TIERS,
+  USAGE_POOLS,
   type Preset,
   type Settings,
   type Snapshot,
@@ -26,7 +27,14 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
+import {
+  Field,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+  FieldLegend,
+  FieldSet,
+} from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -131,6 +139,10 @@ function SettingsForm({
                   onChange={(event) => setDraft({ ...draft, idle: Number(event.target.value) })}
                 />
               </Field>
+              <ReserveFields
+                value={draft.reserves}
+                onChange={(reserves) => setDraft({ ...draft, reserves })}
+              />
             </FieldGroup>
           </StackedTabsContent>
           <StackedTabsContent value="presets">
@@ -334,6 +346,47 @@ function StackedTabsContent(props: ComponentProps<typeof TabsContent>) {
       className="col-start-1 row-start-1 data-hidden:invisible"
       {...props}
     />
+  );
+}
+
+/** The percent of each pool's 5-hour window kept for other apps on the account; empty keeps none. */
+function ReserveFields({
+  value,
+  onChange,
+}: {
+  value: Settings["reserves"];
+  onChange: (reserves: Settings["reserves"]) => void;
+}) {
+  const set = (pool: string, text: string) => {
+    const reserves = { ...value };
+    if (text === "") delete reserves[pool];
+    else reserves[pool] = Number(text);
+    onChange(reserves);
+  };
+  return (
+    <FieldSet>
+      <FieldLegend variant="label">Reserve</FieldLegend>
+      <FieldDescription>
+        Percent of a pool's 5-hour window to leave for other apps. Once it's reached, the pool
+        starts nothing new until the window resets; jobs already running finish, so leave room for
+        them.
+      </FieldDescription>
+      {USAGE_POOLS.map((pool) => (
+        <Field key={pool} orientation="horizontal">
+          <FieldLabel htmlFor={`reserve-${pool}`}>{pool}</FieldLabel>
+          <Input
+            id={`reserve-${pool}`}
+            type="number"
+            className="w-20"
+            min={0}
+            max={99}
+            placeholder="none"
+            value={value[pool] ?? ""}
+            onChange={(event) => set(pool, event.target.value)}
+          />
+        </Field>
+      ))}
+    </FieldSet>
   );
 }
 

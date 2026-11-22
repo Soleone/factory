@@ -27,6 +27,7 @@ Needs node 22+, git, [workwork](https://github.com/Soleone/workwork) 0.3 or late
 
 - Picks go first, in the order you give them; auto jobs follow. While the factory is on, auto mode keeps up to 5 of its jobs per worker queued, cheapest attention first, with repos taking turns, and never re-queues a candidate that already had a job.
 - **Limits:** a limit of 1 (the default) stops a pool at its first usage-limit hit, so only the current allowance gets used. A limit of 2 waits for one reset; "none" always waits. Three quick failures in a row stop a worker, so a broken login can't burn through the queue.
+- **Reserves:** `reserves` keeps a percent of a pool's 5-hour window for other apps on the same subscription. Once the window reaches it, the pool starts nothing new until the window resets; jobs already running finish, so leave room for them. Factory reads the window at most once a minute, for `claude` and pi's `anthropic` and `openai-codex`; when a read fails, nothing is held and the usage-limit hits still apply.
 - **Failures:** a job that fails gets one more attempt; then it waits for you to retry it, and jobs that wait on it are held until then.
 - **Reviewing results:** each result links its PR. From the page you can read its description and diff, merge it, rebase it, or close it, and put several on the **merge train**, which merges them one after another per repo, rebasing as it goes. A rebase that stops on real conflicts queues a job to resolve them.
 
@@ -118,6 +119,7 @@ Run options: `--agents claude,pi` (a worker each, for jobs without a tier), `--l
   ],
   "tiers": { "communicator": ["opus"], "builder": ["sol", "opus"], "grunt": ["luna", "haiku"] },
   "limit": 1,
+  "reserves": { "openai-codex": 5 },
   "idle": 10,
   "capabilities": ["display"],
   "env": {

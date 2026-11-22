@@ -7,6 +7,7 @@ import { AGENT_NAMES } from "./agents.ts";
 import {
   presetId,
   TIERS,
+  USAGE_POOLS,
   type Candidates,
   type Item,
   type Preset,
@@ -43,6 +44,7 @@ const DEFAULTS: Settings = {
   chat: { agent: "pi" },
   presets: [],
   limit: 1,
+  reserves: {},
   idle: 10,
   tiers: { communicator: [], builder: [], grunt: [] },
   store: "local",
@@ -84,6 +86,14 @@ export function checkSettings(raw: Partial<Settings> & { timeout?: number }): Se
     throw new Error("settings need at least one agent");
   if (settings.limit !== null && !(Number.isInteger(settings.limit) && settings.limit > 0))
     throw new Error(`limit wants a whole number above 0 or null, got ${settings.limit}`);
+  for (const [pool, reserve] of Object.entries(settings.reserves)) {
+    if (!(USAGE_POOLS as readonly string[]).includes(pool))
+      throw new Error(
+        `can't read ${pool}'s usage to keep a reserve (can: ${USAGE_POOLS.join(", ")})`,
+      );
+    if (!(Number.isInteger(reserve) && reserve >= 0 && reserve < 100))
+      throw new Error(`reserve for ${pool} wants a whole percent from 0 to 99, got ${reserve}`);
+  }
   if (settings.until !== undefined && !/^\d{1,2}:\d{2}$/.test(settings.until))
     throw new Error(`until wants HH:MM, got ${settings.until}`);
   if (!(Number.isInteger(settings.idle) && settings.idle > 0))

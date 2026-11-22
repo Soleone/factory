@@ -29,6 +29,7 @@ import {
   workersOf,
 } from "./state.ts";
 import { noFacts, readStream, type Facts } from "./stream.ts";
+import { fiveHour, type Window } from "./usage.ts";
 import {
   presetId,
   TIERS,
@@ -62,6 +63,8 @@ export type RunOptions = {
   pollMs?: number;
   /** Tests record the waits for a limit reset instead of sleeping through them. */
   sleep?: (ms: number) => Promise<void>;
+  /** Reads a pool's 5-hour window; tests swap in their own. */
+  usage?: (pool: string) => Promise<Window>;
 };
 
 const MINUTE = 60_000;
@@ -124,6 +127,8 @@ export async function run(options: RunOptions): Promise<string> {
   let killing = false;
   let topping: Promise<void> | undefined;
   const borrowed = new Set<string>();
+  /** Each pool's last usage read, shared by its workers so one read serves them all. */
+  const reads = new Map<string, { at: number; done: Promise<void> }>();
   const piPresets = slots
     .map((slot) => slot.preset)
     .filter((preset) => preset.agent === "pi" && preset.model);
@@ -189,6 +194,32 @@ export async function run(options: RunOptions): Promise<string> {
       const timer = setTimeout(wake, ms);
       wakers.add(wake);
     });
+  }
+
+  /**
+   * Holds a pool until its 5-hour window resets once the window reaches the pool's reserve, so
+   * other apps on the account keep some. Reads at most once a minute; a failed read holds nothing.
+   * Reads the settings each time, so a changed reserve applies at once.
+   */
+  function keepReserve(pool: Pool): Promise<void> {
+    const reserve = readSettings(state).reserves[pool.name];
+    const last = reads.get(pool.name);
+    if (reserve === undefined || pool.until) return Promise.resolve();
+    if (last && Date.now() - last.at < MINUTE) return last.done;
+    const done = (options.usage ?? fiveHour)(pool.name).then(
+      ({ used, resets }) => {
+        pool.used = used;
+        if (used >= 100 - reserve && resets > Date.now()) {
+          const wake = Math.min(resets + 2 * MINUTE, options.until ?? Infinity);
+          Object.assign(pool, { until: new Date(wake).toISOString(), reserved: true });
+          log(`${pool.name} used ${used}% of its 5 hours, keeps ${reserve}% until ${pool.until}`);
+        }
+        writeStatus();
+      },
+      (error: Error) => log(`can't read ${pool.name}'s usage: ${error.message}`),
+    );
+    reads.set(pool.name, { at: Date.now(), done });
+    return done;
   }
 
   /** Auto mode's part: keep a few of its jobs queued. Reads settings each time, so the toggle applies at once. */
@@ -274,10 +305,11 @@ export async function run(options: RunOptions): Promise<string> {
     while (!ended()) {
       topUp();
       if (pool.stopped) return set(worker, { state: "stopped", reason: pool.stopped });
+      if (!handed) await keepReserve(pool);
       if (pool.until) {
         set(worker, { state: "sleeping", until: pool.until });
         await (options.sleep ?? nap)(Math.max(0, Date.parse(pool.until) - Date.now()));
-        pool.until = undefined;
+        Object.assign(pool, { until: undefined, reserved: undefined });
         continue;
       }
       let job: Job | undefined;

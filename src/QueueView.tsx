@@ -76,13 +76,19 @@ function Workers({ status, settings }: { status: Status; settings: Settings }) {
       {status.pools.map((pool) => {
         const workers = status.workers.filter((worker) => worker.pool === pool.name);
         const free = workers.filter((worker) => !worker.job);
-        const pause = pool.stopped ?? (pool.until ? `sleeps until ${clock(pool.until)}` : "");
+        const pause =
+          pool.stopped ??
+          (pool.until
+            ? `${pool.reserved ? "keeps its reserve" : "sleeps"} until ${clock(pool.until)}`
+            : "");
         return (
           <section key={pool.name} className="flex flex-col gap-1.5 text-sm">
             <h2 className="flex items-baseline justify-between gap-2 font-medium text-muted-foreground">
               {pool.name}
               <span className="text-xs font-normal tabular-nums">
                 {free.length} of {workers.length} free · limits {pool.limits}/{status.limit ?? "∞"}
+                {pool.used !== undefined &&
+                  ` · ${pool.used}% of 5h, reserve ${settings.reserves[pool.name] ?? 0}%`}
               </span>
             </h2>
             {pause && <p className="text-xs text-warning">{pause}</p>}

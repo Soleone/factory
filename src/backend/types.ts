@@ -49,6 +49,8 @@ export type Settings = {
   limit: number | null;
   /** HH:MM local time after which a run starts nothing new. */
   until?: string;
+  /** Percent of a pool's 5-hour window left for other apps: past it, the pool starts nothing new until the reset. */
+  reserves: Record<string, number>;
   /** Minutes without a sign of life from an agent before its attempt ends as a timeout. */
   idle: number;
   /** Each tier's presets by id, in the order they're tried. */
@@ -255,8 +257,20 @@ export type Worker = Tuning & {
   context?: number;
 };
 
+/** The pools whose 5-hour usage factory can read, so a reserve can be kept on them. */
+export const USAGE_POOLS = ["claude", "anthropic", "openai-codex"] as const;
+
 /** What one usage limit counts against: an account at a provider. */
-export type Pool = { name: string; limits: number; until?: string; stopped?: string };
+export type Pool = {
+  name: string;
+  limits: number;
+  until?: string;
+  stopped?: string;
+  /** Percent of its 5-hour window used when last read; only read for a pool with a reserve. */
+  used?: number;
+  /** Its until is the reset of a window that reached its reserve, not a limit hit. */
+  reserved?: boolean;
+};
 
 /** What status.json holds while a run is on, and after it ended. */
 export type Status = {

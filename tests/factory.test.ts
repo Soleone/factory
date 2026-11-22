@@ -687,6 +687,42 @@ ${lines
     expect(status(base.state).workers[0]).toMatchObject({ reason: "limit 2 of 2" });
   });
 
+  test("a pool into its reserve starts nothing until its 5-hour window resets", async () => {
+    const base = setup(["a"]);
+    agents({ claude: OK });
+    base.pick("a");
+    writeSettings(base.state, { ...readSettings(base.state), reserves: { claude: 5 } });
+    const resets = Date.now() + 3_600_000;
+    const wakes: number[] = [];
+    const [job] = await work({
+      ...options(base),
+      usage: async () => ({ used: 96, resets }),
+      sleep: async (ms) => void wakes.push(Date.now() + ms),
+    });
+    expect(wakes).toHaveLength(1);
+    expect(Math.abs(wakes[0] - (resets + 2 * MINUTE))).toBeLessThan(100);
+    expect(job.state).toBe("done");
+    expect(status(base.state).pools).toEqual([{ name: "claude", limits: 0, used: 96 }]);
+  });
+
+  test("a pool below its reserve works on, and a failed usage read holds nothing", async () => {
+    const base = setup(["a", "b"]);
+    agents({ claude: OK });
+    base.pick("a");
+    base.pick("b");
+    writeSettings(base.state, { ...readSettings(base.state), reserves: { claude: 5 } });
+    const wakes: number[] = [];
+    const jobs = await work({
+      ...options(base),
+      usage: async () => {
+        throw new Error("401");
+      },
+      sleep: async (ms) => void wakes.push(ms),
+    });
+    expect(jobs.map((job) => job.state)).toEqual(["done", "done"]);
+    expect(wakes).toHaveLength(0);
+  });
+
   test("without a limit it waits for every reset", async () => {
     const base = setup(["a"]);
     const counter = join(scratch, `count-${Date.now()}`);

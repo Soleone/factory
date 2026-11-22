@@ -513,8 +513,15 @@ function status(): void {
     const until = status.until ? `, until ${clock(status.until)}` : "";
     console.log(`run ${status.run}, limit ${status.limit ?? "none"}${until}`);
     for (const pool of status.pools) {
-      const pause = pool.stopped ?? (pool.until ? `sleeps until ${clock(pool.until)}` : "");
-      console.log(`  pool ${pool.name}: limits hit ${pool.limits}${pause ? `, ${pause}` : ""}`);
+      const pause =
+        pool.stopped ??
+        (pool.until
+          ? `${pool.reserved ? "keeps its reserve" : "sleeps"} until ${clock(pool.until)}`
+          : "");
+      const used = pool.used === undefined ? "" : `, ${pool.used}% of 5h used`;
+      console.log(
+        `  pool ${pool.name}: limits hit ${pool.limits}${used}${pause ? `, ${pause}` : ""}`,
+      );
       for (const worker of status.workers.filter((each) => each.pool === pool.name)) {
         const what =
           worker.job ?? (worker.until ? `until ${clock(worker.until)}` : (worker.reason ?? ""));

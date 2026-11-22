@@ -233,6 +233,7 @@ function seed(): Snapshot {
         { agent: "pi", model: "openai-codex/gpt-6-luna", effort: "max", id: "luna", workers: 3 },
       ],
       limit: 2,
+      reserves: {},
       idle: 10,
       tiers: { communicator: ["opus"], builder: ["sol", "opus"], grunt: ["luna"] },
       store: "local",
