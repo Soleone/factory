@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.1](https://github.com/Soleone/factory/compare/v0.4.0...v0.4.1) (2026-11-22)
+
+### Features
+
+* **goals:** clearer goal page and list ([cf71f57](https://github.com/Soleone/factory/commit/cf71f57512a04ec827848f0b512ff9bc572b3527))
+* **goals:** edit the plan before approving, and approve with the full picture ([6f1ad05](https://github.com/Soleone/factory/commit/6f1ad05ae655f5ba63ff5a29f68e89429a4f0738))
+* **goals:** plan as queue-style rows, tier colors, goal jobs in the queue ([54e0927](https://github.com/Soleone/factory/commit/54e09277234ee59ee7fc4beb9d1151444e838e34))
+* **results:** sections for what needs you, grouped by day ([7a41f55](https://github.com/Soleone/factory/commit/7a41f55a66a679e39b352c41b6637007a690b89c))
+
+### Bug Fixes
+
+* **candidates:** spin the refresh icon while workwork is asked ([dafe692](https://github.com/Soleone/factory/commit/dafe6921bbe0bfdd018b04b1034810e8fe10818c))
+* **results:** keep each result on one line, truncating long text ([fef86ee](https://github.com/Soleone/factory/commit/fef86eefa48d3be14bd6b7d0e85840e45912ed4e))
+
 ## [0.4.0](https://github.com/Soleone/factory/compare/v0.3.3...v0.4.0) (2026-11-22)
 
 ### Features
