@@ -63,9 +63,6 @@ function Factory({
   const [tab, setTab] = useQueryParam("tab", "queue");
   const { isMobile, setOpen, setOpenMobile } = useSidebar();
   const { on, status } = snapshot;
-  const queued = snapshot.jobs.filter(
-    (job) => job.state === "queued" && !job.of && !job.goal,
-  ).length;
   const goals = snapshot.jobs.filter(
     (job) => job.goal && job.state !== "removed" && job.state !== "done",
   );
@@ -117,7 +114,7 @@ function Factory({
             <TabsList>
               <TabsTrigger value="queue">
                 <ListOrdered />
-                Queue{queued ? ` (${queued})` : ""}
+                Queue
               </TabsTrigger>
               <TabsTrigger value="goals">
                 <Workflow />
