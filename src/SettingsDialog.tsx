@@ -1,4 +1,4 @@
-import { type ComponentProps, useEffect, useState } from "react";
+import { type ComponentProps, Fragment, useEffect, useState } from "react";
 import {
   ArrowDownIcon,
   ArrowUpIcon,
@@ -18,6 +18,18 @@ import {
   type Tier,
 } from "@/backend/types.ts";
 import { Button } from "@/components/ui/button";
+import {
+  Combobox,
+  ComboboxChip,
+  ComboboxChips,
+  ComboboxChipsInput,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxItem,
+  ComboboxList,
+  ComboboxValue,
+  useComboboxAnchor,
+} from "@/components/ui/combobox";
 import {
   Dialog,
   DialogContent,
@@ -182,35 +194,23 @@ function SettingsForm({
               </Field>
               <Field>
                 <FieldLabel>Blueprints</FieldLabel>
-                <ToggleGroup
-                  multiple
-                  variant="outline"
-                  className="flex-wrap"
+                <MultiPicker
+                  items={blueprints}
                   value={auto.blueprints}
-                  onValueChange={(blueprints) => setAuto({ blueprints })}
-                >
-                  {blueprints.map((blueprint) => (
-                    <ToggleGroupItem key={blueprint} value={blueprint}>
-                      {blueprint}
-                    </ToggleGroupItem>
-                  ))}
-                </ToggleGroup>
+                  onChange={(blueprints) => setAuto({ blueprints })}
+                  placeholder="All blueprints"
+                  label={(blueprint) => blueprint}
+                />
               </Field>
               <Field>
                 <FieldLabel>Repos</FieldLabel>
-                <ToggleGroup
-                  multiple
-                  variant="outline"
-                  className="flex-wrap"
+                <MultiPicker
+                  items={repos}
                   value={auto.repos}
-                  onValueChange={(repos) => setAuto({ repos })}
-                >
-                  {repos.map((repo) => (
-                    <ToggleGroupItem key={repo} value={repo}>
-                      {repoName(repo)}
-                    </ToggleGroupItem>
-                  ))}
-                </ToggleGroup>
+                  onChange={(repos) => setAuto({ repos })}
+                  placeholder="All repos"
+                  label={repoName}
+                />
               </Field>
             </FieldGroup>
           </StackedTabsContent>
@@ -502,5 +502,55 @@ function TierFields({
         );
       })}
     </FieldGroup>
+  );
+}
+
+/** A searchable pick of many: chips for what's chosen, type to filter the rest. */
+function MultiPicker({
+  items,
+  value,
+  onChange,
+  placeholder,
+  label,
+}: {
+  items: string[];
+  value: string[];
+  onChange: (value: string[]) => void;
+  placeholder: string;
+  label: (item: string) => string;
+}) {
+  const anchor = useComboboxAnchor();
+  return (
+    <Combobox
+      multiple
+      autoHighlight
+      items={items}
+      value={value}
+      onValueChange={onChange}
+      itemToStringLabel={label}
+    >
+      <ComboboxChips ref={anchor}>
+        <ComboboxValue>
+          {(chosen: string[]) => (
+            <Fragment>
+              {chosen.map((item) => (
+                <ComboboxChip key={item}>{label(item)}</ComboboxChip>
+              ))}
+              <ComboboxChipsInput placeholder={chosen.length ? "" : placeholder} />
+            </Fragment>
+          )}
+        </ComboboxValue>
+      </ComboboxChips>
+      <ComboboxContent anchor={anchor}>
+        <ComboboxEmpty>Nothing matches</ComboboxEmpty>
+        <ComboboxList>
+          {(item: string) => (
+            <ComboboxItem key={item} value={item}>
+              {label(item)}
+            </ComboboxItem>
+          )}
+        </ComboboxList>
+      </ComboboxContent>
+    </Combobox>
   );
 }
