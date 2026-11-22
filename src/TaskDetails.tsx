@@ -33,7 +33,7 @@ import { MARKDOWN } from "@/PrReview";
 import { PrLine, TrainLine } from "@/ResultsView";
 
 /** From `workwork --help`. */
-const ATTENTION: Record<string, string> = {
+export const ATTENTION: Record<string, string> = {
   none: "a check defines correct, so a digest is enough",
   skim: "same behavior and a small diff, to skim and accept",
   decide: "changes behavior or needs your product judgment",
@@ -63,7 +63,8 @@ const STATES = {
     icon: "text-warning",
     pill: "bg-warning text-background",
   },
-  review: { Icon: GitPullRequestIcon, icon: "text-primary", pill: "bg-primary/15 text-primary" },
+  // Neutral, so yellow stays for what blocks work: a question waiting for you.
+  review: { Icon: GitPullRequestIcon, icon: "text-foreground", pill: "bg-muted text-foreground" },
   done: { Icon: CircleCheckIcon, icon: "text-success", pill: "bg-success/15 text-success" },
   merged: { Icon: GitMergeIcon, icon: "text-success", pill: "bg-success/15 text-success" },
   failed: {

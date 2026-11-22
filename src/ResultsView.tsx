@@ -1,4 +1,5 @@
 import {
+  ChevronDownIcon,
   CircleCheckIcon,
   CircleDashedIcon,
   CircleIcon,
@@ -8,7 +9,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { api, type Act } from "@/api";
-import { useQueryParam } from "@/hooks/use-query-param";
+import { dayOf } from "@/ActivityView";
 import { PrReview } from "@/PrReview";
 import {
   canMerge,
@@ -23,38 +24,17 @@ import {
   type TrainCar,
 } from "@/backend/types.ts";
 import { Button } from "@/components/ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { NeutralCheckbox } from "@/components/variants/checkbox";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { ItemGroup } from "@/components/ui/item";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/tooltip/tooltip";
-import { agentName, ago, itemTitle } from "@/format";
+import { agentName, clock, itemTitle } from "@/format";
 import { Answer } from "@/JobNotes";
 import { Row } from "@/Row";
-import { Choice } from "@/RunFields";
-import { StateIcon, StatePill, TaskDetails, taskState } from "@/TaskDetails";
+import { ATTENTION, StatePill, TaskDetails, taskState, type TaskState } from "@/TaskDetails";
 
 type Prs = Snapshot["prs"];
-
-/** A PR not fetched yet counts as open, so it doesn't vanish from review while gh answers. */
-const FILTERS: Record<string, { label: string; shows: (job: Job, prs: Prs) => boolean }> = {
-  blocked: { label: "Waiting for you", shows: (job) => job.state === "blocked" },
-  review: {
-    label: "Needs review",
-    shows: (job, prs) => {
-      const url = prUrl(job);
-      return url !== undefined && (prs[url]?.state ?? "OPEN") === "OPEN";
-    },
-  },
-  failed: { label: "Failed", shows: (job) => job.state === "failed" },
-  nothing: {
-    label: "Nothing to do",
-    shows: (job) => {
-      const last = job.attempts.at(-1)!;
-      return job.state === "done" && !last.url && !last.branch;
-    },
-  },
-  all: { label: "All", shows: () => true },
-};
 
 const CHECKS = {
   passing: { label: "checks passing", Icon: CircleCheckIcon, className: "text-success" },
@@ -65,6 +45,15 @@ const CHECKS = {
 
 function canDismiss(job: Job) {
   return job.state === "done" || job.state === "failed" || job.state === "blocked";
+}
+
+const hasBranch = (job: Job) => job.attempts.some((attempt) => attempt.branch);
+
+/** Results that wait on the user come first; the rest are history. */
+function sectionOf(state: TaskState) {
+  if (state === "blocked" || state === "failed" || state === "review") return "needs";
+  if (state === "queued" || state === "running") return "running";
+  return "finished";
 }
 
 const SEEN = "factory.results.seen";
@@ -105,7 +94,16 @@ function canBoard(job: Job, prs: Prs, train: Snapshot["train"]) {
   );
 }
 
-/** One row per job that ran, latest first, with its PR to review and merge. */
+function dayLabel(iso: string) {
+  const day = new Date(iso).toDateString();
+  if (day === new Date().toDateString()) return "Today";
+  if (day === new Date(Date.now() - 86_400_000).toDateString()) return "Yesterday";
+  return dayOf(iso);
+}
+
+const lastEnd = (job: Job) => job.attempts.at(-1)!.end;
+
+/** Results that wait on you on top, then running ones, then finished ones folded away, each by day. */
 export function ResultsView({
   snapshot,
   act,
@@ -115,8 +113,6 @@ export function ResultsView({
   act: Act;
   onAsk: (question: string) => void;
 }) {
-  const [filter, setFilter] = useQueryParam("filter", "all");
-  /** One job alone, as a link to it opens it. */
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [dismissing, setDismissing] = useState(false);
   const seen = useLastSeen();
@@ -129,6 +125,9 @@ export function ResultsView({
   const jobs = active
     .filter((job) => job.attempts.length > 0)
     .sort((a, b) => b.attempts.at(-1)!.start.localeCompare(a.attempts.at(-1)!.start));
+  const [finishedOpen, setFinishedOpen] = useState(
+    () => !jobs.some((job) => sectionOf(taskState(job, prs)) === "needs"),
+  );
   if (jobs.length === 0)
     return (
       <Empty>
@@ -141,24 +140,26 @@ export function ResultsView({
       </Empty>
     );
 
-  const shown = jobs.filter((job) => (FILTERS[filter] ?? FILTERS.all).shows(job, prs));
-  const dismissible = shown.filter(canDismiss);
-  const selection = dismissible.filter((job) => selected.has(job.id));
-  const allSelected = selection.length === dismissible.length;
+  const sections = { needs: [] as Job[], running: [] as Job[], finished: [] as Job[] };
+  for (const job of jobs) sections[sectionOf(taskState(job, prs))].push(job);
+  const selection = jobs.filter((job) => canDismiss(job) && selected.has(job.id));
+  const ready = sections.needs.filter((job) => canBoard(job, prs, train));
   const boarding = selection.filter((job) => canBoard(job, prs, train));
 
-  const select = (id: string, checked: boolean) => {
+  const select = (ids: string[], checked: boolean) => {
     setSelected((current) => {
       const next = new Set(current);
-      if (checked) next.add(id);
-      else next.delete(id);
+      for (const id of ids) {
+        if (checked) next.add(id);
+        else next.delete(id);
+      }
       return next;
     });
   };
 
   const dismissSelected = async () => {
     if (
-      selection.some((job) => job.attempts.some((attempt) => attempt.branch)) &&
+      selection.some(hasBranch) &&
       !window.confirm("Dismiss selected results and delete their unpushed branches?")
     )
       return;
@@ -170,112 +171,183 @@ export function ResultsView({
         const failure = outcomes.find((outcome) => outcome.status === "rejected");
         if (failure) throw failure.reason;
       });
+      setSelected(new Set());
     } finally {
       setDismissing(false);
     }
   };
 
-  const mergeSelected = () => {
-    const count = boarding.length === 1 ? "1 PR" : `${boarding.length} PRs`;
+  const merge = (merging: Job[]) => {
+    const count = merging.length === 1 ? "1 PR" : `${merging.length} PRs`;
     if (
       !window.confirm(
         `Merge ${count} one after another? Conflicting ones get rebased; ones that still conflict are skipped.`,
       )
     )
       return;
-    void act(() => api.mergeTrain(boarding.map((job) => job.id)));
+    void act(() => api.mergeTrain(merging.map((job) => job.id)));
     setSelected(new Set());
   };
 
-  return (
-    <div className="flex flex-col gap-4 pt-2">
-      {/* Like GitHub: the batch actions take the filter's place once something is selected. */}
-      <div className="flex min-h-8 flex-wrap items-center gap-3 border border-transparent px-3">
-        {dismissible.length > 0 && (
-          <NeutralCheckbox
-            aria-label={allSelected ? "Clear selection" : "Select all"}
-            checked={selection.length > 0 && allSelected}
-            disabled={dismissing}
-            onCheckedChange={(checked) =>
-              setSelected(new Set(checked ? dismissible.map((job) => job.id) : []))
-            }
-          />
-        )}
-        {selection.length === 0 ? (
-          <Choice
-            label="Filter"
-            className="w-56"
-            items={Object.entries(FILTERS).map(([name, { label, shows }]) => ({
-              value: name,
-              label: `${label} (${jobs.filter((job) => shows(job, prs)).length})`,
-            }))}
-            value={filter}
-            onChange={(chosen) => chosen && setFilter(chosen)}
-          />
-        ) : (
-          <>
-            <span className="text-sm font-medium">
-              {selection.length} of {dismissible.length} selected
-            </span>
-            <div
-              role="group"
-              aria-label="Batch actions"
-              className="flex items-center gap-2 sm:ml-auto"
-            >
-              <Button variant="outline" size="sm" disabled={dismissing} onClick={dismissSelected}>
-                {dismissing ? "Dismissing…" : "Dismiss"}
-              </Button>
-              {boarding.length > 0 && (
-                <Tooltip>
-                  {/* A disabled button ignores the pointer, so the wrapper shows the hint. */}
-                  <TooltipTrigger render={<span />}>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={dismissing}
-                      onClick={mergeSelected}
-                    >
-                      Merge {boarding.length < selection.length && `(${boarding.length})`}
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Merges one after another per repo, smallest first</TooltipContent>
-                </Tooltip>
-              )}
-            </div>
-          </>
-        )}
+  const list = (shown: Job[]) => {
+    const days = new Map<string, Job[]>();
+    for (const job of shown) {
+      const day = dayLabel(lastEnd(job));
+      days.set(day, [...(days.get(day) ?? []), job]);
+    }
+    return [...days].map(([day, dayJobs]) => (
+      <div key={day} className="flex flex-col gap-2">
+        <h3 className="px-3 text-xs text-muted-foreground">{day}</h3>
+        <ItemGroup>
+          {dayJobs.map((job) => (
+            <Result
+              key={job.id}
+              job={job}
+              snapshot={snapshot}
+              act={act}
+              car={train[job.id]}
+              onAsk={onAsk}
+              asked={snapshot.settings.chat.agent}
+              unread={seen !== "" && lastEnd(job) > seen}
+              reviewer={
+                job.item.blueprint !== "review" && !reviewed.has(itemKey(job.item))
+                  ? agents.find((agent) => agent !== job.agent)
+                  : undefined
+              }
+              disabled={dismissing && selected.has(job.id)}
+              selection={
+                canDismiss(job) && (
+                  <NeutralCheckbox
+                    aria-label={`Select ${itemTitle(job.item)}`}
+                    checked={selected.has(job.id)}
+                    disabled={dismissing}
+                    onCheckedChange={(checked) => select([job.id], checked)}
+                  />
+                )
+              }
+            />
+          ))}
+        </ItemGroup>
       </div>
-      <ItemGroup>
-        {shown.map((job) => (
-          <Result
-            key={job.id}
-            job={job}
-            snapshot={snapshot}
-            act={act}
-            car={train[job.id]}
-            onAsk={onAsk}
-            asked={snapshot.settings.chat.agent}
-            unread={seen !== "" && job.attempts.at(-1)!.end > seen}
-            reviewer={
-              job.item.blueprint !== "review" && !reviewed.has(itemKey(job.item))
-                ? agents.find((agent) => agent !== job.agent)
-                : undefined
-            }
-            disabled={dismissing && selected.has(job.id)}
-            selection={
-              canDismiss(job) && (
-                <NeutralCheckbox
-                  aria-label={`Select ${itemTitle(job.item)}`}
-                  checked={selected.has(job.id)}
-                  disabled={dismissing}
-                  onCheckedChange={(checked) => select(job.id, checked)}
-                />
-              )
-            }
+    ));
+  };
+
+  /** A section's title with a checkbox that selects all of its dismissible results. */
+  const heading = (title: string, shown: Job[]) => {
+    const ids = shown.filter(canDismiss).map((job) => job.id);
+    const all = ids.length > 0 && ids.every((id) => selected.has(id));
+    return (
+      <span className="flex items-center gap-3">
+        {ids.length > 0 && (
+          <NeutralCheckbox
+            aria-label={all ? `Clear ${title}` : `Select all in ${title}`}
+            checked={all}
+            disabled={dismissing}
+            onCheckedChange={(checked) => select(ids, checked)}
           />
-        ))}
-      </ItemGroup>
+        )}
+        <h2 className="text-sm font-medium">
+          {title} <span className="font-normal text-muted-foreground">{shown.length}</span>
+        </h2>
+      </span>
+    );
+  };
+
+  return (
+    <div className="flex flex-col gap-6 pt-2">
+      {selection.length > 0 && (
+        <div
+          role="group"
+          aria-label="Batch actions"
+          className="sticky top-0 z-10 flex flex-wrap items-center gap-2 rounded-lg border bg-background px-3 py-2"
+        >
+          <span className="text-sm font-medium">{selection.length} selected</span>
+          <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
+            Clear
+          </Button>
+          <div className="flex items-center gap-2 sm:ml-auto">
+            <Button variant="outline" size="sm" disabled={dismissing} onClick={dismissSelected}>
+              {dismissing ? "Dismissing…" : "Dismiss"}
+            </Button>
+            {boarding.length > 0 && (
+              <MergeButton disabled={dismissing} onClick={() => merge(boarding)}>
+                Merge {boarding.length < selection.length && `(${boarding.length})`}
+              </MergeButton>
+            )}
+          </div>
+        </div>
+      )}
+      <section className="flex flex-col gap-3">
+        <div className="flex min-h-8 items-center gap-3 px-3">
+          {heading("Needs you", sections.needs)}
+          {ready.length > 1 && (
+            <MergeButton className="ml-auto" disabled={dismissing} onClick={() => merge(ready)}>
+              Merge all ready ({ready.length})
+            </MergeButton>
+          )}
+        </div>
+        {sections.needs.length > 0 ? (
+          list(sections.needs)
+        ) : (
+          <p className="px-3 text-sm text-muted-foreground">
+            Nothing needs you. New PRs and questions land here.
+          </p>
+        )}
+      </section>
+      {sections.running.length > 0 && (
+        <section className="flex flex-col gap-3">
+          <div className="flex min-h-8 items-center px-3">
+            {heading("In progress", sections.running)}
+          </div>
+          {list(sections.running)}
+        </section>
+      )}
+      {sections.finished.length > 0 && (
+        <Collapsible open={finishedOpen} onOpenChange={setFinishedOpen}>
+          <section className="flex flex-col gap-3">
+            <div className="flex min-h-8 items-center gap-2 px-3">
+              {heading("Finished", sections.finished)}
+              <CollapsibleTrigger
+                render={<Button variant="ghost" size="icon-sm" />}
+                aria-label={finishedOpen ? "Hide finished" : "Show finished"}
+              >
+                <ChevronDownIcon
+                  aria-hidden="true"
+                  className={`transition-transform ${finishedOpen ? "" : "-rotate-90"}`}
+                />
+              </CollapsibleTrigger>
+            </div>
+            <CollapsibleContent>
+              <div className="flex flex-col gap-3">{list(sections.finished)}</div>
+            </CollapsibleContent>
+          </section>
+        </Collapsible>
+      )}
     </div>
+  );
+}
+
+function MergeButton({
+  className,
+  disabled,
+  onClick,
+  children,
+}: {
+  className?: string;
+  disabled: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <Tooltip>
+      {/* A disabled button ignores the pointer, so the wrapper shows the hint. */}
+      <TooltipTrigger render={<span className={className} />}>
+        <Button variant="outline" size="sm" disabled={disabled} onClick={onClick}>
+          {children}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>Merges one after another per repo, smallest first</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -345,7 +417,11 @@ function Result({
       Retry
     </Button>
   );
-  const dismiss = () => act(() => api.remove(job.id));
+  const dismiss = () => {
+    if (hasBranch(job) && !window.confirm("Dismiss this result and delete its unpushed branch?"))
+      return;
+    void act(() => api.remove(job.id));
+  };
   const ask =
     job.state === "blocked" ? job.notes.findLast((note) => note.kind === "ask") : undefined;
 
@@ -353,21 +429,16 @@ function Result({
     <Row
       leading={
         <>
-          {selection}
-          <StateIcon state={state} />
+          {/* A bar along the row's left edge marks what ended since the last visit. */}
+          {unread && <span aria-hidden className="absolute inset-y-0 left-0 w-1 bg-foreground" />}
+          {selection || <span className="size-4" />}
         </>
       }
       title={
         <>
-          {unread && (
-            <span
-              role="img"
-              aria-label="new"
-              className="mr-1 inline-block size-2 rounded-full bg-primary align-middle"
-            />
-          )}
+          {unread && <span className="sr-only">New: </span>}
           <TaskDetails
-            item={job.item}
+            item={pr ? { ...job.item, title: pr.title } : job.item}
             job={job}
             snapshot={snapshot}
             act={act}
@@ -473,7 +544,9 @@ function Facts({
   const checks = pr?.state === "OPEN" && pr.checks !== "none" && CHECKS[pr.checks];
   const facts: ReactNode[] = url
     ? [
-        pr?.state === "OPEN" && (pr.attention ?? job.item.attention),
+        pr?.state === "OPEN" && (
+          <Attention key="attention" level={pr.attention ?? job.item.attention} />
+        ),
         pr && (
           <>
             <span className="text-success">+{pr.additions}</span>{" "}
@@ -492,27 +565,43 @@ function Facts({
         ),
         pr?.draft && "draft",
         car && <TrainLine key="train" car={car} />,
-        `#${url.split("/").at(-1)}`,
+        <a key="pr" href={url} target="_blank" rel="noreferrer" className="hover:underline">
+          #{url.split("/").at(-1)}
+        </a>,
       ]
-    : job.state === "failed"
-      ? [
-          last.error && (
-            <span key="error" className="text-destructive">
-              {last.error.split("\n")[0]}
-            </span>
-          ),
-          job.attempts.length > 1 && `${job.attempts.length} attempts`,
-        ]
-      : [job.state === "done" && (result?.text ?? "nothing to change")];
+    : [job.state === "failed" && job.attempts.length > 1 && `${job.attempts.length} attempts`];
+  // Free text goes last, so truncating it never hides who ran the job or when.
+  const text =
+    job.state === "failed"
+      ? last.error && (
+          <span key="error" className="text-destructive">
+            {last.error.split("\n")[0]}
+          </span>
+        )
+      : !url && job.state === "done" && (result?.text ?? "nothing to change");
   return (
     <span className="min-w-0 truncate">
-      {[...facts, agentName(last.agent), ago(last.end)].filter(Boolean).map((fact, index) => (
-        <span key={index}>
-          {index > 0 && " · "}
-          {fact}
-        </span>
-      ))}
+      {[...facts, agentName(last.agent), clock(last.end), text]
+        .filter(Boolean)
+        .map((fact, index) => (
+          <span key={index}>
+            {index > 0 && " · "}
+            {fact}
+          </span>
+        ))}
     </span>
+  );
+}
+
+/** How much of the user's attention a PR asks for, explained on hover. */
+function Attention({ level }: { level: string }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<span className="underline decoration-dotted underline-offset-2" />}>
+        {level}
+      </TooltipTrigger>
+      <TooltipContent>Attention: {ATTENTION[level] ?? level}</TooltipContent>
+    </Tooltip>
   );
 }
 
