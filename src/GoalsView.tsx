@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import Markdown from "markdown-to-jsx/react";
 import { ArrowLeftIcon, ChevronRightIcon, FlameIcon, GitBranchIcon, PlusIcon } from "lucide-react";
 import { api, type Act } from "@/api";
@@ -7,7 +7,6 @@ import {
   depths,
   PLANNING,
   prUrl,
-  TIERS,
   type Job,
   type Snapshot,
   type Tier,
@@ -25,19 +24,18 @@ import {
 import { Input } from "@/components/ui/input";
 import { ItemGroup } from "@/components/ui/item";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/tooltip/tooltip";
-import { ago, minutesSince } from "@/format";
+import { ago, minutesSince, repoName } from "@/format";
 import { useQueryParam } from "@/hooks/use-query-param";
 import { NewGoalDialog } from "@/NewGoalDialog";
 import { MARKDOWN } from "@/PrReview";
 import { Row, Section } from "@/Row";
 import { StateIcon, StatePill, TaskDetails } from "@/TaskDetails";
 
-const TIER_SHORT: Record<Tier, string> = { communicator: "comm", builder: "build", grunt: "grunt" };
-
 /** How a goal's own state reads: planning until its plan is in, then working, not queued. */
-function goalLabel(goal: Job, nodes: Job[]): string | undefined {
+function goalLabel(goal: Job, nodes: Job[], on: boolean): string | undefined {
   if (goal.blocked) return BLOCKED[goal.blocked];
   if (goal.state !== "queued") return undefined;
+  if (!on) return "waiting for the factory";
   const planning = nodes.some(
     (node) =>
       node.item.blueprint === "decompose" && (node.state === "queued" || node.state === "running"),
@@ -156,24 +154,18 @@ function GoalList({
                   className="text-left hover:underline"
                   onClick={() => onOpen(goal.id)}
                 >
+                  <span className="font-normal text-muted-foreground">
+                    {repoName(goal.goal!.repo)}:{" "}
+                  </span>
                   {goal.item.title}
                 </button>
               }
               meta={
                 <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                  <StatePill state={goal.state} label={goalLabel(goal, nodes)} />
+                  <StatePill state={goal.state} label={goalLabel(goal, nodes, snapshot.on)} />
                   <span>
-                    {done}/{nodes.length} done
+                    {done}/{nodes.length} jobs done
                   </span>
-                  {TIERS.map((tier) => {
-                    const of = nodes.filter((node) => node.tier === tier);
-                    return of.length ? (
-                      <span key={tier}>
-                        {TIER_SHORT[tier]} {of.filter((node) => node.state === "done").length}/
-                        {of.length}
-                      </span>
-                    ) : null;
-                  })}
                   <span>
                     {used}
                     {budget ? `/${budget}` : ""} attempts
@@ -238,7 +230,7 @@ function GoalView({
           <ArrowLeftIcon />
         </Button>
         <h2 className="font-heading text-lg font-semibold">{goal.item.title}</h2>
-        <StatePill state={goal.state} label={goalLabel(goal, nodes)} />
+        <StatePill state={goal.state} label={goalLabel(goal, nodes, snapshot.on)} />
         <span className="ml-auto flex gap-1">
           {goal.blocked === "paused" ? (
             <Button
@@ -264,7 +256,14 @@ function GoalView({
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => act(() => api.goal(goal.id, "cancel"))}
+              onClick={() => {
+                if (
+                  confirm(
+                    `Cancel ${goal.item.title}? Every job that hasn't finished is removed; this can't be undone.`,
+                  )
+                )
+                  void act(() => api.goal(goal.id, "cancel"));
+              }}
             >
               Cancel goal
             </Button>
@@ -273,27 +272,51 @@ function GoalView({
       </div>
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
-        <span className="flex items-center gap-1">
+        <Fact explain="The integration branch: each job merges here, and it becomes one PR to main when the goal is done.">
           <GitBranchIcon className="size-4" /> goal/{info.slug}
-        </span>
-        <span className={red ? "text-destructive" : ""}>
-          {info.gates.length === 0
-            ? "no goal gates"
-            : `${red ? "red" : "green"}: ${info.gates.map((gate) => `\`${gate}\``).join(", ")}`}
-        </span>
+        </Fact>
+        <Fact explain="Commands run on the integration branch after every merge. While one fails, the goal stops and a fix goes first.">
+          {info.gates.length === 0 ? (
+            "no goal checks"
+          ) : (
+            <span className={red ? "text-destructive" : ""}>
+              {info.gates.map((gate) => (
+                <code key={gate} className="mr-1 font-mono text-xs">
+                  {gate}
+                </code>
+              ))}
+              {red ? "failing" : "passing"}
+            </span>
+          )}
+        </Fact>
         <span>
-          {done}/{nodes.length} done
+          {done}/{nodes.length} jobs done
         </span>
-        <span>
+        <Fact explain="Agent attempts used so far. At the budget the goal stops and asks before going on.">
           {used}
           {info.budget ? ` of ${info.budget.attempts}` : ""} attempts
-        </span>
-        {final && (
-          <a className="text-primary hover:underline" href={final} target="_blank" rel="noreferrer">
-            final PR
-          </a>
-        )}
+        </Fact>
       </div>
+
+      {goal.state === "done" && (
+        <div className="flex flex-col gap-3 rounded-md border border-success/50 bg-success/10 p-3 text-sm sm:flex-row sm:items-center">
+          <p className="flex-1">
+            Done: every job merged into goal/{info.slug}
+            {final ? ", and it's up for review as one PR." : "."}
+          </p>
+          {final && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="self-start sm:self-auto"
+              nativeButton={false}
+              render={<a href={final} target="_blank" rel="noreferrer" />}
+            >
+              Open the PR
+            </Button>
+          )}
+        </div>
+      )}
 
       {brief && (
         <Collapsible>
@@ -372,19 +395,10 @@ function GoalView({
         </Section>
       )}
 
-      {planning.length > 0 && (
-        <Section title="Planning">
-          <ItemGroup>
-            {planning.map((node) => (
-              <NodeRow key={node.id} node={node} snapshot={snapshot} act={act} onPath={false} />
-            ))}
-          </ItemGroup>
-        </Section>
-      )}
-
       <Section title="Plan">
         <PlanList
-          nodes={nodes.filter((node) => !node.parent && !planning.includes(node))}
+          // Planning first: it made the plan, and while it runs it's all there is.
+          nodes={[...planning, ...nodes.filter((node) => !node.parent && !planning.includes(node))]}
           all={nodes}
           path={critical(nodes)}
           snapshot={snapshot}
@@ -567,6 +581,18 @@ export function TierBadge({ tier }: { tier: Tier }) {
   );
 }
 
+/** A fact in the goal's header, with what it means on hover. */
+function Fact({ explain, children }: { explain: string; children: ReactNode }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<span className="flex items-center gap-1" />}>
+        {children}
+      </TooltipTrigger>
+      <TooltipContent className="max-w-72">{explain}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 function Assumption({
   node,
   question,
@@ -628,11 +654,14 @@ function Replan({ goal, act }: { goal: Job; act: Act }) {
         autoFocus
         value={why}
         onChange={(event) => setWhy(event.target.value)}
-        placeholder="Why replan?"
+        placeholder="What should change?"
         className="h-8 w-48"
       />
       <Button type="submit" size="sm" disabled={!why.trim()}>
-        Queue
+        Replan
+      </Button>
+      <Button type="button" variant="ghost" size="sm" onClick={() => setWhy(undefined)}>
+        Never mind
       </Button>
     </form>
   );
