@@ -121,7 +121,7 @@ function Factory({
               </TabsTrigger>
               <TabsTrigger value="goals">
                 <Workflow />
-                Goals{goals.length ? ` (${goals.length})` : ""}
+                Goals
                 {waiting > 0 && <Badge variant="accent">{waiting}</Badge>}
               </TabsTrigger>
               <TabsTrigger value="candidates">
