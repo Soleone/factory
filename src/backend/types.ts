@@ -168,6 +168,8 @@ export type Goal = {
   repo: string;
   /** Names the branch `goal/<slug>` and the memory file `.factory/<slug>.md`. */
   slug: string;
+  /** What the user asked for when starting it from the page or `goal new`; a decomposer's plan replaces the summary. */
+  brief?: string;
   summary: string;
   /** Run on the integration branch after every merge into it. */
   gates: string[];

@@ -337,7 +337,14 @@ export async function newGoal(
     )
   )
     throw new Error(`a goal ${slug} already exists in ${repo}`);
-  const goal: Goal = { repo, slug, summary, gates: [], allowUp: false };
+  const goal: Goal = {
+    repo,
+    slug,
+    brief: brief.trim() || undefined,
+    summary,
+    gates: [],
+    allowUp: false,
+  };
   const job = addJob(state, {
     id: newId(),
     item: goalItem(repo, `goal/${slug}`, "goal", title),

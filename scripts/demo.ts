@@ -111,6 +111,8 @@ function demoGoal(at: string, run: string): Job[] {
       goal: {
         repo,
         slug: "export",
+        brief:
+          "Let people export a report as CSV, JSON or XLSX from its menu.\n\nOne writer shared by every format, so a new format is one file. Done when each export opens cleanly in its usual app.",
         summary: "Exports to CSV, JSON and XLSX with one shared writer.",
         gates: ["pnpm test"],
         budget: { attempts: 30 },

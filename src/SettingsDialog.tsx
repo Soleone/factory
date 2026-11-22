@@ -33,6 +33,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { AGENT_NAMES } from "@/backend/agents.ts";
 import { agentName, repoName } from "@/format";
 import { Choice, RunFields, TuningFields } from "@/RunFields";
+import { version } from "../package.json";
 
 /** A gear button that opens the defaults every run starts from, and what auto mode may queue. */
 export function SettingsDialog({ snapshot, act }: { snapshot: Snapshot; act: Act }) {
@@ -226,7 +227,8 @@ function SettingsForm({
           </StackedTabsContent>
         </div>
       </Tabs>
-      <DialogFooter>
+      <DialogFooter className="sm:items-center">
+        <span className="text-xs text-muted-foreground sm:mr-auto">factory {version}</span>
         <Button type="submit" disabled={unchanged}>
           Save
         </Button>

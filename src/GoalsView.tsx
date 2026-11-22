@@ -1,4 +1,5 @@
 import { useState } from "react";
+import Markdown from "markdown-to-jsx/react";
 import { ArrowLeftIcon, ChevronRightIcon, FlameIcon, GitBranchIcon, PlusIcon } from "lucide-react";
 import { api, type Act } from "@/api";
 import {
@@ -27,6 +28,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/to
 import { ago, minutesSince } from "@/format";
 import { useQueryParam } from "@/hooks/use-query-param";
 import { NewGoalDialog } from "@/NewGoalDialog";
+import { MARKDOWN } from "@/PrReview";
 import { Row, Section } from "@/Row";
 import { StateIcon, StatePill, TaskDetails } from "@/TaskDetails";
 
@@ -51,6 +53,14 @@ const BLOCKED: Record<string, string> = {
   held: "held by a failure",
   review: "merging",
 };
+
+/** The brief the goal started from; goals from before it was kept have it only in their decomposer's prompt. */
+function briefOf(goal: Job, nodes: Job[]): string | undefined {
+  if (goal.goal!.brief) return goal.goal!.brief;
+  const prompt = nodes.find((node) => node.item.blueprint === "decompose")?.prompt;
+  const brief = prompt?.match(/^Repo: .*\n\n([^]*?)\n\n## The plan format/m)?.[1];
+  return brief === "(no brief beyond the title)" ? undefined : brief;
+}
 
 const sentence = (text: string) => text.charAt(0).toUpperCase() + text.slice(1) + ".";
 
@@ -207,6 +217,7 @@ function GoalView({
   const red = goal.blocked === "red";
   const factorySaid = goal.notes.findLast((note) => note.kind === "factory");
   const final = prUrl(goal);
+  const brief = briefOf(goal, nodes);
   const planning = nodes.filter((node) =>
     (PLANNING as readonly string[]).includes(node.item.blueprint),
   );
@@ -283,6 +294,27 @@ function GoalView({
           </a>
         )}
       </div>
+
+      {brief && (
+        <Collapsible>
+          <CollapsibleTrigger
+            render={
+              <button
+                type="button"
+                className="group flex items-center gap-1 text-sm font-medium text-muted-foreground"
+              />
+            }
+          >
+            <ChevronRightIcon className="size-4 transition-transform group-aria-expanded:rotate-90" />
+            Brief
+          </CollapsibleTrigger>
+          <CollapsibleContent className="mt-2">
+            <div className="flex flex-col gap-2 rounded-md border p-3 text-sm wrap-anywhere">
+              <Markdown options={MARKDOWN}>{brief}</Markdown>
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
+      )}
 
       {goal.blocked === "checkpoint" && (
         <div className="flex flex-col gap-3 rounded-md border border-warning/50 bg-warning/10 p-3 text-sm sm:flex-row sm:items-center">
