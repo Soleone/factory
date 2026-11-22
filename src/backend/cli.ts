@@ -57,6 +57,8 @@ const USAGE = `factory: works workwork candidates and long goals with headless c
   factory add <id>... [--repo DIR] [--agent NAME] [--model M] [--effort E] [--after JOB]...
                                queue workwork candidates from DIR (default: here), ahead of auto jobs;
                                --after: start once that job is done
+  factory add --blueprint NAME [--repo DIR] [<id>...]
+                               queue what a blueprint finds in DIR, on-request ones too; ids pick some
   factory add --prompt FILE --tier T [--repo DIR] [--title TEXT]
                                one job of your own, without workwork, for a tier
   factory review <job> --agent NAME
@@ -121,6 +123,7 @@ async function main(): Promise<void> {
       repo: { type: "string" },
       project: { type: "string" },
       prompt: { type: "string" },
+      blueprint: { type: "string" },
       tier: { type: "string" },
       title: { type: "string" },
       brief: { type: "string" },
@@ -246,6 +249,7 @@ async function add(
   ids: string[],
   values: {
     repo?: string;
+    blueprint?: string;
     agent?: string;
     model?: string[];
     effort?: string[];
@@ -256,11 +260,14 @@ async function add(
   },
 ): Promise<void> {
   if (values.prompt) return addOwn(values);
-  if (ids.length === 0)
-    throw new Error("factory add wants at least one workwork id, or --prompt FILE");
+  if (ids.length === 0 && !values.blueprint)
+    throw new Error("factory add wants workwork ids, --blueprint NAME or --prompt FILE");
   const repo = resolve(values.repo ?? ".");
-  const candidates: Item[] = JSON.parse(await output("workwork", ["--json"], repo));
-  const items = ids.map((id) => {
+  const listing = values.blueprint ? ["--blueprint", values.blueprint, "--json"] : ["--json"];
+  const candidates: Item[] = JSON.parse(await output("workwork", listing, repo));
+  if (values.blueprint && candidates.length === 0)
+    throw new Error(`${values.blueprint} finds nothing to do in ${repo}`);
+  const items = (ids.length ? ids : candidates.map((each) => each.id)).map((id) => {
     const item = candidates.find((candidate) => candidate.id === id);
     if (!item) throw new Error(`workwork has no candidate ${id} in ${repo}`);
     return item;

@@ -95,6 +95,11 @@ export function serve(state: string, port: number, host: string): Server {
       );
     return models.get(name)!;
   }
+  function refresh() {
+    void refreshCandidates(state, "workwork").catch((error: Error) =>
+      console.error(`factory: workwork failed: ${error.message}`),
+    );
+  }
   /** Only cached candidates, so the page can't queue or run workwork for anything it names. */
   function candidates(wanted: { repo: string; id: string }[]) {
     const cached = new Map(readCandidates(state)?.items.map((item) => [itemKey(item), item]));
@@ -136,16 +141,12 @@ export function serve(state: string, port: number, host: string): Server {
       return { at: cached?.at ?? null, items, repos, root: sourceRoot() };
     },
     "POST /api/candidates/refresh": () => {
-      void refreshCandidates(state, "workwork").catch((error: Error) =>
-        console.error(`factory: workwork failed: ${error.message}`),
-      );
+      refresh();
     },
     "GET /api/repos": () => clonableRepos(),
     "POST /api/repos/clone": async (body: { name: string }) => {
       await cloneRepo(body.name);
-      void refreshCandidates(state, "workwork").catch((error: Error) =>
-        console.error(`factory: workwork failed: ${error.message}`),
-      );
+      refresh();
     },
     /** A goal from a brief, in a repo under $SRC or, with `project`, a new one. */
     "POST /api/goals": async (body: {
@@ -162,10 +163,15 @@ export function serve(state: string, port: number, host: string): Server {
     // Read fresh each time: it's quick, and the user may have just edited a blueprint of their own.
     "GET /api/blueprints": async (): Promise<Blueprint[]> =>
       JSON.parse(await output("workwork", ["blueprints", "--json"], process.cwd())),
-    "PUT /api/blueprints": (body: Omit<Blueprint, "custom">) =>
-      output("workwork", ["blueprints", "save"], process.cwd(), JSON.stringify(body)),
-    "POST /api/blueprints/delete": (body: { name: string }) =>
-      output("workwork", ["blueprints", "delete", body.name], process.cwd()),
+    // Saving or deleting one changes what every repo's candidates are.
+    "PUT /api/blueprints": async (body: Omit<Blueprint, "custom">) => {
+      await output("workwork", ["blueprints", "save"], process.cwd(), JSON.stringify(body));
+      refresh();
+    },
+    "POST /api/blueprints/delete": async (body: { name: string }) => {
+      await output("workwork", ["blueprints", "delete", body.name], process.cwd());
+      refresh();
+    },
     "POST /api/blueprints/run": async (body: { name: string; repo: string }) => {
       const found: Item[] = JSON.parse(
         await output("workwork", ["--blueprint", body.name, "--json"], body.repo),

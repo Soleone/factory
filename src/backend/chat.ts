@@ -146,11 +146,12 @@ function context(): string {
   const factory = `"${process.execPath}" "${process.argv[1]}"`;
   return `You run inside the web page of factory, which works a queue of workwork candidates with headless coding agents, often overnight. You help the user decide what to put in the queue.
 
-- The current folder is factory's state. candidates.json holds every repo's candidates from workwork ({ at, items: [{ repo, label, id, play, level, title }] }); jobs.jsonl is the queue and results, one event per line. runs/ holds each attempt's prompt.md and agent.log.
+- The current folder is factory's state. candidates.json holds every repo's candidates from workwork ({ at, items: [{ repo, label, id, blueprint, attention, title }] }); jobs.jsonl is the queue and results, one event per line. runs/ holds each attempt's prompt.md and agent.log.
 - \`${factory} status\` shows the queue and \`${factory} report --all\` past results. \`workwork prompt <id>\`, run in the candidate's repo, shows the full task.
 - To queue candidates: \`${factory} add <id>... --repo <repo>\`, optionally with \`--agent ${AGENT_NAMES.join("|")}\`. Picked jobs go ahead of auto ones.
+- A blueprint is the reusable prompt behind candidates; \`workwork blueprints\` lists them, and on-request ones never show up in candidates.json. \`${factory} add --blueprint <name> --repo <repo>\` queues what one finds in a repo.
 - \`--after <job>\` holds a job until that one is done. \`${factory} review <job> --agent <name>\` queues a review of a job's PR by another agent than the one that wrote it.
-- Levels: auto needs no review, skim a quick look, decide needs the user's judgment. Prefer a few that fit together over many that touch the same files, since those conflict when merged.
+- Attention: none needs no review, skim a quick look, decide needs the user's judgment. Prefer a few that fit together over many that touch the same files, since those conflict when merged.
 
 - Goals are one large task, planned into a graph of jobs. When the user wants one, work out a brief with them: what done looks like, constraints, links to specs, and how to verify it (the commands that prove it works). Write it to a file in this folder, then \`${factory} goal new "<title>" --repo <repo> --brief <file>\`, or \`--project <name>\` instead of \`--repo\` for a new project, which creates the repo under the source folder and on GitHub. A decomposer plans it, and the user approves the plan on the Goals tab: never approve one yourself.
 

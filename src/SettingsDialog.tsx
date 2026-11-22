@@ -75,10 +75,20 @@ function SettingsForm({
 
   useEffect(() => {
     void api.candidates().then((candidates) => {
-      setBlueprints([...new Set(candidates.items.map((item) => item.blueprint))].sort());
       setRepos([...new Set(candidates.items.map((item) => item.repo))].sort());
     });
   }, [snapshot.candidates.at]);
+  // On-request blueprints never reach the candidates auto mode picks from.
+  useEffect(() => {
+    void api.blueprints().then((all) =>
+      setBlueprints(
+        all
+          .filter((each) => !each.onRequest)
+          .map((each) => each.name)
+          .sort(),
+      ),
+    );
+  }, []);
 
   const auto = draft.auto;
   const setAuto = (change: Partial<Settings["auto"]>) =>
