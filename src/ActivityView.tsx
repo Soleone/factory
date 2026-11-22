@@ -1,12 +1,47 @@
+import {
+  CircleCheckIcon,
+  CircleXIcon,
+  FactoryIcon,
+  FlagIcon,
+  LightbulbIcon,
+  ListPlusIcon,
+  MessageCircleQuestionIcon,
+  PlayIcon,
+  ReplyIcon,
+  StickyNoteIcon,
+  TrainFrontIcon,
+} from "lucide-react";
+import type { ReactNode } from "react";
 import type { Act } from "@/api";
-import type { Attempt, Job, Snapshot } from "@/backend/types.ts";
+import type { Attempt, Job, Note, Snapshot } from "@/backend/types.ts";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { clock } from "@/format";
 import { KIND } from "@/JobNotes";
 import { TaskDetails } from "@/TaskDetails";
 
-/** `ended` is the attempt an entry ends; `step` the number a step has within its attempt. */
-type Entry = { at: string; job: Job; text: string; tone?: string; ended?: Attempt; step?: string };
+/**
+ * `icon` marks the kind of event, colored on its own; steps go without one, their number marks them.
+ * `ended` is the attempt an entry ends; `step` the number a step has within its attempt.
+ */
+type Entry = {
+  at: string;
+  job: Job;
+  text: string;
+  icon?: ReactNode;
+  tone?: string;
+  ended?: Attempt;
+  step?: string;
+};
+
+const NOTE_ICONS: Record<Exclude<Note["kind"], "step">, ReactNode> = {
+  note: <StickyNoteIcon className="text-muted-foreground" />,
+  ask: <MessageCircleQuestionIcon className="text-warning" />,
+  assume: <LightbulbIcon className="text-warning" />,
+  answer: <ReplyIcon className="text-muted-foreground" />,
+  result: <FlagIcon className="text-primary" />,
+  train: <TrainFrontIcon className="text-muted-foreground" />,
+  factory: <FactoryIcon className="text-muted-foreground" />,
+};
 
 const SHOWN = 200;
 
@@ -27,9 +62,19 @@ function attemptNumbers(attempt: Attempt): string {
 /** Everything that happened to one job: queued, each attempt's start and end, and what its agents said. */
 export function jobEntries(job: Job): Entry[] {
   return [
-    { at: job.added, job, text: `queued${job.agent ? ` for ${job.agent}` : ""}` },
+    {
+      at: job.added,
+      job,
+      text: `queued${job.agent ? ` for ${job.agent}` : ""}`,
+      icon: <ListPlusIcon className="text-muted-foreground" />,
+    },
     ...job.attempts.flatMap((attempt) => [
-      { at: attempt.start, job, text: `${attempt.agent} started` },
+      {
+        at: attempt.start,
+        job,
+        text: `${attempt.agent} started`,
+        icon: <PlayIcon className="text-muted-foreground" />,
+      },
       {
         at: attempt.end,
         job,
@@ -40,6 +85,12 @@ export function jobEntries(job: Job): Entry[] {
         ]
           .filter(Boolean)
           .join(" · "),
+        icon:
+          attempt.outcome === "done" ? (
+            <CircleCheckIcon className="text-success" />
+          ) : (
+            <CircleXIcon className="text-destructive" />
+          ),
         tone: attempt.outcome === "done" ? undefined : "text-destructive",
         ended: attempt,
       },
@@ -50,6 +101,7 @@ export function jobEntries(job: Job): Entry[] {
           at: note.at,
           job,
           text: `${KIND[note.kind]}: ${note.text}`,
+          icon: NOTE_ICONS[note.kind],
           tone:
             note.kind === "ask"
               ? "text-foreground font-medium"
@@ -86,6 +138,15 @@ export function StepNumber({ step }: { step: string }) {
   return (
     <span className="mr-2 inline-flex min-w-5 justify-center rounded-full bg-primary/15 px-1.5 text-xs font-medium text-primary tabular-nums">
       {step}
+    </span>
+  );
+}
+
+/** An entry's icon, or for a step a dot in the accent color. */
+export function EntryMark({ entry }: { entry: Entry }) {
+  return (
+    <span aria-hidden className="flex size-4 items-center justify-center [&_svg]:size-3.5">
+      {entry.icon ?? <span className="size-2 rounded-full bg-primary" />}
     </span>
   );
 }
@@ -130,10 +191,15 @@ export function ActivityView({ snapshot, act }: { snapshot: Snapshot; act: Act }
                 </time>
                 <TaskDetails item={entry.job.item} job={entry.job} snapshot={snapshot} act={act} />
                 <span
-                  className={`col-start-2 wrap-anywhere sm:col-start-3 ${entry.tone ?? "text-muted-foreground"}`}
+                  className={`col-start-2 flex gap-2 wrap-anywhere sm:col-start-3 ${entry.tone ?? "text-muted-foreground"}`}
                 >
-                  {entry.step && <StepNumber step={entry.step} />}
-                  {entry.text}
+                  <span className="mt-0.5">
+                    <EntryMark entry={entry} />
+                  </span>
+                  <span>
+                    {entry.step && <StepNumber step={entry.step} />}
+                    {entry.text}
+                  </span>
                 </span>
               </li>
             ))}

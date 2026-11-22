@@ -12,7 +12,7 @@ import {
 import Markdown from "markdown-to-jsx/react";
 import { useEffect, useState, type ReactNode } from "react";
 import { api, type Act } from "@/api";
-import { dayOf, jobEntries, StepNumber } from "@/ActivityView";
+import { dayOf, EntryMark, jobEntries, StepNumber } from "@/ActivityView";
 import { prUrl, type Item, type Job, type Snapshot } from "@/backend/types.ts";
 import {
   Dialog,
@@ -306,7 +306,7 @@ function Story({ job, snapshot, act }: { job: Job; snapshot: Snapshot; act: Act 
               {dayEntries.map((entry) => (
                 <li
                   key={`${entry.at} ${entry.text}`}
-                  className="group grid grid-cols-[4.5rem_0.75rem_1fr] gap-x-2"
+                  className="group grid grid-cols-[4.5rem_1rem_1fr] gap-x-2"
                 >
                   <time
                     dateTime={entry.at}
@@ -314,12 +314,9 @@ function Story({ job, snapshot, act }: { job: Job; snapshot: Snapshot; act: Act 
                   >
                     {clock(entry.at)}
                   </time>
-                  {/* The rail runs from the first dot of the day to the last. */}
-                  <span
-                    aria-hidden
-                    className={`relative flex justify-center before:absolute before:inset-y-0 before:w-px before:bg-border group-first:before:top-2 group-last:before:bottom-auto group-last:before:h-2 ${entry.tone ?? "text-muted-foreground"}`}
-                  >
-                    <span className="relative mt-1.5 size-2 rounded-full border-2 border-current bg-popover" />
+                  {/* The rail runs from under each mark to the next one, and stops at the day's last. */}
+                  <span className="relative flex justify-center pt-0.5 before:absolute before:top-5.5 before:bottom-0.5 before:w-px before:bg-border group-last:before:hidden">
+                    <EntryMark entry={entry} />
                   </span>
                   <span className={`pb-3 wrap-anywhere ${entry.tone ?? ""}`}>
                     {entry.step && <StepNumber step={entry.step} />}
