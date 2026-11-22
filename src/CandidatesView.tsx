@@ -209,7 +209,9 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
                 />
               }
             >
-              <RefreshCwIcon className={refreshing ? "animate-spin motion-reduce:animate-none" : undefined} />
+              <RefreshCwIcon
+                className={refreshing ? "animate-spin motion-reduce:animate-none" : undefined}
+              />
             </TooltipTrigger>
             <TooltipContent>
               {refreshing ? "Asking workwork, takes a few minutes" : "Ask workwork again"}
