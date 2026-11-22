@@ -368,7 +368,7 @@ export async function newGoal(
 }
 
 const TIER_RUBRIC = `Pick the lowest tier that will get each node right; tiers are the main lever on cost.
-- communicator (the most capable and most limited model): the decomposition itself, UX and visual design, user-facing copy, anything the user judges by taste.
+- communicator (the most capable and most limited model): the decomposition itself, UX and visual design, anything the user judges by taste, and anything people read: user-facing copy, READMEs and other docs, naming the domain's terms. Writing for a reader is judgment, never mechanical, so it is never grunt work.
 - builder (intelligent and thorough, not a great communicator): architecture, foundations other nodes build on, tricky logic, reviews.
 - grunt (follows a detailed spec, little judgment, very cheap): anything a detailed prompt makes mechanical, like porting a spec'd component, writing tests from a spec, wiring, renames. Writing a grunt prompt in more detail is cheaper than running the node on a higher tier.`;
 

@@ -174,7 +174,11 @@ function demoGoal(at: string, run: string): Job[] {
     }),
     node("xlsx", "XLSX format", { parent: "formats", tier: "builder", needs: ["display"] }),
     node("menu", "Export menu and copy", { parent: "finish", tier: "communicator" }),
-    node("docs", "Document the formats", { parent: "finish", tier: "grunt", after: ["menu"] }),
+    node("docs", "Document the formats", {
+      parent: "finish",
+      tier: "communicator",
+      after: ["menu"],
+    }),
   ];
 }
 

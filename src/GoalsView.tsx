@@ -209,7 +209,7 @@ function GoalView({
   act: Act;
   onBack: () => void;
 }) {
-  const { jobs, status } = snapshot;
+  const { jobs } = snapshot;
   const nodes = nodesOf(jobs, goal);
   const info = goal.goal!;
   const done = nodes.filter((node) => node.state === "done").length;
@@ -330,6 +330,11 @@ function GoalView({
           </Button>
         </div>
       )}
+      {!snapshot.on && goal.state === "queued" && (
+        <p className="rounded-md border p-3 text-sm text-muted-foreground">
+          The factory is off. Its jobs are in the queue and start when you turn it on.
+        </p>
+      )}
       {red && factorySaid && (
         <p className="rounded-md border border-destructive/40 p-3 text-sm text-destructive">
           {factorySaid.text}; a fix is queued at the front.
@@ -369,184 +374,196 @@ function GoalView({
 
       {planning.length > 0 && (
         <Section title="Planning">
-          <div className="flex flex-wrap gap-2">
+          <ItemGroup>
             {planning.map((node) => (
-              <NodeCard
-                key={node.id}
-                node={node}
-                snapshot={snapshot}
-                act={act}
-                status={status}
-                onPath={false}
-                dependency={false}
-                onHover={() => {}}
-              />
+              <NodeRow key={node.id} node={node} snapshot={snapshot} act={act} onPath={false} />
             ))}
-          </div>
+          </ItemGroup>
         </Section>
       )}
 
       <Section title="Plan">
-        <div className="overflow-x-auto pb-2">
-          <Columns
-            nodes={nodes.filter((node) => !node.parent && !planning.includes(node))}
-            all={nodes}
-            snapshot={snapshot}
-            act={act}
-            status={status}
-          />
-        </div>
+        <PlanList
+          nodes={nodes.filter((node) => !node.parent && !planning.includes(node))}
+          all={nodes}
+          path={critical(nodes)}
+          snapshot={snapshot}
+          act={act}
+        />
       </Section>
     </div>
   );
 }
 
 /**
- * The plan as columns by dependency depth, left to right. A milestone is one card holding its own
- * columns, collapsed once it's done. Factory's helpers sit in the column of the node they serve.
+ * The plan top to bottom in the order its dependencies allow, as rows like the queue's. A milestone
+ * is a heading over its own nodes, collapsed once it's done. Factory's helpers follow the node they serve.
  */
-function Columns({
+function PlanList({
   nodes,
   all,
+  path,
   snapshot,
   act,
-  status,
 }: {
   nodes: Job[];
   all: Job[];
+  path: Set<string>;
   snapshot: Snapshot;
   act: Act;
-  status: Snapshot["status"];
 }) {
-  const [hovered, setHovered] = useState<string>();
-  const planned = nodes.filter((node) => !node.branchOf);
-  const depth = depths(planned);
+  const depth = depths(nodes.filter((node) => !node.branchOf));
   for (const helper of nodes.filter((node) => node.branchOf))
-    depth.set(helper.id, depth.get(helper.branchOf!) ?? 0);
-  const path = critical(all);
-  const highlighted = new Set(all.find((node) => node.id === hovered)?.after ?? []);
-  const layers = [...new Set(depth.values())].sort((a, b) => a - b);
+    depth.set(helper.id, (depth.get(helper.branchOf!) ?? 0) + 0.5);
+  const sorted = nodes.toSorted((a, b) => depth.get(a.id)! - depth.get(b.id)!);
   return (
-    <div className="flex w-max gap-3">
-      {layers.map((layer) => (
-        <div key={layer} className="flex flex-col gap-2">
-          {nodes
-            .filter((node) => depth.get(node.id) === layer)
-            .map((node) => {
-              const children = all.filter((each) => each.parent === node.id);
-              const props = {
-                node,
-                snapshot,
-                act,
-                status,
-                // One node is trivially on the path, so it says nothing then.
-                onPath: path.size > 1 && path.has(node.id),
-                dependency: highlighted.has(node.id),
-                onHover: setHovered,
-              };
-              return children.length > 0 ? (
-                <Milestone key={node.id} {...props} members={children} all={all} />
-              ) : (
-                <NodeCard key={node.id} {...props} />
-              );
-            })}
-        </div>
-      ))}
-    </div>
+    <ItemGroup>
+      {sorted.map((node) => {
+        const members = all.filter((each) => each.parent === node.id);
+        return members.length > 0 ? (
+          <Milestone
+            key={node.id}
+            node={node}
+            members={members}
+            all={all}
+            path={path}
+            snapshot={snapshot}
+            act={act}
+          />
+        ) : (
+          <NodeRow
+            key={node.id}
+            node={node}
+            snapshot={snapshot}
+            act={act}
+            // One node is trivially on the path, so it says nothing then.
+            onPath={path.size > 1 && path.has(node.id)}
+          />
+        );
+      })}
+    </ItemGroup>
   );
 }
 
-type CardProps = {
+function Milestone({
+  node,
+  members,
+  all,
+  path,
+  snapshot,
+  act,
+}: {
+  node: Job;
+  members: Job[];
+  all: Job[];
+  path: Set<string>;
+  snapshot: Snapshot;
+  act: Act;
+}) {
+  const done = members.filter((member) => member.state === "done").length;
+  return (
+    <Collapsible defaultOpen={node.state !== "done"} className="mt-2">
+      <CollapsibleTrigger
+        render={
+          <button
+            type="button"
+            className="group flex w-full items-center gap-2 pb-2 text-left text-sm font-medium"
+          />
+        }
+      >
+        <ChevronRightIcon className="size-4 text-muted-foreground transition-transform group-aria-expanded:rotate-90" />
+        <span className="flex-1">{node.item.title}</span>
+        <span className="text-xs text-muted-foreground tabular-nums">
+          {done}/{members.length}
+        </span>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="border-l pl-3">
+          <PlanList nodes={members} all={all} path={path} snapshot={snapshot} act={act} />
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+/** One node as a row like the queue's: state, tier, what it waits for, and what it's doing right now. */
+function NodeRow({
+  node,
+  snapshot,
+  act,
+  onPath,
+}: {
   node: Job;
   snapshot: Snapshot;
   act: Act;
-  status: Snapshot["status"];
   onPath: boolean;
-  dependency: boolean;
-  onHover: (id: string | undefined) => void;
-};
-
-function Milestone({ members, all, ...props }: CardProps & { members: Job[]; all: Job[] }) {
-  const { node, snapshot, act, status } = props;
-  const done = members.filter((member) => member.state === "done").length;
-  return (
-    <div className="min-w-60 rounded-md border border-dashed p-2">
-      <Collapsible defaultOpen={node.state !== "done"}>
-        <CollapsibleTrigger
-          render={
-            <button
-              type="button"
-              className="flex w-full items-center gap-2 text-left text-sm font-medium"
-            />
-          }
-        >
-          <StateIcon state={node.state} />
-          <span className="flex-1">{node.item.title}</span>
-          <span className="text-xs text-muted-foreground">
-            {done}/{members.length}
-          </span>
-        </CollapsibleTrigger>
-        <CollapsibleContent className="mt-2">
-          <Columns nodes={members} all={all} snapshot={snapshot} act={act} status={status} />
-        </CollapsibleContent>
-      </Collapsible>
-    </div>
-  );
-}
-
-/** One node: state, tier, what it's doing right now, and its details on click. */
-function NodeCard({ node, snapshot, act, status, onPath, dependency, onHover }: CardProps) {
-  const worker = status?.workers.find((each) => each.job === node.id);
+}) {
+  const worker = snapshot.status?.workers.find((each) => each.job === node.id);
   const step = node.notes.findLast(
     (note) => note.kind === "step" && note.attempt === node.attempts.length + 1,
   );
   const heavy = node.attempts.some((attempt) => (attempt.compactions ?? 0) > 2);
-  const ring = dependency ? "ring-2 ring-accent" : onPath ? "border-primary/60" : "";
+  const waiting = node.after.flatMap((id) => {
+    const before = snapshot.jobs.find((job) => job.id === id);
+    return before && before.state !== "done" ? [before.item.title] : [];
+  });
   return (
-    <div
-      className={`flex w-60 flex-col gap-1 rounded-md border bg-card p-2 text-sm ${ring}`}
-      onMouseEnter={() => onHover(node.id)}
-      onMouseLeave={() => onHover(undefined)}
-    >
-      <div className="flex items-start gap-2">
-        <StateIcon state={node.state} />
-        <span className="min-w-0 flex-1 wrap-anywhere [&_button]:whitespace-normal">
-          <TaskDetails item={node.item} job={node} snapshot={snapshot} act={act} bare />
-        </span>
-      </div>
-      <div className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
-        {node.tier && <Badge variant="secondary">{node.tier}</Badge>}
-        {node.front && <Badge variant="outline">factory</Badge>}
-        {node.blocked && <span>{BLOCKED[node.blocked]}</span>}
-        {node.attempts.length > 0 && (
-          <span>
-            {node.attempts.length} attempt{node.attempts.length === 1 ? "" : "s"}
+    <Row
+      leading={<StateIcon state={node.state} />}
+      title={<TaskDetails item={node.item} job={node} snapshot={snapshot} act={act} bare />}
+      meta={
+        <span className="flex flex-col gap-1">
+          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            {node.tier && <TierBadge tier={node.tier} />}
+            {node.front && <Badge variant="outline">factory</Badge>}
+            {node.blocked && <span>{BLOCKED[node.blocked]}</span>}
+            {waiting.length > 0 && <span>after {waiting.join(", ")}</span>}
+            {node.attempts.length > 0 && (
+              <span>
+                {node.attempts.length} attempt{node.attempts.length === 1 ? "" : "s"}
+              </span>
+            )}
+            {heavy && (
+              <Tooltip>
+                <TooltipTrigger
+                  render={<span className="flex items-center gap-0.5 text-warning" />}
+                >
+                  <FlameIcon className="size-3.5" /> heavy
+                </TooltipTrigger>
+                <TooltipContent>
+                  Compacted more than twice; replans split work like this smaller.
+                </TooltipContent>
+              </Tooltip>
+            )}
+            {onPath && <span className="text-primary">critical path</span>}
           </span>
-        )}
-        {heavy && (
-          <Tooltip>
-            <TooltipTrigger render={<span className="flex items-center text-warning" />}>
-              <FlameIcon className="size-3.5" /> heavy
-            </TooltipTrigger>
-            <TooltipContent>
-              Compacted more than twice; replans split work like this smaller.
-            </TooltipContent>
-          </Tooltip>
-        )}
-        {onPath && <span className="text-primary">critical path</span>}
-      </div>
-      {worker && (
-        <div className="text-xs">
-          <span className="text-primary">{worker.id}</span>, {minutesSince(worker.since)} min
-          {worker.context ? `, ${Math.round(worker.context / 1000)}k context` : ""}
-          <div className="truncate text-muted-foreground">
-            {step
-              ? `${step.text}${step.of ? ` (${step.done ?? 0}/${step.of})` : ""}`
-              : (worker.activity ?? "starting")}
-          </div>
-        </div>
-      )}
-    </div>
+          {worker && (
+            <span>
+              <span className="text-primary">{worker.id}</span>, {minutesSince(worker.since)} min
+              {worker.context ? `, ${Math.round(worker.context / 1000)}k context` : ""}:{" "}
+              {step
+                ? `${step.text}${step.of ? ` (${step.done ?? 0}/${step.of})` : ""}`
+                : (worker.activity ?? "starting")}
+            </span>
+          )}
+        </span>
+      }
+    />
+  );
+}
+
+const TIER_STYLE: Record<Tier, string> = {
+  communicator: "border-primary/50 text-primary",
+  builder: "border-transparent bg-secondary text-secondary-foreground",
+  grunt: "text-muted-foreground border-border",
+};
+
+/** Which tier runs a job, louder the more capable (and scarce) it is. */
+export function TierBadge({ tier }: { tier: Tier }) {
+  return (
+    <Badge variant="outline" className={TIER_STYLE[tier]}>
+      {tier}
+    </Badge>
   );
 }
 

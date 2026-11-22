@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/empty";
 import { ItemGroup } from "@/components/ui/item";
 import { clock, itemTitle, minutesSince, pinName, tuning } from "@/format";
+import { TierBadge } from "@/GoalsView";
 import { NewJobDialog } from "@/NewJobDialog";
 import { Row, Section } from "@/Row";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/tooltip/tooltip";
@@ -204,6 +205,14 @@ export function QueueView({
   const byId = new Map(jobs.map((job) => [job.id, job]));
   const picks = jobs.filter((job) => job.state === "queued" && job.source === "pick");
   const auto = jobs.filter((job) => job.state === "queued" && job.source === "auto");
+  // A goal's nodes wait while the goal does (for approval, or paused); milestones never run themselves.
+  const fromGoals = jobs.filter(
+    (job) =>
+      job.state === "queued" &&
+      job.of &&
+      byId.get(job.of)?.state === "queued" &&
+      !jobs.some((each) => each.parent === job.id),
+  );
   const details = (job: Job, removable: boolean) => (
     <TaskDetails
       item={job.item}
@@ -331,6 +340,29 @@ export function QueueView({
             </>
           )}
         </Section>
+
+        {fromGoals.length > 0 && (
+          <Section title={`From goals (${fromGoals.length})`}>
+            <ItemGroup>
+              <AnimatePresence mode="popLayout" initial={false}>
+                {fromGoals.map((job) => (
+                  <Glide key={job.id}>
+                    <Row
+                      leading={<StateIcon state={job.state} />}
+                      title={details(job, false)}
+                      meta={
+                        <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                          {job.tier && <TierBadge tier={job.tier} />}
+                          {byId.get(job.of!)!.item.title}
+                        </span>
+                      }
+                    />
+                  </Glide>
+                ))}
+              </AnimatePresence>
+            </ItemGroup>
+          </Section>
+        )}
 
         <Section title={`Auto (${auto.length})`}>
           {auto.length === 0 ? (

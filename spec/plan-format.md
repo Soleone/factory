@@ -68,7 +68,7 @@ A milestone (a node some other node names as `parent`) never runs itself, so it 
 
 Pick the lowest tier that will get a node right; tiers are the main lever on cost.
 
-- `communicator`: the most capable and most limited. The decomposition itself, UX and visual design, user-facing copy, anything judged by taste.
+- `communicator`: the most capable and most limited. The decomposition itself, UX and visual design, anything judged by taste, and anything people read: user-facing copy, READMEs and other docs, naming the domain's terms. Writing for a reader is never grunt work.
 - `builder`: intelligent and thorough, not a great communicator. Architecture, foundations other nodes build on, tricky logic, reviews.
 - `grunt`: follows a detailed spec with little judgment, very cheap. Anything a detailed prompt makes mechanical. A more detailed grunt prompt costs less than a higher tier.
 
