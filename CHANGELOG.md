@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.4.0](https://github.com/Soleone/factory/compare/v0.3.3...v0.4.0) (2026-11-22)
+
+### Features
+
+* blueprints, attention and a Blueprints tab to create, edit and run your own ([a6d475a](https://github.com/Soleone/factory/commit/a6d475a3ce85492fd2fcebfe7d3989b8d3209ca7))
+* factory add --blueprint, and blueprints reach chat, auto mode and candidates ([302c500](https://github.com/Soleone/factory/commit/302c5003e4c0b672d5fed6f70c6ca5821c0460f3))
+* **goals:** show the brief a goal started from, and the version in the settings footer ([077d273](https://github.com/Soleone/factory/commit/077d273bff4ae783df8065cbb4b4c59f6e82e005))
+* **pools:** keep a reserve of each pool's 5-hour window for other apps ([0a8af16](https://github.com/Soleone/factory/commit/0a8af16f6bdf8cb8cc27f9981b23747b19b7cde0))
+* **settings:** pick auto mode blueprints and repos from a searchable chip list ([8f82da5](https://github.com/Soleone/factory/commit/8f82da53fa9ebb7e3595debea50278604f6d4666))
+* **ui:** icons for every timeline event, and idle workers as a pool beside the queue ([f8bfa93](https://github.com/Soleone/factory/commit/f8bfa933caa0daf7cdfc2997c2ebd13071546297))
+
+### Bug Fixes
+
+* **goals:** finish a goal when a replan is the last job to end, and on a run's start ([abd16ed](https://github.com/Soleone/factory/commit/abd16ed41889a044d3f3b6383e55b55405caf7c9))
+* **loop:** untiered jobs run only on the run's agent workers, not on tier presets ([40a9282](https://github.com/Soleone/factory/commit/40a9282e93c27c35c51864a27429345e145ee7fb))
+* **ui:** drop the count from the Goals tab ([86b596a](https://github.com/Soleone/factory/commit/86b596a2de0f8b9998e74dc65b8ecccce43a4f76))
+* **ui:** drop the count from the Queue tab ([670b865](https://github.com/Soleone/factory/commit/670b86598912aca2ac7d1b534af7c0c92a1125d7))
+
 ## [0.3.3](https://github.com/Soleone/factory/compare/v0.3.2...v0.3.3) (2026-11-21)
 
 ### Features
