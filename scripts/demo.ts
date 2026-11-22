@@ -40,8 +40,8 @@ function demoGoal(at: string, run: string): Job[] {
     repo,
     label: "atlas",
     id,
-    play: "goal",
-    level: "decide",
+    blueprint: "goal",
+    attention: "decide",
     title,
   });
   const attempt = (
@@ -87,7 +87,7 @@ function demoGoal(at: string, run: string): Job[] {
     {
       ...BLANK,
       id: "goal",
-      item: { ...item("goal/export", "Export to every format"), play: "goal" },
+      item: { ...item("goal/export", "Export to every format"), blueprint: "goal" },
       source: "goal",
       added: at,
       state: "blocked",
@@ -118,7 +118,7 @@ function demoGoal(at: string, run: string): Job[] {
       },
     },
     node("plan", "Decompose: Export to every format", {
-      item: { ...item("plan", "Decompose: Export to every format"), play: "decompose" },
+      item: { ...item("plan", "Decompose: Export to every format"), blueprint: "decompose" },
       tier: "communicator",
       front: true,
       state: "done",
@@ -236,7 +236,7 @@ function seed(): Snapshot {
       store: "local",
       capabilities: [],
       env: {},
-      auto: { on: true, levels: ["auto"], plays: [], repos: [] },
+      auto: { on: true, attention: ["none"], blueprints: [], repos: [] },
     },
     candidates: { at, count: items.length, refreshing: false },
     prs: Object.fromEntries(
@@ -267,20 +267,20 @@ function seed(): Snapshot {
 
 const items: Item[] = [
   ["atlas", "tests", "skim", "Cover empty search results"],
-  ["atlas", "docs", "auto", "Document the export format"],
-  ["relay", "cleanup", "auto", "Remove unused retry settings"],
+  ["atlas", "docs", "none", "Document the export format"],
+  ["relay", "cleanup", "none", "Remove unused retry settings"],
   ["atlas", "tests", "skim", "Add CSV export tests"],
   ["relay", "cleanup", "decide", "Simplify request logging"],
   ["relay", "tests", "skim", "Test reconnect after timeout"],
-  ["atlas", "docs", "auto", "Check the quickstart links"],
-  ["relay", "docs", "auto", "Document webhook retries"],
+  ["atlas", "docs", "none", "Check the quickstart links"],
+  ["relay", "docs", "none", "Document webhook retries"],
   ["atlas", "cleanup", "decide", "Split the import parser"],
-].map(([repo, play, level, title], index) => ({
+].map(([repo, blueprint, attention, title], index) => ({
   repo: `/demo/${repo}`,
   label: repo,
   id: `demo-${index + 1}`,
-  play,
-  level,
+  blueprint,
+  attention,
   title,
 }));
 
@@ -377,16 +377,25 @@ function dispatch(snapshot: Snapshot, route: string, body: unknown): unknown {
     case "POST /api/candidates/refresh":
       snapshot.candidates.at = new Date().toISOString();
       return null;
-    case "GET /api/plays":
+    case "GET /api/blueprints":
       return [
-        { name: "tests", description: "Adds a behavior test for something no test covers yet." },
-        { name: "docs", description: "Fixes docs that disagree with what the code does." },
-        { name: "cleanup", description: "Cuts dead paths and needless layers from one file." },
-      ];
+        ["tests", "Adds a behavior test for something no test covers yet.", false],
+        ["docs", "Fixes docs that disagree with what the code does.", false],
+        ["cleanup", "Cuts dead paths and needless layers from a batch of files.", true],
+      ].map(([name, description, custom]) => ({
+        name,
+        description,
+        custom,
+        attention: "skim",
+        finder: "scan",
+        done: "checks pass",
+        onRequest: false,
+        prompt: `Demo blueprint: ${description}`,
+      }));
     case "POST /api/candidates/prompt": {
       const { id } = body as Pick<Item, "id">;
       const item = items.find((each) => each.id === id);
-      return `# workwork: ${id}\n\nPlay: ${item?.play}\nLevel: ${item?.level}\n\n## Task\n\nDemo task: ${item?.title?.toLowerCase()}. Keep the change small and covered by a test.\n\n## Done when\n\n- \`pnpm test\` passes.\n\n## Deliver\n\n- One commit, pushed as a PR labeled \`workwork\`.\n\n## Standard\n\nNot shown in the page.\n`;
+      return `# workwork: ${id}\n\nBlueprint: ${item?.blueprint}\nAttention: ${item?.attention}\n\n## Task\n\nDemo task: ${item?.title?.toLowerCase()}. Keep the change small and covered by a test.\n\n## Done when\n\n- \`pnpm test\` passes.\n\n## Deliver\n\n- One commit, pushed as a PR labeled \`workwork\`.\n\n## Standard\n\nNot shown in the page.\n`;
     }
     case "POST /api/jobs": {
       const selection = body as { items: Pick<Item, "repo" | "id">[]; pin?: Preset };

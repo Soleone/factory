@@ -49,7 +49,8 @@ async function readPr(url: string): Promise<Pr> {
     state: raw.state,
     draft: raw.isDraft,
     title: raw.title,
-    level: /^Level: (\w+)\s*$/m.exec(raw.body)?.[1],
+    // Level and auto are what PRs from before workwork 0.3 say.
+    attention: /^(?:Attention|Level): (\w+)\s*$/m.exec(raw.body)?.[1].replace(/^auto$/, "none"),
     additions: raw.additions,
     deletions: raw.deletions,
     files: raw.files.map((file) => file.path),

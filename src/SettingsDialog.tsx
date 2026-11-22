@@ -67,7 +67,7 @@ function SettingsForm({
   onSaved: () => void;
 }) {
   const [draft, setDraft] = useState<Settings>(snapshot.settings);
-  const [plays, setPlays] = useState<string[]>([]);
+  const [blueprints, setBlueprints] = useState<string[]>([]);
   const [repos, setRepos] = useState<string[]>([]);
   // The Auto switch in the header saves on its own; this form never changes it.
   const current = { ...draft, auto: { ...draft.auto, on: snapshot.settings.auto.on } };
@@ -75,7 +75,7 @@ function SettingsForm({
 
   useEffect(() => {
     void api.candidates().then((candidates) => {
-      setPlays([...new Set(candidates.items.map((item) => item.play))].sort());
+      setBlueprints([...new Set(candidates.items.map((item) => item.blueprint))].sort());
       setRepos([...new Set(candidates.items.map((item) => item.repo))].sort());
     });
   }, [snapshot.candidates.at]);
@@ -143,32 +143,32 @@ function SettingsForm({
                 filter allows everything.
               </FieldDescription>
               <Field>
-                <FieldLabel>Levels</FieldLabel>
+                <FieldLabel>Attention</FieldLabel>
                 <ToggleGroup
                   multiple
                   variant="outline"
-                  value={auto.levels}
-                  onValueChange={(levels) => setAuto({ levels })}
+                  value={auto.attention}
+                  onValueChange={(attention) => setAuto({ attention })}
                 >
-                  {["auto", "skim", "decide"].map((level) => (
-                    <ToggleGroupItem key={level} value={level}>
-                      {level}
+                  {["none", "skim", "decide"].map((value) => (
+                    <ToggleGroupItem key={value} value={value}>
+                      {value}
                     </ToggleGroupItem>
                   ))}
                 </ToggleGroup>
               </Field>
               <Field>
-                <FieldLabel>Plays</FieldLabel>
+                <FieldLabel>Blueprints</FieldLabel>
                 <ToggleGroup
                   multiple
                   variant="outline"
                   className="flex-wrap"
-                  value={auto.plays}
-                  onValueChange={(plays) => setAuto({ plays })}
+                  value={auto.blueprints}
+                  onValueChange={(blueprints) => setAuto({ blueprints })}
                 >
-                  {plays.map((play) => (
-                    <ToggleGroupItem key={play} value={play}>
-                      {play}
+                  {blueprints.map((blueprint) => (
+                    <ToggleGroupItem key={blueprint} value={blueprint}>
+                      {blueprint}
                     </ToggleGroupItem>
                   ))}
                 </ToggleGroup>

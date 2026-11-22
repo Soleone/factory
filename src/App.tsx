@@ -1,6 +1,14 @@
 import { useState } from "react";
-import { Activity, Inbox, ListOrdered, PackageCheck, Workflow } from "lucide-react";
+import {
+  Activity,
+  DraftingCompass,
+  Inbox,
+  ListOrdered,
+  PackageCheck,
+  Workflow,
+} from "lucide-react";
 import { ActivityView } from "@/ActivityView";
+import { BlueprintsView } from "@/BlueprintsView";
 import { useFactory, type Act } from "@/api";
 import type { Snapshot } from "@/backend/types.ts";
 import { AgentSidebar } from "@/components/soleone/agent";
@@ -125,6 +133,10 @@ function Factory({
                 <Inbox />
                 Candidates
               </TabsTrigger>
+              <TabsTrigger value="blueprints">
+                <DraftingCompass />
+                Blueprints
+              </TabsTrigger>
               <TabsTrigger value="results">
                 <PackageCheck />
                 Results
@@ -145,6 +157,9 @@ function Factory({
         </TabsContent>
         <TabsContent value="candidates">
           <CandidatesView snapshot={snapshot} act={act} />
+        </TabsContent>
+        <TabsContent value="blueprints">
+          <BlueprintsView act={act} />
         </TabsContent>
         <TabsContent value="activity">
           <ActivityView snapshot={snapshot} act={act} />

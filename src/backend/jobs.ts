@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { workworkBranch } from "./review.ts";
-import { LEVELS, output } from "./state.ts";
+import { ATTENTION, output } from "./state.ts";
 import {
   chains,
   itemKey,
@@ -16,6 +16,7 @@ import {
   type Note,
   type Settings,
   type Tier,
+  upgradeItem,
 } from "./types.ts";
 
 /**
@@ -100,6 +101,7 @@ type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K>
 
 const fresh = (job: NewJob, at: string): Job => ({
   ...job,
+  item: upgradeItem(job.item),
   after: typeof job.after === "string" ? [job.after] : (job.after ?? []),
   gates: job.gates ?? [],
   needs: job.needs ?? [],
@@ -176,7 +178,12 @@ export function replay(events: Event[]): Job[] {
       job.blocked = undefined;
       job.why = undefined;
     }
-    if (event.type === "update") Object.assign(job, event.change);
+    if (event.type === "update")
+      Object.assign(
+        job,
+        event.change,
+        event.change.item && { item: upgradeItem(event.change.item) },
+      );
     if (event.type === "verify")
       job.unverified = event.need ? job.unverified.filter((need) => need !== event.need) : [];
     if (event.type === "note") {
@@ -205,7 +212,7 @@ export function replay(events: Event[]): Job[] {
       )?.unverified;
       const lacking = [...(unverified ?? []), ...(event.attempt.missing ?? [])];
       // A plan has nothing to check by hand; what its writer was unsure of stays in its result.
-      const planning = (PLANNING as readonly string[]).includes(job.item.play);
+      const planning = (PLANNING as readonly string[]).includes(job.item.blueprint);
       if (outcome === "done" && lacking.length && !planning)
         job.unverified = [...new Set([...job.unverified, ...lacking])];
       if (asked) {
@@ -358,7 +365,7 @@ export function nextJob(jobs: Job[], agent: string): Job | undefined {
 }
 
 const ACTIVE: Job["state"][] = ["queued", "running", "blocked"];
-const sameWork = (item: Item) => `${itemKey(item)} ${item.play} ${item.title}`;
+const sameWork = (item: Item) => `${itemKey(item)} ${item.blueprint} ${item.title}`;
 
 /** Queues the items, skipping those already in the queue; returns the jobs it added. */
 export function addJobs(
@@ -401,8 +408,8 @@ export function addOwnJob(
       repo: own.repo,
       label: basename(own.repo),
       id: `own-${Date.now()}`,
-      play: "own",
-      level: "decide",
+      blueprint: "own",
+      attention: "decide",
       title,
     },
     source: "pick",
@@ -418,7 +425,11 @@ export function addOwnJob(
  */
 export function queueConflicts(state: string, id: string, url: string, files: string[]): void {
   const job = readJobs(state).find((job) => job.id === id)!;
-  const item = { ...job.item, play: "conflicts", title: `Resolve conflicts: ${job.item.title}` };
+  const item = {
+    ...job.item,
+    blueprint: "conflicts",
+    title: `Resolve conflicts: ${job.item.title}`,
+  };
   addJobs(state, [item], "pick", { prompt: conflictsPrompt(url, files) });
 }
 
@@ -447,7 +458,7 @@ export function queueReview(state: string, id: string, agent: string): Job | und
   if (job.agent === agent)
     throw new Error(`job ${id} is ${agent}'s own; pick another agent to review it`);
   const branch = workworkBranch(job.item);
-  const item = { ...job.item, play: "review", title: `Review: ${job.item.title}` };
+  const item = { ...job.item, blueprint: "review", title: `Review: ${job.item.title}` };
   const prompt = reviewPrompt(branch, job.agent);
   return addJobs(state, [item], "pick", { agent, prompt, after: [id] })[0];
 }
@@ -474,7 +485,7 @@ export function queueFollowup(state: string, id: string, task: string): Job | un
   const job = find(state, id, ...ACTIVE, "done", "failed");
   if (!job.notes.some((note) => note.followups?.includes(task)))
     throw new Error(`job ${id} reported no follow-up "${task}"`);
-  const item = { ...job.item, id: `${job.item.id}+followup`, play: "followup", title: task };
+  const item = { ...job.item, id: `${job.item.id}+followup`, blueprint: "followup", title: task };
   const url = prUrl(job);
   const prompt = `${task}
 
@@ -577,7 +588,7 @@ Change the work to follow the answer. ${prUrl(job) ? `Its pull request is ${prUr
     item: {
       ...job.item,
       id: `${job.item.id}+answer`,
-      play: "answer",
+      blueprint: "answer",
       title: `Follow the answer: ${job.item.title}`,
     },
     source: job.of ? "goal" : "pick",
@@ -601,11 +612,11 @@ export function endJob(state: string, id: string, attempt: Attempt): void {
   append(state, { at: new Date().toISOString(), type: "attempt", id, attempt });
 }
 
-/** Cheapest attention first, and within a level one item per repo in turn so no repo takes the night. */
-export function order(items: Item[], levels: string[]): Item[] {
-  return LEVELS.filter((level) => levels.includes(level)).flatMap((level) => {
+/** Cheapest attention first, and within each one item per repo in turn so no repo takes the night. */
+export function order(items: Item[], wanted: string[]): Item[] {
+  return ATTENTION.filter((attention) => wanted.includes(attention)).flatMap((attention) => {
     const byRepo = new Map<string, Item[]>();
-    for (const item of items.filter((item) => item.level === level))
+    for (const item of items.filter((item) => item.attention === attention))
       byRepo.set(item.repo, [...(byRepo.get(item.repo) ?? []), item]);
     const queues = [...byRepo.values()];
     const turns: Item[] = [];
@@ -626,8 +637,8 @@ export function autoPicks(
   const wanted = candidates.filter(
     (item) =>
       !seen.has(itemKey(item)) &&
-      (auto.plays.length === 0 || auto.plays.includes(item.play)) &&
+      (auto.blueprints.length === 0 || auto.blueprints.includes(item.blueprint)) &&
       (auto.repos.length === 0 || auto.repos.includes(item.repo)),
   );
-  return order(wanted, auto.levels).slice(0, count);
+  return order(wanted, auto.attention).slice(0, count);
 }

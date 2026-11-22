@@ -33,8 +33,8 @@ import { MARKDOWN } from "@/PrReview";
 import { PrLine, TrainLine } from "@/ResultsView";
 
 /** From `workwork --help`. */
-const LEVELS: Record<string, string> = {
-  auto: "a check defines correct, so a digest is enough",
+const ATTENTION: Record<string, string> = {
+  none: "a check defines correct, so a digest is enough",
   skim: "same behavior and a small diff, to skim and accept",
   decide: "changes behavior or needs your product judgment",
 };
@@ -131,7 +131,7 @@ function TaskTitle({ item, bare }: { item: Item; bare?: boolean }) {
 export function TaskDetails({
   item,
   job,
-  play,
+  blueprint,
   snapshot,
   act,
   actions,
@@ -141,8 +141,8 @@ export function TaskDetails({
   job?: Job;
   /** Without the repo, as inside a goal, where every node shares it. */
   bare?: boolean;
-  /** What the item's play does, once workwork has said. */
-  play?: string;
+  /** What the item's blueprint does, once workwork has said. */
+  blueprint?: string;
   snapshot: Snapshot;
   act: Act;
   actions?: ReactNode;
@@ -173,7 +173,7 @@ export function TaskDetails({
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground">
                 <StatePill state={state} />
                 <DialogDescription>
-                  {item.label} · {item.play} · {item.level}
+                  {item.label} · {item.blueprint} · {item.attention}
                 </DialogDescription>
               </div>
             </div>
@@ -184,7 +184,7 @@ export function TaskDetails({
             <div className="flex min-w-0 flex-col gap-3 overflow-auto p-4">
               <Label>The task</Label>
               <Task item={item} jobId={job.id} />
-              <About item={item} play={play} />
+              <About item={item} blueprint={blueprint} />
             </div>
             <div className="flex min-w-0 flex-col gap-3 overflow-auto bg-muted/30 p-4 md:border-l">
               <Story job={job} snapshot={snapshot} act={act} />
@@ -193,7 +193,7 @@ export function TaskDetails({
         ) : (
           <div className="flex max-h-[65dvh] flex-col gap-3 overflow-auto">
             <Task item={item} />
-            <About item={item} play={play} />
+            <About item={item} blueprint={blueprint} />
           </div>
         )}
         {actions && <DialogFooter>{actions}</DialogFooter>}
@@ -247,7 +247,7 @@ function Story({ job, snapshot, act }: { job: Job; snapshot: Snapshot; act: Act 
   const last = job.attempts.at(-1);
   const queued = new Set(
     snapshot.jobs
-      .filter((each) => each.state !== "removed" && each.item.play === "followup")
+      .filter((each) => each.state !== "removed" && each.item.blueprint === "followup")
       .map((each) => each.item.title),
   );
   const worker = status?.workers.find((each) => each.job === job.id);
@@ -415,18 +415,19 @@ function Label({ children }: { children: ReactNode }) {
   return <h3 className="text-xs font-medium text-muted-foreground">{children}</h3>;
 }
 
-/** What the play and the review level mean, for whoever decides on the result. */
-function About({ item, play }: { item: Item; play?: string }) {
+/** What the blueprint and the review attention mean, for whoever decides on the result. */
+function About({ item, blueprint }: { item: Item; blueprint?: string }) {
   return (
     <p className="text-xs text-muted-foreground">
-      {play && (
+      {blueprint && (
         <>
-          <span className="font-medium text-foreground">{item.play}</span>: {play}{" "}
+          <span className="font-medium text-foreground">{item.blueprint}</span>: {blueprint}{" "}
         </>
       )}
-      {LEVELS[item.level] && (
+      {ATTENTION[item.attention] && (
         <>
-          <span className="font-medium text-foreground">{item.level}</span>: {LEVELS[item.level]}.
+          <span className="font-medium text-foreground">{item.attention}</span>:{" "}
+          {ATTENTION[item.attention]}.
         </>
       )}
     </p>

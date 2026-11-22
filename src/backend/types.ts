@@ -21,7 +21,7 @@ export type Preset = Tuning & {
 /** What kind of intelligence a job needs, highest first. */
 export const TIERS = ["communicator", "builder", "grunt"] as const;
 
-/** The plays of factory's own jobs that write a goal's plan. */
+/** The blueprints of factory's own jobs that write a goal's plan. */
 export const PLANNING = ["decompose", "replan"] as const;
 export type Tier = (typeof TIERS)[number];
 
@@ -61,8 +61,8 @@ export type Settings = {
   capabilities: string[];
   /** Environment per repo path for the agents and gates that work it. */
   env: Record<string, Record<string, string>>;
-  /** Auto mode tops up the queue from workwork; empty repos or plays means all of them. */
-  auto: { on: boolean; levels: string[]; plays: string[]; repos: string[] };
+  /** Auto mode tops up the queue from workwork; empty repos or blueprints means all of them. */
+  auto: { on: boolean; attention: string[]; blueprints: string[]; repos: string[] };
 };
 
 /** A workwork candidate, as `workwork --json` prints it. `id` is workwork's, not a job's. */
@@ -70,10 +70,21 @@ export type Item = {
   repo: string;
   label: string;
   id: string;
-  play: string;
-  level: string;
+  blueprint: string;
+  attention: string;
   title: string;
 };
+
+/** Before workwork 0.3 a blueprint was a play and attention a level, with auto for none. */
+export type LegacyItem =
+  | Item
+  | (Omit<Item, "blueprint" | "attention"> & { play: string; level: string });
+
+export function upgradeItem(item: LegacyItem): Item {
+  if (!("play" in item)) return item;
+  const { play, level, ...rest } = item;
+  return { ...rest, blueprint: play, attention: level === "auto" ? "none" : level };
+}
 
 /** A candidate's identity across workwork runs. */
 export const itemKey = (item: Pick<Item, "repo" | "id">) => `${item.repo} ${item.id}`;
@@ -81,8 +92,17 @@ export const itemKey = (item: Pick<Item, "repo" | "id">) => `${item.repo} ${item
 /** `workwork --all --json` takes minutes, so its answer is kept here for browsing and auto mode. */
 export type Candidates = { at: string; items: Item[] };
 
-/** A play as `workwork plays --json` prints it, with the fields factory shows. */
-export type Play = { name: string; description: string };
+/** A blueprint as `workwork blueprints --json` prints it. `custom` ones are the user's own. */
+export type Blueprint = {
+  name: string;
+  attention: string;
+  description: string;
+  finder: string;
+  done: string;
+  onRequest: boolean;
+  prompt: string;
+  custom: boolean;
+};
 
 /** Tokens by kind over an attempt, as the runner's event stream reports them. */
 export type Tokens = { input: number; cached: number; output: number };
@@ -275,8 +295,8 @@ export type Pr = {
   state: "OPEN" | "MERGED" | "CLOSED";
   draft: boolean;
   title: string;
-  /** The PR body's Level line: the agent may have raised the candidate's. */
-  level?: string;
+  /** The PR body's Attention line: the agent may have raised the candidate's. */
+  attention?: string;
   additions: number;
   deletions: number;
   files: string[];

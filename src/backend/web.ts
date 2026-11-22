@@ -50,7 +50,8 @@ import {
   itemKey,
   prUrl,
   type Model,
-  type Play,
+  type Blueprint,
+  type Item,
   type Preset,
   type Settings,
   type Snapshot,
@@ -158,9 +159,20 @@ export function serve(state: string, port: number, host: string): Server {
       return newGoal(state, body.title.trim(), repo, body.brief ?? "");
     },
     "POST /api/goals/import": (body: { plan: string }) => importPlanText(state, body.plan),
-    // Read fresh each time: it's quick, and the user may have just edited a play of their own.
-    "GET /api/plays": async (): Promise<Play[]> =>
-      JSON.parse(await output("workwork", ["plays", "--json"], process.cwd())),
+    // Read fresh each time: it's quick, and the user may have just edited a blueprint of their own.
+    "GET /api/blueprints": async (): Promise<Blueprint[]> =>
+      JSON.parse(await output("workwork", ["blueprints", "--json"], process.cwd())),
+    "PUT /api/blueprints": (body: Omit<Blueprint, "custom">) =>
+      output("workwork", ["blueprints", "save"], process.cwd(), JSON.stringify(body)),
+    "POST /api/blueprints/delete": (body: { name: string }) =>
+      output("workwork", ["blueprints", "delete", body.name], process.cwd()),
+    "POST /api/blueprints/run": async (body: { name: string; repo: string }) => {
+      const found: Item[] = JSON.parse(
+        await output("workwork", ["--blueprint", body.name, "--json"], body.repo),
+      );
+      if (found.length === 0) throw new Error(`${body.name} finds nothing to do in ${body.repo}`);
+      return addJobs(state, found, "pick");
+    },
     "POST /api/candidates/prompt": (body: { repo: string; id: string }) => {
       const [item] = candidates([body]);
       return output("workwork", ["prompt", item.id], item.repo);

@@ -123,7 +123,7 @@ export function ResultsView({
   const { prs, train } = snapshot;
   const active = snapshot.jobs.filter((job) => job.state !== "removed");
   const reviewed = new Set(
-    active.filter((job) => job.item.play === "review").map((job) => itemKey(job.item)),
+    active.filter((job) => job.item.blueprint === "review").map((job) => itemKey(job.item)),
   );
   const agents = Object.keys(snapshot.settings.agents);
   const jobs = active
@@ -257,7 +257,7 @@ export function ResultsView({
             asked={snapshot.settings.chat.agent}
             unread={seen !== "" && job.attempts.at(-1)!.end > seen}
             reviewer={
-              job.item.play !== "review" && !reviewed.has(itemKey(job.item))
+              job.item.blueprint !== "review" && !reviewed.has(itemKey(job.item))
                 ? agents.find((agent) => agent !== job.agent)
                 : undefined
             }
@@ -473,7 +473,7 @@ function Facts({
   const checks = pr?.state === "OPEN" && CHECKS[pr.checks];
   const facts: ReactNode[] = url
     ? [
-        pr?.state === "OPEN" && (pr.level ?? job.item.level),
+        pr?.state === "OPEN" && (pr.attention ?? job.item.attention),
         pr && (
           <>
             <span className="text-success">+{pr.additions}</span>{" "}

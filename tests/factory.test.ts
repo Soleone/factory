@@ -128,27 +128,27 @@ describe("limit messages", () => {
   });
 });
 
-const item = (repo: string, id: string, level = "skim", play = "fake"): Item => ({
+const item = (repo: string, id: string, attention = "skim", blueprint = "fake"): Item => ({
   repo,
   label: repo,
   id,
-  play,
-  level,
+  blueprint,
+  attention,
   title: `fix ${id}`,
 });
 
 describe("queue", () => {
-  test("cheapest attention first, taking turns between repos, only the wanted levels", () => {
+  test("cheapest attention first, taking turns between repos, only the wanted attention", () => {
     const items = [
       item("a", "a1"),
       item("a", "a2"),
       item("a", "a3"),
       item("b", "b1"),
-      item("a", "a4", "auto"),
+      item("a", "a4", "none"),
       item("b", "b2", "decide"),
       item("c", "c1"),
     ];
-    expect(order(items, ["auto", "skim", "decide"]).map((item) => item.id)).toEqual([
+    expect(order(items, ["none", "skim", "decide"]).map((item) => item.id)).toEqual([
       "a4",
       "a1",
       "b1",
@@ -157,16 +157,43 @@ describe("queue", () => {
       "a3",
       "b2",
     ]);
-    expect(order(items, ["auto"]).map((item) => item.id)).toEqual(["a4"]);
+    expect(order(items, ["none"]).map((item) => item.id)).toEqual(["a4"]);
   });
 
-  test("auto mode takes only the chosen repos and plays, none chosen meaning all", () => {
+  test("auto mode takes only the chosen repos and blueprints, none chosen meaning all", () => {
     const items = [item("a", "a1"), item("b", "b1", "skim", "simplify"), item("c", "c1")];
-    const ids = (auto: { plays: string[]; repos: string[] }) =>
-      autoPicks(items, [], { levels: ["skim"], ...auto }, 5).map((item) => item.id);
-    expect(ids({ plays: [], repos: [] })).toEqual(["a1", "b1", "c1"]);
-    expect(ids({ plays: [], repos: ["a", "b"] })).toEqual(["a1", "b1"]);
-    expect(ids({ plays: ["simplify"], repos: ["a", "b"] })).toEqual(["b1"]);
+    const ids = (auto: { blueprints: string[]; repos: string[] }) =>
+      autoPicks(items, [], { attention: ["skim"], ...auto }, 5).map((item) => item.id);
+    expect(ids({ blueprints: [], repos: [] })).toEqual(["a1", "b1", "c1"]);
+    expect(ids({ blueprints: [], repos: ["a", "b"] })).toEqual(["a1", "b1"]);
+    expect(ids({ blueprints: ["simplify"], repos: ["a", "b"] })).toEqual(["b1"]);
+  });
+
+  test("jobs and settings saved before blueprints still read, with auto as none", () => {
+    const state = mkdtempSync(join(scratch, "state-"));
+    const old = { repo: "r", label: "r", id: "todo/a", play: "todo", level: "auto", title: "a" };
+    writeFileSync(
+      join(state, "jobs.jsonl"),
+      `${JSON.stringify({ at: "2026-11-01T00:00:00Z", type: "add", job: { id: "j", item: old, source: "pick" } })}\n`,
+    );
+    writeFileSync(
+      join(state, "settings.json"),
+      JSON.stringify({ auto: { on: true, levels: ["auto", "skim"], plays: ["todo"], repos: [] } }),
+    );
+    expect(readJobs(state)[0].item).toEqual({
+      repo: "r",
+      label: "r",
+      id: "todo/a",
+      blueprint: "todo",
+      attention: "none",
+      title: "a",
+    });
+    expect(readSettings(state).auto).toEqual({
+      on: true,
+      attention: ["none", "skim"],
+      blueprints: ["todo"],
+      repos: [],
+    });
   });
 
   test("picks come before auto jobs, in the order the user gives them", async () => {
@@ -186,7 +213,7 @@ describe("queue", () => {
 });
 
 describe("jobs that wait on others", () => {
-  test("a job waits for the one it comes after; the same play is queued once", () => {
+  test("a job waits for the one it comes after; the same blueprint is queued once", () => {
     const state = mkdtempSync(join(scratch, "state-"));
     const [fix] = addJobs(state, [item("r", "a")], "pick", { agent: "claude" });
     expect(addJobs(state, [item("r", "a")], "pick")).toEqual([]);
@@ -195,7 +222,7 @@ describe("jobs that wait on others", () => {
     expect(review).toMatchObject({
       after: [fix.id],
       agent: "pi",
-      item: { id: "a", play: "review" },
+      item: { id: "a", blueprint: "review" },
     });
     expect(review.prompt).toContain("gh pr diff workwork/a");
     expect(queueReview(state, fix.id, "pi")).toBeUndefined();
@@ -242,7 +269,11 @@ describe("jobs that wait on others", () => {
     addNote(state, job.id, { kind: "result", text: "done", followups: ["also b"] });
     expect(() => queueFollowup(state, job.id, "not reported")).toThrow("no follow-up");
     const followup = queueFollowup(state, job.id, "also b")!;
-    expect(followup.item).toMatchObject({ id: "a+followup", play: "followup", title: "also b" });
+    expect(followup.item).toMatchObject({
+      id: "a+followup",
+      blueprint: "followup",
+      title: "also b",
+    });
     expect(followup.prompt).toMatch(/^also b\n/);
     expect(queueFollowup(state, job.id, "also b")).toBeUndefined();
   });
@@ -366,7 +397,7 @@ describe("the factory", () => {
     base.pick("b");
     writeSettings(base.state, {
       ...readSettings(base.state),
-      auto: { on: true, levels: ["skim"], plays: [], repos: [] },
+      auto: { on: true, attention: ["skim"], blueprints: [], repos: [] },
     });
     const jobs = await work(
       options(base),
@@ -977,7 +1008,7 @@ esac; ${RESULT}`;
       options(base, { claude: {}, pi: {} }),
       (jobs) => jobs.find((job) => job.id === goal.id)!.state === "done",
     );
-    const conflicts = jobs.filter((job) => job.item.play === "conflicts");
+    const conflicts = jobs.filter((job) => job.item.blueprint === "conflicts");
     expect(conflicts).toHaveLength(1);
     expect(conflicts[0]).toMatchObject({ state: "done", front: true });
     expect(sh(repo, "git", "show", "origin/goal/demo:same.txt")).toBe("both\n");
@@ -1006,7 +1037,7 @@ esac; git push -q origin HEAD:$b; ${RESULT}`,
     expect(goalJob.notes.map((note) => note.text)).toContain(
       "goal/demo fails `test ! -e bad.txt` after merging a",
     );
-    expect(jobs.filter((job) => job.item.play === "red").map((job) => job.state)).toEqual([
+    expect(jobs.filter((job) => job.item.blueprint === "red").map((job) => job.state)).toEqual([
       "done",
       "done",
     ]);
@@ -1029,7 +1060,7 @@ esac`,
       options(base),
       (jobs) => jobs.find((job) => job.id === goal.id)!.state === "done",
     );
-    expect(jobs.filter((job) => job.of).map((job) => [job.item.play, job.state])).toEqual([
+    expect(jobs.filter((job) => job.of).map((job) => [job.item.blueprint, job.state])).toEqual([
       ["review", "done"],
       ["fix", "done"],
       ["goal", "done"],
@@ -1063,7 +1094,7 @@ if [ $n = 1 ]; then echo '{"format":"factory-plan/1","nodes":[]}' > .factory/dem
     // Nothing to approve until the plan is in.
     expect(readJobs(state).find((job) => job.id === goal.id)?.blocked).toBeUndefined();
     const jobs = await work(options(base), (jobs) => jobs.some((job) => job.key === "b"));
-    const decompose = jobs.find((job) => job.item.play === "decompose")!;
+    const decompose = jobs.find((job) => job.item.blueprint === "decompose")!;
     expect(decompose).toMatchObject({ state: "done", tier: "communicator" });
     expect(decompose.notes.find((note) => note.kind === "factory")?.text).toContain(
       "has problems; fix them all:",
@@ -1097,7 +1128,7 @@ esac`,
     );
     approveGoal(state, goal.id);
     const jobs = await work(options(base), (jobs) =>
-      jobs.some((job) => job.item.play === "replan" && job.state === "done"),
+      jobs.some((job) => job.item.blueprint === "replan" && job.state === "done"),
     );
     const nodes = jobs.filter((job) => job.key).sort((x, y) => x.key!.localeCompare(y.key!));
     expect(nodes.map((job) => [job.key, job.state])).toEqual([
@@ -1268,7 +1299,7 @@ esac`,
         await new Promise((resolve) => setTimeout(resolve, 20));
       }
       expect(prs[pr]).toMatchObject({
-        level: "skim",
+        attention: "skim",
         checks: "pending",
         files: ["a.ts"],
         conflicts: false,
@@ -1687,7 +1718,9 @@ esac; done`,
               reason: "conflicts in shared.txt; a job to resolve them is queued",
             });
           }
-          const fixes = readJobs(base.state).filter((other) => other.item.play === "conflicts");
+          const fixes = readJobs(base.state).filter(
+            (other) => other.item.blueprint === "conflicts",
+          );
           expect(fixes.map((fix) => [fix.state, fix.item.title])).toEqual([
             ["queued", "Resolve conflicts: fix a"],
           ]);

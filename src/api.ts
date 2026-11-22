@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type { Candidates, Job, Model, Play, Preset, Snapshot, Tier } from "./backend/types.ts";
+import type { Blueprint, Candidates, Job, Model, Preset, Snapshot, Tier } from "./backend/types.ts";
 import type { clonableRepos } from "./backend/repos.ts";
 import type { DialogAnswer } from "./pi";
 
@@ -20,7 +20,14 @@ export const api = {
       "/api/candidates",
     ),
   refreshCandidates: () => call("POST", "/api/candidates/refresh"),
-  plays: () => call<Play[]>("GET", "/api/plays"),
+  blueprints: () => call<Blueprint[]>("GET", "/api/blueprints"),
+  /** Saves one of the user's own, replacing theirs of the same name. */
+  saveBlueprint: (blueprint: Omit<Blueprint, "custom">) =>
+    call("PUT", "/api/blueprints", blueprint),
+  deleteBlueprint: (name: string) => call("POST", "/api/blueprints/delete", { name }),
+  /** Queues every candidate the blueprint finds in the repo, on-request ones included. */
+  runBlueprint: (name: string, repo: string) =>
+    call<Job[]>("POST", "/api/blueprints/run", { name, repo }),
   /** What an agent is told to do for the candidate. */
   prompt: (item: { repo: string; id: string }) =>
     call<string>("POST", "/api/candidates/prompt", { repo: item.repo, id: item.id }),

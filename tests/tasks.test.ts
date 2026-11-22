@@ -38,8 +38,8 @@ test.skipIf(!existsSync(cli))(
       repo: "/r",
       label: "r",
       id,
-      play: "goal",
-      level: "decide",
+      blueprint: "goal",
+      attention: "decide",
       title: `Node ${id}`,
     });
     const node = (id: string, rest: Partial<NewJob> = {}) =>
@@ -62,7 +62,7 @@ test.skipIf(!existsSync(cli))(
     node("a", { tier: "communicator" });
     node("b", { after: ["a"] });
     node("c", { tier: "grunt" });
-    addJob(state, { id: "w", item: { ...item("w"), play: "simplify" }, source: "pick" });
+    addJob(state, { id: "w", item: { ...item("w"), blueprint: "simplify" }, source: "pick" });
 
     client = new TasksClient(cli, home);
     const tasks = async () =>

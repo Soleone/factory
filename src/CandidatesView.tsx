@@ -45,7 +45,7 @@ const CLONE = { value: "clone-project", label: "Clone project..." };
 const PAGE = 100;
 const key = (item: { repo: string; id: string }) => `${item.repo} ${item.id}`;
 
-/** Everything workwork found, by play, to pick from. */
+/** Everything workwork found, by blueprint, to pick from. */
 export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act }) {
   const [cloneOpen, setCloneOpen] = useState(false);
   const [cloneCount, setCloneCount] = useState(0);
@@ -53,11 +53,11 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
   const [items, setItems] = useState<Item[]>([]);
   const [repoPaths, setRepoPaths] = useState<string[]>([]);
   const [repo, setRepo] = useState(ALL);
-  const [play, setPlay] = useState(ALL);
-  const [levels, setLevels] = useState(["auto", "skim", "decide"]);
+  const [blueprint, setBlueprint] = useState(ALL);
+  const [attention, setAttention] = useState(["none", "skim", "decide"]);
   const [search, setSearch] = useState("");
   const [shown, setShown] = useState(PAGE);
-  /** What each play does, by name; empty until workwork answers. */
+  /** What each blueprint does, by name; empty until workwork answers. */
   const [described, setDescribed] = useState(new Map<string, string>());
   /** Refresh clicks, each turning the icon once. */
   const [turns, setTurns] = useState(0);
@@ -77,8 +77,10 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
 
   useEffect(() => {
     void api
-      .plays()
-      .then((plays) => setDescribed(new Map(plays.map((each) => [each.name, each.description]))));
+      .blueprints()
+      .then((blueprints) =>
+        setDescribed(new Map(blueprints.map((each) => [each.name, each.description]))),
+      );
   }, [at]);
 
   // The latest job per candidate, so the list says what already happened to it.
@@ -98,15 +100,16 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
   }, [items, repoPaths]);
 
   const inRepo = repo === ALL ? items : items.filter((item) => item.repo === repo);
-  const playCounts = new Map<string, number>();
-  for (const item of inRepo) playCounts.set(item.play, (playCounts.get(item.play) ?? 0) + 1);
-  const plays = [...playCounts].sort((a, b) => a[1] - b[1]);
+  const blueprintCounts = new Map<string, number>();
+  for (const item of inRepo)
+    blueprintCounts.set(item.blueprint, (blueprintCounts.get(item.blueprint) ?? 0) + 1);
+  const blueprints = [...blueprintCounts].sort((a, b) => a[1] - b[1]);
 
   const words = search.toLowerCase().split(/\s+/).filter(Boolean);
   const matches = inRepo.filter(
     (item) =>
-      (play === ALL || item.play === play) &&
-      levels.includes(item.level) &&
+      (blueprint === ALL || item.blueprint === blueprint) &&
+      attention.includes(item.attention) &&
       words.every((word) =>
         `${itemTitle(item)} ${item.id} ${item.label}`.toLowerCase().includes(word),
       ),
@@ -143,10 +146,10 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
           value={search}
           onChange={(event) => setSearch(event.target.value)}
         />
-        <ToggleGroup multiple variant="outline" value={levels} onValueChange={setLevels}>
-          {["auto", "skim", "decide"].map((level) => (
-            <ToggleGroupItem key={level} value={level}>
-              {level}
+        <ToggleGroup multiple variant="outline" value={attention} onValueChange={setAttention}>
+          {["none", "skim", "decide"].map((value) => (
+            <ToggleGroupItem key={value} value={value}>
+              {value}
             </ToggleGroupItem>
           ))}
         </ToggleGroup>
@@ -161,8 +164,12 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
             const next = value ?? ALL;
             setRepo(next);
             setShown(PAGE);
-            if (!items.some((item) => item.play === play && (next === ALL || item.repo === next)))
-              setPlay(ALL);
+            if (
+              !items.some(
+                (item) => item.blueprint === blueprint && (next === ALL || item.repo === next),
+              )
+            )
+              setBlueprint(ALL);
           }}
         >
           <SelectTrigger aria-label="Repo" ref={repoTrigger}>
@@ -222,21 +229,21 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
       ) : (
         <div className="flex flex-col gap-6 md:flex-row">
           <nav className="flex flex-wrap gap-1 md:w-48 md:flex-none md:flex-col">
-            {[[ALL, inRepo.length] as const, ...plays].map(([name, total]) => (
+            {[[ALL, inRepo.length] as const, ...blueprints].map(([name, total]) => (
               <Tooltip key={name} disabled={!described.has(name)}>
                 <TooltipTrigger
                   render={
                     <Button
-                      variant={play === name ? "secondary" : "ghost"}
+                      variant={blueprint === name ? "secondary" : "ghost"}
                       size="sm"
                       onClick={() => {
-                        setPlay(name);
+                        setBlueprint(name);
                         setShown(PAGE);
                       }}
                     />
                   }
                 >
-                  <span className="flex-1 text-left">{name || "All plays"}</span>
+                  <span className="flex-1 text-left">{name || "All blueprints"}</span>
                   <span className="text-muted-foreground">{total}</span>
                 </TooltipTrigger>
                 <TooltipContent side="right">{described.get(name)}</TooltipContent>
@@ -279,7 +286,7 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
                         <TaskDetails
                           item={item}
                           job={job}
-                          play={described.get(item.play)}
+                          blueprint={described.get(item.blueprint)}
                           snapshot={snapshot}
                           act={act}
                           actions={!job && queueButton}
@@ -288,7 +295,7 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
                       meta={
                         <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
                           <StatePill state={taskState(job, snapshot.prs)} />
-                          {[item.play, item.level, item.id].join(" · ")}
+                          {[item.blueprint, item.attention, item.id].join(" · ")}
                         </span>
                       }
                     >

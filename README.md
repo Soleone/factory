@@ -10,7 +10,7 @@ npm install -g @soleone/factory
 factory serve    # http://127.0.0.1:7040
 ```
 
-Needs node 22+, git, [workwork](https://github.com/Soleone/workwork) with `--json` support, `gh`, and whichever of `claude` and `pi` you use, logged in.
+Needs node 22+, git, [workwork](https://github.com/Soleone/workwork) 0.3 or later, `gh`, and whichever of `claude` and `pi` you use, logged in.
 
 ## How it works
 

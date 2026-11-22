@@ -33,7 +33,7 @@ function jobMeta(job: Job, byId: Map<string, Job>): string {
     return before && before.state !== "done" ? [itemTitle(before.item)] : [];
   });
   const after = waiting.length > 0 && `after ${waiting.join(", ")}`;
-  return [job.item.play, job.item.level, pin, after].filter(Boolean).join(" · ");
+  return [job.item.blueprint, job.item.attention, pin, after].filter(Boolean).join(" · ");
 }
 
 function Meta({ job, byId }: { job: Job; byId: Map<string, Job> }) {

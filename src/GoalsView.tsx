@@ -38,7 +38,7 @@ function goalLabel(goal: Job, nodes: Job[]): string | undefined {
   if (goal.state !== "queued") return undefined;
   const planning = nodes.some(
     (node) =>
-      node.item.play === "decompose" && (node.state === "queued" || node.state === "running"),
+      node.item.blueprint === "decompose" && (node.state === "queued" || node.state === "running"),
   );
   return planning ? "planning" : "working";
 }
@@ -207,7 +207,9 @@ function GoalView({
   const red = goal.blocked === "red";
   const factorySaid = goal.notes.findLast((note) => note.kind === "factory");
   const final = prUrl(goal);
-  const planning = nodes.filter((node) => (PLANNING as readonly string[]).includes(node.item.play));
+  const planning = nodes.filter((node) =>
+    (PLANNING as readonly string[]).includes(node.item.blueprint),
+  );
   const unverified = nodes.flatMap((node) => node.unverified.map((need) => ({ node, need })));
   const assumed = nodes.flatMap((node) =>
     node.notes.flatMap((note, index) =>

@@ -11,6 +11,7 @@ import {
   type Item,
   type Preset,
   type Settings,
+  upgradeItem,
 } from "./types.ts";
 
 export const STATE = process.env.DATA
@@ -35,7 +36,7 @@ export function alive(pid: number): boolean {
   }
 }
 
-export const LEVELS = ["auto", "skim", "decide"];
+export const ATTENTION = ["none", "skim", "decide"];
 
 const DEFAULTS: Settings = {
   agents: { claude: {}, pi: {} },
@@ -47,7 +48,7 @@ const DEFAULTS: Settings = {
   store: "local",
   capabilities: [],
   env: {},
-  auto: { on: false, levels: LEVELS, plays: [], repos: [] },
+  auto: { on: false, attention: ATTENTION, blueprints: [], repos: [] },
 };
 
 const settingsPath = (state: string) => join(state, "settings.json");
@@ -69,7 +70,7 @@ export function checkSettings(raw: Partial<Settings> & { timeout?: number }): Se
     ...DEFAULTS,
     ...rest,
     tiers: { ...DEFAULTS.tiers, ...rest.tiers },
-    auto: { ...DEFAULTS.auto, ...rest.auto },
+    auto: { ...DEFAULTS.auto, ...upgradeAuto(rest.auto) },
   };
   for (const name of Object.keys(settings.agents))
     if (!AGENT_NAMES.includes(name))
@@ -100,9 +101,21 @@ export function checkSettings(raw: Partial<Settings> & { timeout?: number }): Se
     throw new Error(`store wants local or tasks, got ${String(settings.store)}`);
   if (settings.store === "tasks" && !settings.tasks?.home)
     throw new Error("store tasks wants tasks.home, the Tasks home to mirror goals into");
-  for (const level of settings.auto.levels)
-    if (!LEVELS.includes(level)) throw new Error(`unknown level ${level}`);
+  for (const attention of settings.auto.attention)
+    if (!ATTENTION.includes(attention)) throw new Error(`unknown attention ${attention}`);
   return settings;
+}
+
+type LegacyAuto = Partial<Settings["auto"]> & { levels?: string[]; plays?: string[] };
+
+/** Before workwork 0.3 auto mode filtered on levels and plays, with auto for none. */
+function upgradeAuto(auto: LegacyAuto = {}): Partial<Settings["auto"]> {
+  const { levels, plays, ...rest } = auto;
+  return {
+    ...rest,
+    ...(levels && { attention: levels.map((level) => (level === "auto" ? "none" : level)) }),
+    ...(plays && { blueprints: plays }),
+  };
 }
 
 const candidatesPath = (state: string) => join(state, "candidates.json");
@@ -110,7 +123,8 @@ const refreshLock = (state: string) => join(state, "candidates.lock");
 
 export function readCandidates(state: string): Candidates | undefined {
   if (!existsSync(candidatesPath(state))) return undefined;
-  return JSON.parse(readFileSync(candidatesPath(state), "utf8"));
+  const { at, items } = JSON.parse(readFileSync(candidatesPath(state), "utf8"));
+  return { at, items: items.map(upgradeItem) };
 }
 
 export function refreshingCandidates(state: string): boolean {
@@ -139,11 +153,15 @@ export async function refreshCandidates(state: string, workwork: string): Promis
   }
 }
 
-export async function output(command: string, args: string[], cwd: string): Promise<string> {
-  const { stdout, stderr } = await promisify(execFile)(command, args, {
-    cwd,
-    maxBuffer: 64 * 1024 * 1024,
-  });
+export async function output(
+  command: string,
+  args: string[],
+  cwd: string,
+  input?: string,
+): Promise<string> {
+  const run = promisify(execFile)(command, args, { cwd, maxBuffer: 64 * 1024 * 1024 });
+  run.child.stdin!.end(input);
+  const { stdout, stderr } = await run;
   // workwork reports failed finders here; they belong in the factory log.
   process.stderr.write(stderr);
   return stdout;

@@ -25,8 +25,8 @@ const item = (id: string, repo = "/r"): Item => ({
   repo,
   label: "r",
   id,
-  play: "p",
-  level: "skim",
+  blueprint: "p",
+  attention: "skim",
   title: id,
 });
 const attempt = (outcome: Attempt["outcome"]): Attempt => ({
@@ -128,7 +128,7 @@ describe("the graph", () => {
 
   test("what a plan writer couldn't check stays in its result; a node's goes on the checklist", () => {
     const { state, add, byId } = graph();
-    add("plan", { item: { ...item("plan"), play: "replan" }, front: true });
+    add("plan", { item: { ...item("plan"), blueprint: "replan" }, front: true });
     add("node");
     for (const id of ["plan", "node"]) {
       startJob(state, id, "claude");
