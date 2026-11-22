@@ -858,6 +858,22 @@ ${lines
     expect(sh(base.repo, "git", "worktree", "list").trim().split("\n")).toHaveLength(3);
   });
 
+  test("untiered jobs go to the run's agent workers, never to a tier's preset", async () => {
+    const base = setup(["a", "b"]);
+    agents({ pi: "exit 1", claude: RESULT });
+    tiered(base.state, {
+      presets: [{ agent: "pi", model: "openai-codex/luna", id: "luna", workers: 2 }],
+      tiers: { communicator: [], builder: [], grunt: ["luna"] },
+    });
+    base.pick("a");
+    base.pick("b");
+    const jobs = await work(options(base));
+    expect(jobs.flatMap((job) => job.attempts)).toMatchObject([
+      { outcome: "done", preset: "claude" },
+      { outcome: "done", preset: "claude" },
+    ]);
+  });
+
   test("agents and gates get the repo's env, with {worktree} filled in", async () => {
     const base = setup(["a"]);
     agents({ claude: `echo "target=$CARGO_TARGET_DIR"; ${RESULT}` });

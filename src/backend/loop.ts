@@ -295,6 +295,8 @@ export async function run(options: RunOptions): Promise<string> {
         if (chosen === worker.preset) return job;
         if (chosen !== null) continue;
       }
+      // Untiered work (picks, auto) goes to the run's agent workers only: a preset serves its tiers.
+      if (!(worker.preset in options.agents)) continue;
       if ((job.agent ?? worker.agent) === worker.agent) return job;
     }
   }
