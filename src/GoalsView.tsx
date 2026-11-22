@@ -1,12 +1,21 @@
 import { useState, type ReactNode } from "react";
 import Markdown from "markdown-to-jsx/react";
-import { ArrowLeftIcon, ChevronRightIcon, FlameIcon, GitBranchIcon, PlusIcon } from "lucide-react";
+import {
+  ArrowLeftIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  FlameIcon,
+  GitBranchIcon,
+  PlusIcon,
+  XIcon,
+} from "lucide-react";
 import { api, type Act } from "@/api";
 import {
   critical,
   depths,
   PLANNING,
   prUrl,
+  TIERS,
   type Job,
   type Snapshot,
   type Tier,
@@ -21,6 +30,13 @@ import {
   EmptyHeader,
   EmptyTitle,
 } from "@/components/ui/empty";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { ItemGroup } from "@/components/ui/item";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/tooltip/tooltip";
@@ -122,6 +138,8 @@ function GoalList({
       <PlusIcon /> New goal
     </Button>
   );
+  const active = goals.filter((goal) => goal.state !== "done");
+  const finished = goals.filter((goal) => goal.state === "done");
   if (goals.length === 0)
     return (
       <Empty>
@@ -137,56 +155,67 @@ function GoalList({
   return (
     <div className="flex flex-col gap-4 pt-2">
       <div className="flex justify-end">{newGoal}</div>
-      <ItemGroup>
-        {goals.map((goal) => {
-          const nodes = nodesOf(snapshot.jobs, goal);
-          const done = nodes.filter((node) => node.state === "done").length;
-          const used = nodes.reduce((sum, node) => sum + node.attempts.length, 0);
-          const budget = goal.goal!.budget?.attempts;
-          return (
-            <Row
-              key={goal.id}
-              leading={<StateIcon state={goal.state} />}
-              progress={nodes.length ? done / nodes.length : 0}
-              title={
-                <button
-                  type="button"
-                  className="text-left hover:underline"
-                  onClick={() => onOpen(goal.id)}
-                >
-                  <span className="font-normal text-muted-foreground">
-                    {repoName(goal.goal!.repo)}:{" "}
-                  </span>
-                  {goal.item.title}
-                </button>
-              }
-              meta={
-                <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                  <StatePill state={goal.state} label={goalLabel(goal, nodes, snapshot.on)} />
-                  <span>
-                    {done}/{nodes.length} jobs done
-                  </span>
-                  <span>
-                    {used}
-                    {budget ? `/${budget}` : ""} attempts
-                  </span>
-                  <span>{ago(lastActivity(nodes, goal))}</span>
-                </span>
-              }
-            >
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label="Open goal"
-                onClick={() => onOpen(goal.id)}
-              >
-                <ChevronRightIcon />
-              </Button>
-            </Row>
-          );
-        })}
-      </ItemGroup>
+      {active.length > 0 && (
+        <ItemGroup>
+          {active.map((goal) => (
+            <GoalRow key={goal.id} goal={goal} snapshot={snapshot} onOpen={onOpen} />
+          ))}
+        </ItemGroup>
+      )}
+      {finished.length > 0 && (
+        <Section title={`Done (${finished.length})`}>
+          <ItemGroup>
+            {finished.map((goal) => (
+              <GoalRow key={goal.id} goal={goal} snapshot={snapshot} onOpen={onOpen} />
+            ))}
+          </ItemGroup>
+        </Section>
+      )}
     </div>
+  );
+}
+
+function GoalRow({
+  goal,
+  snapshot,
+  onOpen,
+}: {
+  goal: Job;
+  snapshot: Snapshot;
+  onOpen: (id: string) => void;
+}) {
+  const nodes = nodesOf(snapshot.jobs, goal);
+  const done = nodes.filter((node) => node.state === "done").length;
+  const used = nodes.reduce((sum, node) => sum + node.attempts.length, 0);
+  const budget = goal.goal!.budget?.attempts;
+  return (
+    <Row
+      leading={<StateIcon state={goal.state} />}
+      progress={nodes.length ? done / nodes.length : 0}
+      title={
+        <button type="button" className="text-left hover:underline" onClick={() => onOpen(goal.id)}>
+          <span className="font-normal text-muted-foreground">{repoName(goal.goal!.repo)}: </span>
+          {goal.item.title}
+        </button>
+      }
+      meta={
+        <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <StatePill state={goal.state} label={goalLabel(goal, nodes, snapshot.on)} />
+          <span>
+            {done}/{nodes.length} jobs done
+          </span>
+          <span>
+            {used}
+            {budget ? `/${budget}` : ""} attempts
+          </span>
+          <span>{ago(lastActivity(nodes, goal))}</span>
+        </span>
+      }
+    >
+      <Button variant="ghost" size="icon-sm" aria-label="Open goal" onClick={() => onOpen(goal.id)}>
+        <ChevronRightIcon />
+      </Button>
+    </Row>
   );
 }
 
@@ -213,6 +242,7 @@ function GoalView({
   const planning = nodes.filter((node) =>
     (PLANNING as readonly string[]).includes(node.item.blueprint),
   );
+  const planned = nodes.filter((node) => !planning.includes(node));
   const unverified = nodes.flatMap((node) => node.unverified.map((need) => ({ node, need })));
   const assumed = nodes.flatMap((node) =>
     node.notes.flatMap((note, index) =>
@@ -223,15 +253,43 @@ function GoalView({
     ),
   );
 
+  const checkpoint = goal.blocked === "checkpoint";
+  const checks = (unverified.length > 0 || assumed.length > 0) && (
+    <ul className="flex flex-col gap-2 text-sm">
+      {unverified.map(({ node, need }) => (
+        <li key={`${node.id} ${need}`} className="flex flex-wrap items-center gap-2">
+          <Badge variant="outline">unverified</Badge>
+          <span className="flex-1">
+            {node.item.title}: {need}
+          </span>
+          <Button size="sm" variant="outline" onClick={() => act(() => api.verify(node.id, need))}>
+            Checked
+          </Button>
+        </li>
+      ))}
+      {assumed.map(({ node, note }) => (
+        <Assumption
+          key={`${node.id} ${note.at}`}
+          node={node}
+          question={note.text}
+          assumed={note.assumed ?? ""}
+          act={act}
+        />
+      ))}
+    </ul>
+  );
+
   return (
     <div className="flex flex-col gap-6 pt-2">
       <div className="flex flex-wrap items-center gap-2">
-        <Button variant="ghost" size="icon-sm" aria-label="All goals" onClick={onBack}>
-          <ArrowLeftIcon />
-        </Button>
-        <h2 className="font-heading text-lg font-semibold">{goal.item.title}</h2>
-        <StatePill state={goal.state} label={goalLabel(goal, nodes, snapshot.on)} />
-        <span className="ml-auto flex gap-1">
+        <div className="flex min-w-0 flex-1 basis-80 flex-wrap items-center gap-2">
+          <Button variant="ghost" size="icon-sm" aria-label="All goals" onClick={onBack}>
+            <ArrowLeftIcon />
+          </Button>
+          <h2 className="font-heading text-lg font-semibold">{goal.item.title}</h2>
+          <StatePill state={goal.state} label={goalLabel(goal, nodes, snapshot.on)} />
+        </div>
+        <span className="flex gap-1">
           {goal.blocked === "paused" ? (
             <Button
               variant="outline"
@@ -319,7 +377,7 @@ function GoalView({
       )}
 
       {brief && (
-        <Collapsible>
+        <Collapsible defaultOpen={planned.length === 0}>
           <CollapsibleTrigger
             render={
               <button
@@ -339,14 +397,19 @@ function GoalView({
         </Collapsible>
       )}
 
-      {goal.blocked === "checkpoint" && (
-        <div className="flex flex-col gap-3 rounded-md border border-warning/50 bg-warning/10 p-3 text-sm sm:flex-row sm:items-center">
-          <p className="flex-1">
-            {sentence(goal.why ?? factorySaid?.text ?? "waiting for your approval")}
-          </p>
+      {checkpoint && (
+        <div className="flex flex-col gap-3 rounded-md border border-warning/50 bg-warning/10 p-3 text-sm">
+          <p>{sentence(goal.why ?? factorySaid?.text ?? "waiting for your approval")}</p>
+          <PlanCost nodes={nodes} budget={info.budget?.attempts} used={used} />
+          {checks && (
+            <div className="flex flex-col gap-2 border-t border-warning/30 pt-3">
+              <h3 className="font-medium">Check these before approving</h3>
+              {checks}
+            </div>
+          )}
           <Button
             size="sm"
-            className="self-start sm:self-auto"
+            className="self-start sm:self-end"
             onClick={() => act(() => api.goal(goal.id, "approve"))}
           >
             Approve
@@ -364,36 +427,7 @@ function GoalView({
         </p>
       )}
 
-      {(unverified.length > 0 || assumed.length > 0) && (
-        <Section title="For you to check">
-          <ul className="flex flex-col gap-2 text-sm">
-            {unverified.map(({ node, need }) => (
-              <li key={`${node.id} ${need}`} className="flex flex-wrap items-center gap-2">
-                <Badge variant="outline">unverified</Badge>
-                <span className="flex-1">
-                  {node.item.title}: {need}
-                </span>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => act(() => api.verify(node.id, need))}
-                >
-                  Checked
-                </Button>
-              </li>
-            ))}
-            {assumed.map(({ node, note }) => (
-              <Assumption
-                key={`${node.id} ${note.at}`}
-                node={node}
-                question={note.text}
-                assumed={note.assumed ?? ""}
-                act={act}
-              />
-            ))}
-          </ul>
-        </Section>
-      )}
+      {checks && !checkpoint && <Section title="For you to check">{checks}</Section>}
 
       <Section title="Plan">
         <PlanList
@@ -517,6 +551,7 @@ function NodeRow({
     (note) => note.kind === "step" && note.attempt === node.attempts.length + 1,
   );
   const heavy = node.attempts.some((attempt) => (attempt.compactions ?? 0) > 2);
+  const editable = unstarted(node);
   const waiting = node.after.flatMap((id) => {
     const before = snapshot.jobs.find((job) => job.id === id);
     return before && before.state !== "done" ? [before.item.title] : [];
@@ -528,7 +563,8 @@ function NodeRow({
       meta={
         <span className="flex flex-col gap-1">
           <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            {node.tier && <TierBadge tier={node.tier} />}
+            {node.tier &&
+              (editable ? <TierMenu node={node} act={act} /> : <TierBadge tier={node.tier} />)}
             {node.front && <Badge variant="outline">factory</Badge>}
             {node.blocked && <span>{BLOCKED[node.blocked]}</span>}
             {waiting.length > 0 && <span>after {waiting.join(", ")}</span>}
@@ -562,7 +598,96 @@ function NodeRow({
           )}
         </span>
       }
-    />
+    >
+      {editable && (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Drop from the plan"
+                onClick={() => act(() => api.drop(node.id))}
+              />
+            }
+          >
+            <XIcon />
+          </TooltipTrigger>
+          <TooltipContent>
+            Drop from the plan; what waits on it waits on what it waited on
+          </TooltipContent>
+        </Tooltip>
+      )}
+    </Row>
+  );
+}
+
+/** A node that hasn't started yet, so it can still move to another tier or be dropped. */
+const unstarted = (node: Job) =>
+  node.key !== undefined &&
+  (node.state === "queued" || (node.state === "blocked" && node.blocked === "held"));
+
+/** What approving commits to: the jobs left by tier, and the attempts they take at the least. */
+function PlanCost({ nodes, budget, used }: { nodes: Job[]; budget?: number; used: number }) {
+  const left = nodes.filter(
+    (node) => unstarted(node) && !nodes.some((each) => each.parent === node.id),
+  );
+  if (left.length === 0) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground">
+      <span className="text-foreground">
+        {left.length} job{left.length === 1 ? "" : "s"} to go:
+      </span>
+      {TIERS.map((tier) => {
+        const count = left.filter((node) => node.tier === tier).length;
+        return (
+          count > 0 && (
+            <span key={tier} className="flex items-center gap-1">
+              {count} <TierBadge tier={tier} />
+            </span>
+          )
+        );
+      })}
+      <span>
+        at least {left.length} attempt{left.length === 1 ? "" : "s"}
+        {budget ? ` of the ${budget - used} left in the budget` : ""}. Change a tier or drop a job
+        below; replan for bigger changes.
+      </span>
+    </div>
+  );
+}
+
+/** The node's tier, as a menu to move it while it hasn't started. */
+function TierMenu({ node, act }: { node: Job; act: Act }) {
+  return (
+    <DropdownMenu>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <DropdownMenuTrigger
+              render={
+                <button type="button" aria-label={`Tier: ${node.tier}`} className="rounded-4xl" />
+              }
+            />
+          }
+        >
+          <TierBadge tier={node.tier!} more />
+        </TooltipTrigger>
+        <TooltipContent>Run it on another tier</TooltipContent>
+      </Tooltip>
+      <DropdownMenuContent align="start" className="w-auto">
+        <DropdownMenuRadioGroup
+          value={node.tier}
+          onValueChange={(tier: Tier) => act(() => api.retier(node.id, tier))}
+        >
+          {TIERS.map((tier) => (
+            <DropdownMenuRadioItem key={tier} value={tier}>
+              {tier}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -573,10 +698,11 @@ const TIER_STYLE: Record<Tier, string> = {
 };
 
 /** Which tier runs a job, louder the more capable (and scarce) it is. */
-export function TierBadge({ tier }: { tier: Tier }) {
+export function TierBadge({ tier, more }: { tier: Tier; more?: boolean }) {
   return (
     <Badge variant="outline" className={TIER_STYLE[tier]}>
       {tier}
+      {more && <ChevronDownIcon data-icon="inline-end" />}
     </Badge>
   );
 }

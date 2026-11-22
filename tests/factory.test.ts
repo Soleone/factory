@@ -25,9 +25,11 @@ import {
 } from "../src/backend/jobs.ts";
 import {
   approveGoal,
+  dropNode,
   importPlan,
   importPlanText,
   newGoal,
+  retierNode,
   type Plan,
 } from "../src/backend/goals.ts";
 import { stringify as toYaml } from "yaml";
@@ -985,6 +987,23 @@ echo "$key" > $key.txt; git add $key.txt; git commit -qm "$key"; git push -q ori
       sh(origin, "git", "ls-tree", "--name-only", "-r", branch).trim().split("\n");
     return { repo, origin, state, github, files, base: { state, workwork: "false" } };
   }
+
+  test("before it starts, a node can move to another tier or be dropped, and what waited on it waits on what it waited on", async () => {
+    const { repo, state } = goalRepo();
+    const goal = await importPlan(
+      state,
+      plan(repo, [{ key: "a" }, { key: "b", after: ["a"] }, { key: "c", after: ["b"] }]),
+    );
+    const id = (key: string) =>
+      readJobs(state).find((job) => job.of === goal.id && job.key === key)!.id;
+    retierNode(state, id("c"), "grunt");
+    dropNode(state, id("b"));
+    const nodes = readJobs(state).filter((job) => job.of === goal.id && job.state !== "removed");
+    expect(nodes.map((node) => [node.key, node.tier, node.after])).toEqual([
+      ["a", "builder", []],
+      ["c", "grunt", [id("a")]],
+    ]);
+  });
 
   test("a goal: waits for approval, merges each node into its integration branch in order, then opens the final PR", async () => {
     const { repo, state, github, files, base } = goalRepo();

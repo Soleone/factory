@@ -1107,6 +1107,39 @@ export function resumeGoal(state: string, goalId: string): void {
   record(state, { type: "unblock", id: goalId });
 }
 
+/** A goal node that hasn't started, which the user may still change or drop. */
+function unstartedNode(state: string, id: string): { node: Job; jobs: Job[] } {
+  const jobs = readJobs(state);
+  const node = jobs.find((job) => job.id === id);
+  if (!node?.of || !node.key) throw new Error(`${id} is not a node of a goal`);
+  if (started(node) || node.state === "removed") throw new Error(`${node.key} has started`);
+  return { node, jobs };
+}
+
+/** The user moves a node that hasn't started to another tier. */
+export function retierNode(state: string, id: string, tier: Tier): void {
+  if (!isTier(tier)) throw new Error(`${String(tier)} is not one of ${TIERS.join(", ")}`);
+  unstartedNode(state, id);
+  record(state, { type: "update", id, change: { tier } });
+}
+
+/** The user drops a node that hasn't started; what waited on it waits on what it waited on instead. */
+export function dropNode(state: string, id: string): void {
+  const { node, jobs } = unstartedNode(state, id);
+  if (jobs.some((job) => job.parent === id && job.state !== "removed"))
+    throw new Error(`${node.key} is a milestone; drop its nodes instead`);
+  for (const job of jobs)
+    if (job.after.includes(id))
+      record(state, {
+        type: "update",
+        id: job.id,
+        change: {
+          after: [...new Set([...job.after.filter((each) => each !== id), ...node.after])],
+        },
+      });
+  record(state, { type: "remove", id });
+}
+
 /** Removes the goal and everything under it that hasn't finished; running agents finish their turn. */
 export function cancelGoal(state: string, goalId: string): void {
   findGoal(state, goalId);

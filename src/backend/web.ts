@@ -25,6 +25,8 @@ import { closePr, mergePr, prCache, readPrDetails, rebasePr } from "./review.ts"
 import {
   approveGoal,
   cancelGoal,
+  dropNode,
+  retierNode,
   findGoal,
   importPlanText,
   newGoal,
@@ -194,6 +196,8 @@ export function serve(state: string, port: number, host: string): Server {
     "POST /api/jobs/pause": (_, id) => pauseGoal(state, id),
     "POST /api/jobs/resume": (_, id) => resumeGoal(state, id),
     "POST /api/jobs/cancel": (_, id) => cancelGoal(state, id),
+    "POST /api/jobs/tier": (body: { tier: Tier }, id) => retierNode(state, id, body.tier),
+    "POST /api/jobs/drop": (_, id) => dropNode(state, id),
     "POST /api/jobs/replan": (body: { why: string }, id) => {
       if (!body.why?.trim()) throw new Error("a replan wants a reason");
       queueReplan(state, findGoal(state, id), body.why);

@@ -52,6 +52,9 @@ export const api = {
   newGoal: (goal: { title: string; brief: string; repo?: string; project?: string }) =>
     call<Job>("POST", "/api/goals", goal),
   importPlan: (plan: string) => call<Job>("POST", "/api/goals/import", { plan }),
+  /** A goal node that hasn't started, on another tier or dropped. */
+  retier: (id: string, tier: Tier) => call("POST", `/api/jobs/${id}/tier`, { tier }),
+  drop: (id: string) => call("POST", `/api/jobs/${id}/drop`),
   replan: (id: string, why: string) => call("POST", `/api/jobs/${id}/replan`, { why }),
   /** The user checked what the job couldn't; without a need, all of it. */
   verify: (id: string, need?: string) => call("POST", `/api/jobs/${id}/verify`, { need }),
