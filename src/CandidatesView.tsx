@@ -59,8 +59,6 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
   const [shown, setShown] = useState(PAGE);
   /** What each blueprint does, by name; empty until workwork answers. */
   const [described, setDescribed] = useState(new Map<string, string>());
-  /** Refresh clicks, each turning the icon once. */
-  const [turns, setTurns] = useState(0);
   const { at, count, refreshing } = snapshot.candidates;
 
   useEffect(() => {
@@ -207,15 +205,11 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
                   size="icon-sm"
                   aria-label="Refresh candidates"
                   disabled={refreshing}
-                  onClick={() => {
-                    setTurns(turns + 1);
-                    void act(api.refreshCandidates);
-                  }}
+                  onClick={() => void act(api.refreshCandidates)}
                 />
               }
             >
-              {/* A new key replays the turn on every click. */}
-              <RefreshCwIcon key={turns} className={turns ? "refresh-turn" : undefined} />
+              <RefreshCwIcon className={refreshing ? "animate-spin motion-reduce:animate-none" : undefined} />
             </TooltipTrigger>
             <TooltipContent>
               {refreshing ? "Asking workwork, takes a few minutes" : "Ask workwork again"}
