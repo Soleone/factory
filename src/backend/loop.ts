@@ -16,7 +16,7 @@ import { agent as makeAgent, classify, resetTime, type Agent } from "./agents.ts
 import { keepWork, release } from "./git.ts";
 import { piWindows } from "./models.ts";
 import { mirrorTasks } from "./tasksStore.ts";
-import { afterAttempt, builtinCheck, prepare } from "./goals.ts";
+import { afterAttempt, builtinCheck, finishGoals, prepare } from "./goals.ts";
 import { addJobs, autoPicks, endJob, ready, readJobs, record, startJob } from "./jobs.ts";
 import { findPr } from "./review.ts";
 import {
@@ -630,6 +630,7 @@ export async function run(options: RunOptions): Promise<string> {
   const stopMirror = mirrorTasks(state, settings, log);
   writeStatus();
   try {
+    await finishGoals(state, log);
     await Promise.all(slots.map((slot) => work(slot, handed.get(slot))));
   } catch (error) {
     kill();

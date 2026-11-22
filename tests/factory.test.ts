@@ -1144,6 +1144,32 @@ esac`,
     });
   });
 
+  test("a goal whose replan is the last job to finish still opens its final PR", async () => {
+    const { repo, state, github, base } = goalRepo();
+    const nodes = [
+      { key: "m" },
+      { key: "a", parent: "m", touches: ["a/**"] },
+      { key: "b", touches: ["b/**"] },
+    ];
+    // m is done once a merges, which queues a replan; b merges meanwhile, so the replan ends last.
+    const replanned = plan(repo, nodes);
+    const script = `case "$prompt" in
+  *"Replan the goal"*) sleep 0.5; mkdir -p .factory; echo '${JSON.stringify(replanned)}' > .factory/demo.replan.json; ${RESULT} ;;
+  *) ${NODE} ;;
+esac`;
+    agents({ claude: script, pi: script });
+    const goal = await importPlan(state, plan(repo, nodes));
+    approveGoal(state, goal.id);
+    const jobs = await work(
+      options(base, { claude: {}, pi: {} }),
+      (jobs) => jobs.find((job) => job.id === goal.id)!.state === "done",
+    );
+    expect(jobs.filter((job) => job.item.blueprint === "replan").map((job) => job.state)).toEqual([
+      "done",
+    ]);
+    expect(github.calls()).toContain("pr create --base main --head goal/demo --title Demo goal");
+  });
+
   test("a goal at its attempt budget waits; approving gives it the budget again", async () => {
     const { repo, state, base } = goalRepo();
     agents({ claude: NODE });

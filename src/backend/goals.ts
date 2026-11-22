@@ -516,6 +516,7 @@ export async function afterAttempt(
     else if (job.attempts.at(-1)?.outcome === "done")
       await delivered(state, job, jobs, goalJob, worktree, log);
     checkBudget(state, goalJob.id);
+    await finishGoals(state, log);
   } catch (error) {
     const message = (error as Error).message.trim().split("\n").slice(0, 5).join("\n");
     log(`goal ${goalJob.goal.slug}: ${job.id} didn't deliver: ${message}`);
@@ -754,7 +755,7 @@ async function remember(goal: Goal, node: Job, worktree: string): Promise<void> 
   await output("git", ["push", "--quiet", "origin", `HEAD:${integration(goal)}`], worktree);
 }
 
-/** After a merge: the goal's gates, checkpoints, milestones, a red goal turning green, the final PR. */
+/** After a merge: the goal's gates, checkpoints, milestones and a red goal turning green. */
 async function afterMerge(
   state: string,
   node: Job,
@@ -808,8 +809,19 @@ async function afterMerge(
     await rebaseOntoMain(state, goalJob, worktree, log);
     queueReplan(state, goalJob, `milestone ${parent.item.title} is done`);
   }
-  const rest = readJobs(state).filter((each) => each.of === goalId && each.state !== "removed");
-  if (rest.length > 0 && rest.every((each) => each.state === "done")) {
+}
+
+/**
+ * Opens the final PR of every goal whose nodes are all done. Runs after each goal attempt, not only
+ * a merge: a replan can be the last to finish, and a run's start picks up any goal left waiting.
+ */
+export async function finishGoals(state: string, log: Log): Promise<void> {
+  const jobs = readJobs(state);
+  for (const goalJob of jobs) {
+    if (!goalJob.goal || goalJob.state !== "queued") continue;
+    const rest = jobs.filter((each) => each.of === goalJob.id && each.state !== "removed");
+    if (rest.length === 0 || rest.some((each) => each.state !== "done")) continue;
+    const goal = goalJob.goal;
     const main = await originHead(goal.repo);
     const unverified = rest.flatMap((each) =>
       each.unverified.map((need) => `- [ ] ${each.item.title}: ${need}`),
@@ -823,10 +835,10 @@ async function afterMerge(
     );
     record(state, {
       type: "note",
-      id: goalId,
+      id: goalJob.id,
       note: { kind: "factory", text: `every node is done; the final PR is open`, url },
     });
-    record(state, { type: "merged", id: goalId });
+    record(state, { type: "merged", id: goalJob.id });
     log(`goal ${goal.slug} is done: ${url}`);
   }
 }
