@@ -95,14 +95,10 @@ export function useFactory(): { snapshot?: Snapshot; error?: string; act: Act } 
   );
 
   useEffect(() => {
-    const load = () =>
-      void call<Snapshot>("GET", "/api/state").then(setSnapshot, (failure: Error) =>
-        setError(`Can't reach factory serve: ${failure.message}`),
-      );
-    load();
-    const timer = setInterval(load, 3000);
+    void reload();
+    const timer = setInterval(reload, 3000);
     return () => clearInterval(timer);
-  }, []);
+  }, [reload]);
 
   const act = useCallback<Act>(
     async (change) => {
