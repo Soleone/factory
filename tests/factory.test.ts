@@ -469,8 +469,8 @@ describe("the factory", () => {
   });
 
   /** A shell line that reports on the job the way `factory note|ask|result` does. */
-  const report = (state: string, note: Record<string, unknown>) =>
-    `echo '{"at":"2026-11-16T04:00:00Z","type":"note","id":"'$FACTORY_JOB'","note":${JSON.stringify(note)}}' >> ${state}/jobs.jsonl`;
+  const report = (state: string, note: Record<string, unknown>, at = "$(date -u +%FT%TZ)") =>
+    `echo '{"at":"'${at}'","type":"note","id":"'$FACTORY_JOB'","note":${JSON.stringify(note)}}' >> ${state}/jobs.jsonl`;
 
   test("a question pauses the attempt until answered; the same session goes on in the same worktree", async () => {
     const base = setup(["a"]);
@@ -500,6 +500,45 @@ ${report(base.state, { kind: "ask", text: "A or B?" })}`,
     const turn = readFileSync(join(dirname(done.attempts[0].log), "turn-2.md"), "utf8");
     expect(turn).toContain("The user answered your question: A");
     expect(readFileSync(done.attempts[0].log, "utf8")).toBe("");
+  });
+
+  test("a question nobody answers holds the job only so long, then the agent goes with its recommendation", async () => {
+    const base = setup(["a"]);
+    agents({
+      claude: `case "$prompt" in *"Nobody answered"*) ${RESULT}; exit 0 ;; esac
+${report(base.state, { kind: "ask", text: "A or B? A, I think" }, "2026-11-16T04:00:00Z")}`,
+    });
+    base.pick("a");
+    const [job] = await work(options(base));
+    expect(job.state).toBe("done");
+    expect(job.attempts).toMatchObject([{ outcome: "done", turns: 2 }]);
+    expect(job.notes.map((note) => note.kind)).toEqual(["ask", "answer", "result"]);
+    const turn = readFileSync(join(dirname(job.attempts[0].log), "turn-2.md"), "utf8");
+    expect(turn).toContain("Go with your recommendation");
+  });
+
+  test("a session that was never saved starts over from the prompt instead of failing the job", async () => {
+    const base = setup(["a"]);
+    // Like claude when the session to resume doesn't exist: an error result, exit 0.
+    const lost = JSON.stringify({
+      type: "result",
+      is_error: true,
+      errors: ["No conversation found with session ID: x"],
+    });
+    agents({
+      claude: `echo "args: $*"
+case "$*" in *--resume*) echo 'No conversation found with session ID: x'; echo '${lost}'; exit 0 ;; esac
+case "$prompt" in *"do a"*"You stopped without finishing"*) ${RESULT} ;; esac`,
+    });
+    base.pick("a");
+    const [job] = await work(options(base));
+    expect(job.state).toBe("done");
+    expect(job.attempts).toMatchObject([{ outcome: "done", turns: 3, followups: 1 }]);
+    const log = readFileSync(job.attempts[0].log, "utf8");
+    const sessions = [...log.matchAll(/--session-id (\S+)/g)].map((match) => match[1]);
+    expect(sessions).toHaveLength(2);
+    expect(sessions[0]).not.toBe(sessions[1]);
+    expect(job.attempts[0].session).toBe(sessions[1]);
   });
 
   test("an unfinished exit or a failed gate gets a follow-up in the same session", async () => {

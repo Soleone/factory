@@ -17,7 +17,7 @@ import { keepWork, release } from "./git.ts";
 import { piWindows } from "./models.ts";
 import { mirrorTasks } from "./tasksStore.ts";
 import { afterAttempt, builtinCheck, finishGoals, prepare } from "./goals.ts";
-import { addJobs, autoPicks, endJob, ready, readJobs, record, startJob } from "./jobs.ts";
+import { addJobs, answer, autoPicks, endJob, ready, readJobs, record, startJob } from "./jobs.ts";
 import { findPr } from "./review.ts";
 import {
   alive,
@@ -78,6 +78,11 @@ const STALE_CANDIDATES = 6 * 60 * MINUTE;
 const FOLLOWUPS = 2;
 const GATE_TIMEOUT = 30 * MINUTE;
 const WATCH_EVERY = 5 * MINUTE;
+/** A question nobody answers this long stops holding the job: the agent goes with its recommendation. */
+const ASK_WAIT = 15 * MINUTE;
+const NO_ANSWER = `Nobody answered within ${ASK_WAIT / MINUTE} minutes, so factory told the agent to go with its recommendation.`;
+/** What claude and pi print when the session to resume was never saved. */
+const LOST_SESSION = /No conversation found with session ID|No session found matching/;
 
 /**
  * An attempt under way, kept in running/<job id>.json until it's recorded: its session, its worktree,
@@ -97,6 +102,8 @@ type Live = {
   pid?: number;
   /** What the next turn picks up from. */
   waiting?: "asked" | "limited" | "interrupted";
+  /** The turn this session started on, when not the first; later turns resume it. */
+  sessionTurn?: number;
   /** Needs no worker here has, so the agent was told it can't check them. */
   missing: string[];
 };
@@ -239,6 +246,18 @@ export async function run(options: RunOptions): Promise<string> {
       .finally(() => (watching = undefined));
   }
 
+  /** Nobody may be around to answer, overnight least of all: a question waits only so long. */
+  function moveOnFromAsks(): void {
+    for (const job of readJobs(state)) {
+      if (job.blocked !== "asked" || job.state !== "blocked") continue;
+      const ask = job.notes.findLast((note) => note.kind === "ask");
+      if (ask && Date.now() - Date.parse(ask.at) < ASK_WAIT) continue;
+      // An answer like the user's, so the question counts as settled everywhere a real one does.
+      answer(state, job.id, NO_ANSWER);
+      log(`${job.id} goes on without an answer`);
+    }
+  }
+
   /** Auto mode's part: keep a few of its jobs queued. Reads settings each time, so the toggle applies at once. */
   function topUp(): void {
     topping ??= fillFromAuto()
@@ -324,6 +343,7 @@ export async function run(options: RunOptions): Promise<string> {
     while (!ended()) {
       topUp();
       lookOut();
+      moveOnFromAsks();
       if (pool.stopped) return set(worker, { state: "stopped", reason: pool.stopped });
       if (!handed) await keepReserve(pool);
       if (pool.until) {
@@ -338,7 +358,8 @@ export async function run(options: RunOptions): Promise<string> {
         ({ job } = handed);
         set(worker, { state: "working", job: job.id });
         log(`${worker.id} takes over ${job.id} from run ${handed.live.begun.run}`);
-        result = await attempt(slot, job, handed.live);
+        const taken = job;
+        result = await attempt(slot, job, handed.live).catch((error: Error) => broke(taken, error));
         handed = undefined;
       } else {
         job = pick(slot);
@@ -350,7 +371,10 @@ export async function run(options: RunOptions): Promise<string> {
         startJob(state, job.id, worker.agent, worker.preset);
         set(worker, { state: "working", job: job.id });
         log(`${worker.id} starts ${job.id}: ${job.item.label} ${job.item.id}`);
-        result = await attempt(slot, job, readLive(state, job.id));
+        const taken = job;
+        result = await attempt(slot, job, readLive(state, job.id)).catch((error: Error) =>
+          broke(taken, error),
+        );
       }
       if (!result) {
         // The run stopped: before the agent started the job goes back; a running agent is handed off.
@@ -370,8 +394,11 @@ export async function run(options: RunOptions): Promise<string> {
         const worktree = readLive(state, job.id)?.worktree;
         if (worktree) {
           await afterAttempt(state, job.id, worktree, log);
-          // Lets go of its branch, which a later job may check out elsewhere.
-          await release(worktree);
+          // Lets go of its branch, which a later job may check out elsewhere. When that fails, the
+          // next job's checkout forces it anyway.
+          await release(worktree).catch((error: Error) =>
+            log(`can't release ${worktree}: ${error.message.trim().split("\n")[0]}`),
+          );
         }
         rmSync(livePath(state, job.id), { force: true });
         const seconds = (Date.parse(result.attempt.end) - Date.parse(result.attempt.start)) / 1000;
@@ -406,6 +433,22 @@ export async function run(options: RunOptions): Promise<string> {
   }
 
   /**
+   * One job's trouble (git in its worktree, a gate that won't run) fails that job; it doesn't end
+   * the run and every agent working in it.
+   */
+  function broke(job: Job, error: Error): Turned {
+    const begun = readLive(state, job.id)?.begun;
+    if (!begun) throw error;
+    const message = error.message.trim();
+    log(`${job.id} broke: ${message.split("\n")[0]}`);
+    const end = new Date().toISOString();
+    return {
+      attempt: { ...begun, end, outcome: "failed", error: message.slice(0, 2000) },
+      text: "",
+    };
+  }
+
+  /**
    * One attempt as a session: the first turn, or the turn that picks a paused one up, then follow-ups
    * while a gate fails or the agent stopped without finishing. Undefined when the run stopped first.
    */
@@ -425,17 +468,17 @@ export async function run(options: RunOptions): Promise<string> {
         ),
       );
     }
-    const agentOf = (resume: boolean) =>
+    const agentOf = () =>
       makeAgent(worker.agent, live!.begun, {
         id: live!.session,
-        resume,
+        resume: live!.turns > (live!.sessionTurn ?? 1),
         folder: join(state, "sessions"),
         compactAt: worker.agent === "claude" ? compactAt(preset) : undefined,
       });
     for (;;) {
       if (!live.pid) {
         if (stopping) return undefined;
-        live.pid = startAgent(agentOf(live.turns > 1), live, job.id, envFor(job, live.worktree));
+        live.pid = startAgent(agentOf(), live, job.id, envFor(job, live.worktree));
         writeLive(state, job.id, live);
       }
       const turn = await finishTurn(worker, live);
@@ -446,6 +489,11 @@ export async function run(options: RunOptions): Promise<string> {
       if (timedOut) return { attempt: await end(job, live, "timeout", facts), text };
       const outcome = classify(makeAgent(worker.agent, live.begun), code, text, facts.error);
       if (outcome === "limited") return pause(job, live, "limited", text);
+      // Once: an agent that saves no session at all would start over at every follow-up.
+      if (outcome === "failed" && live.turns > 1 && !live.sessionTurn && LOST_SESSION.test(text)) {
+        live = restart(job, live);
+        continue;
+      }
       const fresh = readJobs(state).find((each) => each.id === job.id)!;
       const said = fresh.notes.filter((note) => note.attempt === fresh.attempts.length + 1);
       // A question since the last answer: this turn asked it.
@@ -544,6 +592,30 @@ export async function run(options: RunOptions): Promise<string> {
       waiting: undefined,
       pid: undefined,
     };
+  }
+
+  /**
+   * The session to resume was never saved, say because a run stopped before its first turn got
+   * going: a new session starts from the prompt, with what this turn had to say after it.
+   */
+  function restart(job: Job, live: Live): Live {
+    const prompt = readFileSync(join(live.dir, "prompt.md"), "utf8");
+    const message = readFileSync(live.turn, "utf8");
+    const next = nextTurn(
+      live,
+      `${prompt}\n## Picking up\n\nAn earlier session at this job was lost; whatever it did is still in this folder.\n\n${message}`,
+    );
+    record(state, {
+      type: "note",
+      id: job.id,
+      note: {
+        kind: "factory",
+        text: "the session to resume was lost; a new one starts from the prompt",
+      },
+    });
+    const restarted = { ...next, session: randomUUID(), sessionTurn: next.turns };
+    writeLive(state, job.id, restarted);
+    return restarted;
   }
 
   function pause(job: Job, live: Live, reason: "asked" | "limited", text: string): Turned {
@@ -682,7 +754,10 @@ export async function run(options: RunOptions): Promise<string> {
   const stopMirror = mirrorTasks(state, settings, log);
   writeStatus();
   try {
-    await finishGoals(state, log);
+    // Retried after every goal job; a failed fetch here shouldn't keep the factory off.
+    await finishGoals(state, log).catch((error: Error) =>
+      log(`can't finish goals: ${error.message.trim().split("\n")[0]}`),
+    );
     await Promise.all(slots.map((slot) => work(slot, handed.get(slot))));
   } catch (error) {
     kill();
@@ -694,6 +769,9 @@ export async function run(options: RunOptions): Promise<string> {
     stopMirror();
     await topping;
     writeStatus();
+    log(
+      `off: ${slots.map(({ worker }) => `${worker.id} ${worker.reason ?? worker.state}`).join(", ")}`,
+    );
   }
   return id;
 }
@@ -761,6 +839,8 @@ export function piSettingsWarnings(presets: Preset[], windows: Record<string, nu
 function resumeText(live: Live, job: Job): string {
   if (live.waiting === "asked") {
     const said = job.notes.findLast((note) => note.kind === "answer" && note.re === undefined);
+    if (said?.text === NO_ANSWER)
+      return `Nobody answered your question within ${ASK_WAIT / MINUTE} minutes. Go with your recommendation, or with the option that deletes and publishes nothing when yours would, and record it with \`factory ask "<question>" --assume "<what you chose>"\` so the user can still weigh in. Then carry on with the job.`;
     return `The user answered your question: ${said?.text ?? "(no answer recorded)"}\n\nCarry on with the job.`;
   }
   if (live.waiting === "limited")
@@ -901,7 +981,7 @@ You run headless for factory as job ${job.id}, and nobody watches live. Report t
 - \`${factory} step "<what you're doing now>" [--done N --of M]\` at each meaningful step (not every command), so the user sees where you are.
 - \`${factory} note "<text>"\` records something worth knowing later: what you found, tried, or what's in the way. A few per job, not a play-by-play.
 - Decide for yourself wherever a reasonable engineer would. When the user might decide otherwise, run \`${factory} ask "<question>" --assume "<what you'll do>"\` and carry on with that; the user answers later, and a different answer becomes a job of its own.
-- Only for a decision too costly to guess (a data format, deleting things, anything public), run \`${factory} ask "<question, with the options and your recommendation>"\` without --assume and end there. Your work in this folder is kept, and you'll get the answer in this same session.
+- Only for a decision too costly to guess (a data format, deleting things, anything public), run \`${factory} ask "<question, with the options and your recommendation>"\` without --assume and end there. Your work in this folder is kept, and you'll get the answer in this same session. Nobody may be around: after ${ASK_WAIT / MINUTE} minutes without an answer you'll be told to go with your recommendation.
 - Before you end, run \`${factory} result "<what changed and why, in a sentence or two>" --confidence low|medium|high\`, adding \`--url <link>\` for the PR or issue you opened, \`--followup "<task>"\` for each task you saw that deserves its own job, and \`--unverified "<what>"\` for each thing you couldn't check. Factory may run checks after you stop and come back to you with what failed.
 - In a PR description you write, add the line \`Agent: ${signature}\`.
 `;
