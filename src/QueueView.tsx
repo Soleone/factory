@@ -26,21 +26,17 @@ import { Row, Section } from "@/Row";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/tooltip/tooltip";
 import { StateIcon, StatePill, TaskDetails } from "@/TaskDetails";
 
-function jobMeta(job: Job, byId: Map<string, Job>): string {
-  const pin = job.agent ? pinName({ ...job, agent: job.agent }) : "";
+function Meta({ job, byId }: { job: Job; byId: Map<string, Job> }) {
+  const pin = job.agent && pinName({ agent: job.agent, model: job.model, effort: job.effort });
   const waiting = job.after.flatMap((id) => {
     const before = byId.get(id);
     return before && before.state !== "done" ? [itemTitle(before.item)] : [];
   });
   const after = waiting.length > 0 && `after ${waiting.join(", ")}`;
-  return [job.item.blueprint, job.item.attention, pin, after].filter(Boolean).join(" · ");
-}
-
-function Meta({ job, byId }: { job: Job; byId: Map<string, Job> }) {
   return (
     <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
       <StatePill state={job.state} />
-      {jobMeta(job, byId)}
+      {[job.item.blueprint, job.item.attention, pin, after].filter(Boolean).join(" · ")}
     </span>
   );
 }
@@ -332,58 +328,56 @@ export function QueueView({
               </EmptyContent>
             </Empty>
           ) : (
-            <>
-              <ItemGroup>
-                <AnimatePresence mode="popLayout" initial={false}>
-                  {picks.map((job, index) => (
-                    <Glide key={job.id}>
-                      <div
-                        draggable
-                        onDragStart={() => setDragging(index)}
-                        onDragOver={(event) => dragging !== undefined && event.preventDefault()}
-                        onDrop={() => {
-                          if (dragging !== undefined && dragging !== index)
-                            void act(() => api.move(picks[dragging].id, index));
-                          setDragging(undefined);
-                        }}
-                        onDragEnd={() => setDragging(undefined)}
+            <ItemGroup>
+              <AnimatePresence mode="popLayout" initial={false}>
+                {picks.map((job, index) => (
+                  <Glide key={job.id}>
+                    <div
+                      draggable
+                      onDragStart={() => setDragging(index)}
+                      onDragOver={(event) => dragging !== undefined && event.preventDefault()}
+                      onDrop={() => {
+                        if (dragging !== undefined && dragging !== index)
+                          void act(() => api.move(picks[dragging].id, index));
+                        setDragging(undefined);
+                      }}
+                      onDragEnd={() => setDragging(undefined)}
+                    >
+                      <Row
+                        leading={
+                          <span className="flex items-center gap-1">
+                            <GripVerticalIcon className="size-4 cursor-grab text-muted-foreground" />
+                            <StateIcon state={job.state} />
+                          </span>
+                        }
+                        title={details(job, true)}
+                        meta={<Meta job={job} byId={byId} />}
                       >
-                        <Row
-                          leading={
-                            <span className="flex items-center gap-1">
-                              <GripVerticalIcon className="size-4 cursor-grab text-muted-foreground" />
-                              <StateIcon state={job.state} />
-                            </span>
-                          }
-                          title={details(job, true)}
-                          meta={<Meta job={job} byId={byId} />}
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label="Move up"
+                          disabled={index === 0}
+                          onClick={() => act(() => api.move(job.id, index - 1))}
                         >
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            aria-label="Move up"
-                            disabled={index === 0}
-                            onClick={() => act(() => api.move(job.id, index - 1))}
-                          >
-                            <ArrowUpIcon />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            aria-label="Move down"
-                            disabled={index === picks.length - 1}
-                            onClick={() => act(() => api.move(job.id, index + 1))}
-                          >
-                            <ArrowDownIcon />
-                          </Button>
-                          {remove(job)}
-                        </Row>
-                      </div>
-                    </Glide>
-                  ))}
-                </AnimatePresence>
-              </ItemGroup>
-            </>
+                          <ArrowUpIcon />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label="Move down"
+                          disabled={index === picks.length - 1}
+                          onClick={() => act(() => api.move(job.id, index + 1))}
+                        >
+                          <ArrowDownIcon />
+                        </Button>
+                        {remove(job)}
+                      </Row>
+                    </div>
+                  </Glide>
+                ))}
+              </AnimatePresence>
+            </ItemGroup>
           )}
         </Section>
 
