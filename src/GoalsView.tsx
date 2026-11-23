@@ -43,7 +43,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/to
 import { ago, minutesSince, repoName } from "@/format";
 import { useQueryParam } from "@/hooks/use-query-param";
 import { openAssumptions } from "@/inbox";
-import { NewGoalDialog } from "@/NewGoalDialog";
 import { MARKDOWN } from "@/PrReview";
 import { Row, Section } from "@/Row";
 import { StateIcon, StatePill, TaskDetails } from "@/TaskDetails";
@@ -94,33 +93,21 @@ function lastActivity(nodes: Job[], goal: Job): string {
 }
 
 /** Goals: large tasks as graphs of jobs, each on its own integration branch. */
-export function GoalsView({ snapshot, act }: { snapshot: Snapshot; act: Act }) {
+export function GoalsView({
+  snapshot,
+  act,
+  onNew,
+}: {
+  snapshot: Snapshot;
+  act: Act;
+  onNew: () => void;
+}) {
   const [open, setOpen] = useQueryParam("goal", "");
-  const [creating, setCreating] = useState(false);
   const goals = snapshot.jobs.filter((job) => job.goal && job.state !== "removed");
   const shown = goals.find((goal) => goal.id === open);
   if (shown)
     return <GoalView goal={shown} snapshot={snapshot} act={act} onBack={() => setOpen("")} />;
-  // One dialog for both the empty page and the list, so the goal appearing mid-create doesn't remount it.
-  return (
-    <>
-      <GoalList
-        goals={goals}
-        snapshot={snapshot}
-        onNew={() => setCreating(true)}
-        onOpen={setOpen}
-      />
-      <NewGoalDialog
-        act={act}
-        open={creating}
-        onOpenChange={setCreating}
-        onCreated={(id) => {
-          setCreating(false);
-          setOpen(id);
-        }}
-      />
-    </>
-  );
+  return <GoalList goals={goals} snapshot={snapshot} onNew={onNew} onOpen={setOpen} />;
 }
 
 function GoalList({

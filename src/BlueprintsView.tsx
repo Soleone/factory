@@ -1,3 +1,4 @@
+import { PlusIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, type Act } from "@/api";
 import type { Blueprint } from "@/backend/types.ts";
@@ -5,12 +6,12 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
-  DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { AnchoredDialogContent } from "@/components/variants/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -119,20 +120,27 @@ export function BlueprintsView({ act }: { act: Act }) {
   const yours = blueprints.filter((blueprint) => blueprint.custom);
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-center gap-2">
-        <p className="flex-1 text-sm text-muted-foreground">
-          A blueprint is a reusable prompt that workwork turns into candidates in every repo.
-          Running one on a repo queues what it finds there.
-        </p>
-        <Button onClick={() => setEditing({ ...BLANK, custom: true })}>New blueprint</Button>
-      </div>
-      <Section title={`Yours (${yours.length})`}>
+      <p className="text-sm text-muted-foreground">
+        A blueprint is a reusable prompt that workwork turns into candidates in every repo. Running
+        one on a repo queues what it finds there.
+      </p>
+      <section className="flex flex-col gap-2">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-sm font-medium text-muted-foreground">Yours ({yours.length})</h2>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setEditing({ ...BLANK, custom: true })}
+          >
+            <PlusIcon /> New blueprint
+          </Button>
+        </div>
         {yours.length ? (
           <ItemGroup>{yours.map(row)}</ItemGroup>
         ) : (
           <p className="text-sm text-muted-foreground">None yet.</p>
         )}
-      </Section>
+      </section>
       <Section title="Built in">
         <ItemGroup>{blueprints.filter((blueprint) => !blueprint.custom).map(row)}</ItemGroup>
       </Section>
@@ -172,7 +180,7 @@ function BlueprintDialog({
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-2xl">
+      <AnchoredDialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>{creating ? "New blueprint" : blueprint.name}</DialogTitle>
           <DialogDescription>
@@ -284,7 +292,7 @@ function BlueprintDialog({
             </Button>
           </DialogFooter>
         )}
-      </DialogContent>
+      </AnchoredDialogContent>
     </Dialog>
   );
 }

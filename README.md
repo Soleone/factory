@@ -39,7 +39,7 @@ factory goal show gpui-client       # the graph before anything runs: tiers, cri
 factory goal approve gpui-client
 ```
 
-- **Starting one:** **New goal** on the Goals tab takes a title, a repo and a brief, or a plan to import. **New project...** in its repo list creates `$SRC/<name>` and a private GitHub repo of the same name (`goal new --project NAME` on the command line). The Live Agent can work out the brief with you and start the goal too; approving its plan stays with you.
+- **Starting one:** **New goal** on the Goals tab (the Goal view of **Add work**) takes a title, a repo and a brief, or a plan to import. **New project...** in its repo list creates `$SRC/<name>` and a private GitHub repo of the same name (`goal new --project NAME` on the command line). The Live Agent can work out the brief with you and start the goal too; approving its plan stays with you.
 - **Planning:** `goal new` queues a communicator to decompose the goal into a plan, which factory validates and imports, then waits for your approval. `goal import plan.json` takes a plan you wrote, with someone or something else; [spec/plan-format.md](spec/plan-format.md) describes the format (JSON or YAML) and `goal check` validates one.
 - **Branches:** the goal gets `goal/<slug>` on origin. Each node works on `node/<slug>/<key>`, started from the integration branch's head; it commits and pushes but never opens a PR. Factory runs its gates, rebases it onto the integration branch, opens the PR and merges it, then runs the goal's own gates. A conflict queues a job to resolve it; a red integration branch pauses the goal and queues a fix.
 - **Memory:** `.factory/<slug>.md` on the integration branch holds the goal's summary and the decisions each node leaves for the next. Prompts carry the goal summary, what a node's dependencies delivered, and a pointer to the memory.
@@ -62,7 +62,7 @@ factory result "<summary>" --confidence high --url LINK --followup "<task>" --un
 
 The prompt tells agents to decide what a reasonable engineer would and note the call. An assumption you answer with "fine" closes; any other answer queues a job to change it. A plain question pauses the job until you answer, on the page or with `factory answer`, and the same session picks up from there. `factory report` ends with what waits on you: unverified work and assumptions to confirm.
 
-On the page, everything that waits on you collects in the **Inbox**, which the page opens on while anything blocks work. On top, what holds work up until you act: questions, goal checkpoints and plans to approve, and jobs that failed twice. Below, what agents carried on past: PRs to merge, assumptions to confirm and work to verify. Candidates and blueprints live behind **Add work**, and Activity sits next to Results.
+On the page, everything that waits on you collects in the **Inbox**, which the page opens on while anything blocks work. On top, what holds work up until you act: questions, goal checkpoints and plans to approve, and jobs that failed twice. Below, what agents carried on past: PRs to merge, assumptions to confirm and work to verify. **Add work** gathers every way in: a job of your own, a goal, candidates and blueprints. Activity sits next to Results.
 
 ## Live Agent
 

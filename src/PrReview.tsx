@@ -6,12 +6,12 @@ import type { Pr } from "@/backend/types.ts";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
-  DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { AnchoredDialogContent } from "@/components/variants/dialog";
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
@@ -45,7 +45,7 @@ export function PrReview({ jobId, url, pr }: { jobId: string; url: string; pr: P
   return (
     <Dialog>
       <DialogTrigger render={<Button variant="link" size="xs" />}>Review</DialogTrigger>
-      <DialogContent className="sm:max-w-4xl">
+      <AnchoredDialogContent className="sm:max-w-4xl">
         <DialogHeader className="mr-8">
           <DialogTitle>{pr.title}</DialogTitle>
           <DialogDescription>
@@ -60,7 +60,7 @@ export function PrReview({ jobId, url, pr }: { jobId: string; url: string; pr: P
           </DialogDescription>
         </DialogHeader>
         <Details jobId={jobId} pr={pr} />
-      </DialogContent>
+      </AnchoredDialogContent>
     </Dialog>
   );
 }

@@ -2,13 +2,8 @@ import { type RefObject, useEffect, useState } from "react";
 import { api, type Act } from "@/api";
 import type { GithubRepo } from "@/backend/repos.ts";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { AnchoredDialogContent } from "@/components/variants/dialog";
 import { Input } from "@/components/ui/input";
 import { ItemGroup } from "@/components/ui/item";
 import { Spinner } from "@/components/ui/spinner";
@@ -29,7 +24,7 @@ export function CloneDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-xl" finalFocus={finalFocus}>
+      <AnchoredDialogContent className="sm:max-w-xl" finalFocus={finalFocus}>
         <DialogHeader>
           <DialogTitle>Clone a repo</DialogTitle>
           <DialogDescription>
@@ -38,7 +33,7 @@ export function CloneDialog({
           </DialogDescription>
         </DialogHeader>
         <RepoList act={act} onCloned={onCloned} />
-      </DialogContent>
+      </AnchoredDialogContent>
     </Dialog>
   );
 }

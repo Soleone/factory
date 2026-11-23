@@ -9,7 +9,9 @@ import { ThemePicker } from "@/components/soleone/theme-picker";
 import { UsageRing, type UsageWindow } from "@/components/soleone/usage-ring/usage-ring";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Dialog, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { AnchoredDialogContent } from "@/components/variants/dialog";
+
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useSidebar } from "@/components/ui/sidebar";
@@ -24,6 +26,8 @@ import { SettingsDialog } from "@/SettingsDialog";
 import { clock, runStart } from "@/format";
 import { setQueryParam, useQueryParam } from "@/hooks/use-query-param";
 import { inbox } from "@/inbox";
+import { NewGoalForm } from "@/NewGoalForm";
+import { NewJobForm } from "@/NewJobForm";
 import { InboxView } from "@/InboxView";
 
 // Links from before the tabs were merged still open what they named, before any view reads the query.
@@ -164,12 +168,7 @@ function Factory({
               <TabsTrigger value="results">Results</TabsTrigger>
             </TabsList>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="ml-auto"
-            onClick={() => setAdding("candidates")}
-          >
+          <Button variant="outline" size="sm" className="ml-auto" onClick={() => setAdding("job")}>
             <PlusIcon /> Add work
           </Button>
         </div>
@@ -185,10 +184,10 @@ function Factory({
           />
         </TabsContent>
         <TabsContent value="queue">
-          <QueueView snapshot={snapshot} act={act} onCandidates={() => setAdding("candidates")} />
+          <QueueView snapshot={snapshot} act={act} onAdd={setAdding} />
         </TabsContent>
         <TabsContent value="goals">
-          <GoalsView snapshot={snapshot} act={act} />
+          <GoalsView snapshot={snapshot} act={act} onNew={() => setAdding("goal")} />
         </TabsContent>
         <TabsContent value="results">
           <div className="pt-2">
@@ -207,27 +206,40 @@ function Factory({
           </div>
         </TabsContent>
       </Tabs>
-      <Sheet open={adding !== ""} onOpenChange={(open) => !open && setAdding("")}>
-        <SheetContent className="w-full overflow-y-auto data-[side=right]:sm:max-w-3xl">
-          <SheetHeader>
-            <SheetTitle>Add work</SheetTitle>
-          </SheetHeader>
-          <div className="px-4 pb-4">
-            <Tabs value={adding || "candidates"} onValueChange={setAdding}>
-              <TabsList variant="line">
-                <TabsTrigger value="candidates">Candidates</TabsTrigger>
-                <TabsTrigger value="blueprints">Blueprints</TabsTrigger>
-              </TabsList>
-              <TabsContent value="candidates">
-                <CandidatesView snapshot={snapshot} act={act} />
-              </TabsContent>
-              <TabsContent value="blueprints">
-                <BlueprintsView act={act} />
-              </TabsContent>
-            </Tabs>
-          </div>
-        </SheetContent>
-      </Sheet>
+      <Dialog open={adding !== ""} onOpenChange={(open) => !open && setAdding("")}>
+        <AnchoredDialogContent className="sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Add work</DialogTitle>
+          </DialogHeader>
+          <Tabs value={adding} onValueChange={setAdding}>
+            <TabsList variant="line">
+              <TabsTrigger value="job">Job</TabsTrigger>
+              <TabsTrigger value="goal">Goal</TabsTrigger>
+              <TabsTrigger value="candidates">Candidates</TabsTrigger>
+              <TabsTrigger value="blueprints">Blueprints</TabsTrigger>
+            </TabsList>
+            <TabsContent value="goal">
+              <NewGoalForm
+                act={act}
+                onCreated={(id) => {
+                  setAdding("");
+                  setQueryParam("goal", id);
+                  setTab("goals");
+                }}
+              />
+            </TabsContent>
+            <TabsContent value="candidates">
+              <CandidatesView snapshot={snapshot} act={act} />
+            </TabsContent>
+            <TabsContent value="job">
+              <NewJobForm act={act} onQueued={() => setAdding("")} />
+            </TabsContent>
+            <TabsContent value="blueprints">
+              <BlueprintsView act={act} />
+            </TabsContent>
+          </Tabs>
+        </AnchoredDialogContent>
+      </Dialog>
     </div>
   );
 }

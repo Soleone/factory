@@ -3,12 +3,12 @@ import type { DialogAnswer, PiDialog } from "@/pi";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
-  DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { AnchoredDialogContent } from "@/components/variants/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -25,7 +25,7 @@ export function AgentDialog({
 
   return (
     <Dialog open onOpenChange={(open) => !open && onAnswer({ cancelled: true })}>
-      <DialogContent>
+      <AnchoredDialogContent>
         <DialogHeader>
           <DialogTitle>{dialog.title}</DialogTitle>
           {dialog.method === "confirm" && dialog.message && (
@@ -63,7 +63,7 @@ export function AgentDialog({
           )}
           {typed && <Button onClick={() => onAnswer({ value: text })}>Send</Button>}
         </DialogFooter>
-      </DialogContent>
+      </AnchoredDialogContent>
     </Dialog>
   );
 }

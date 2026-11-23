@@ -5,12 +5,12 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
-  DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { AnchoredDialogContent } from "@/components/variants/dialog";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/tooltip/tooltip";
 import { RunFields, type Run } from "@/RunFields";
@@ -60,7 +60,7 @@ export function Controls({ snapshot, act }: { snapshot: Snapshot; act: Act }) {
         <TooltipContent>Shift-click to turn on with your defaults</TooltipContent>
       </Tooltip>
       <Dialog open={run !== undefined} onOpenChange={(open) => !open && setRun(undefined)}>
-        <DialogContent>
+        <AnchoredDialogContent>
           <DialogHeader>
             <DialogTitle>Turn the factory on</DialogTitle>
             <DialogDescription>
@@ -82,7 +82,7 @@ export function Controls({ snapshot, act }: { snapshot: Snapshot; act: Act }) {
               Turn on
             </Button>
           </DialogFooter>
-        </DialogContent>
+        </AnchoredDialogContent>
       </Dialog>
     </div>
   );

@@ -1,6 +1,6 @@
-import { ArrowDownIcon, ArrowUpIcon, PlusIcon, XIcon } from "lucide-react";
+import { ArrowDownIcon, ArrowUpIcon, XIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useState, type ReactNode, type Ref } from "react";
+import type { ReactNode, Ref } from "react";
 import { api, type Act } from "@/api";
 import {
   TIERS,
@@ -22,7 +22,6 @@ import {
 import { ItemGroup } from "@/components/ui/item";
 import { clock, itemTitle, minutesSince, pinName, tuning } from "@/format";
 import { TierBadge } from "@/GoalsView";
-import { NewJobDialog } from "@/NewJobDialog";
 import { Row, Section } from "@/Row";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/tooltip/tooltip";
 import { StateIcon, StatePill, TaskDetails } from "@/TaskDetails";
@@ -194,13 +193,12 @@ function Glide({ ref, children }: { ref?: Ref<HTMLDivElement>; children: ReactNo
 export function QueueView({
   snapshot,
   act,
-  onCandidates,
+  onAdd,
 }: {
   snapshot: Snapshot;
   act: Act;
-  onCandidates: () => void;
+  onAdd: (view: "candidates" | "job") => void;
 }) {
-  const [creating, setCreating] = useState(false);
   const { jobs, status, on, settings } = snapshot;
   const byId = new Map(jobs.map((job) => [job.id, job]));
   const picks = jobs.filter((job) => job.state === "queued" && job.source === "pick");
@@ -251,19 +249,12 @@ export function QueueView({
     </Tooltip>
   );
 
-  const newJob = (
-    <Button variant="outline" onClick={() => setCreating(true)}>
-      <PlusIcon /> New job
-    </Button>
-  );
-
   const running = on && status ? status.workers.filter((worker) => worker.job) : [];
 
   return (
     <div className={`grid gap-8 pt-2 ${on && status ? "lg:grid-cols-[1fr_15rem]" : ""}`}>
       {on && status && <Workers status={status} settings={settings} />}
       <div className="flex min-w-0 flex-col gap-8 lg:row-start-1">
-        <NewJobDialog act={act} open={creating} onOpenChange={setCreating} />
         {running.length > 0 && (
           <Section title={`Running (${running.length})`}>
             <ItemGroup>
@@ -295,15 +286,16 @@ export function QueueView({
                 </EmptyDescription>
               </EmptyHeader>
               <EmptyContent className="flex-row justify-center">
-                <Button variant="outline" onClick={onCandidates}>
+                <Button variant="outline" onClick={() => onAdd("candidates")}>
                   Browse candidates
                 </Button>
-                {newJob}
+                <Button variant="outline" onClick={() => onAdd("job")}>
+                  Write your own
+                </Button>
               </EmptyContent>
             </Empty>
           ) : (
             <>
-              <div className="flex justify-end">{newJob}</div>
               <ItemGroup>
                 <AnimatePresence mode="popLayout" initial={false}>
                   {picks.map((job, index) => (

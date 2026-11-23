@@ -1,14 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type Act } from "@/api";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
@@ -28,40 +20,25 @@ import { repoName } from "@/format";
 const NEW = { value: "new-project", label: "New project..." };
 
 /** Starts a goal from a brief, in a repo or a new project, or from a plan written elsewhere. */
-export function NewGoalDialog({
-  act,
-  open,
-  onOpenChange,
-  onCreated,
-}: {
-  act: Act;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onCreated: (id: string) => void;
-}) {
+export function NewGoalForm({ act, onCreated }: { act: Act; onCreated: (id: string) => void }) {
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>New goal</DialogTitle>
-          <DialogDescription>
-            A goal is one large task, planned into jobs. Nothing runs until you approve the plan.
-          </DialogDescription>
-        </DialogHeader>
-        <Tabs defaultValue="brief">
-          <TabsList>
-            <TabsTrigger value="brief">From a brief</TabsTrigger>
-            <TabsTrigger value="plan">Import a plan</TabsTrigger>
-          </TabsList>
-          <TabsContent value="brief">
-            <BriefForm act={act} onCreated={onCreated} />
-          </TabsContent>
-          <TabsContent value="plan">
-            <PlanForm act={act} onCreated={onCreated} />
-          </TabsContent>
-        </Tabs>
-      </DialogContent>
-    </Dialog>
+    <div className="flex flex-col gap-6">
+      <p className="text-sm text-muted-foreground">
+        A goal is one large task, planned into jobs. Nothing runs until you approve the plan.
+      </p>
+      <Tabs defaultValue="brief">
+        <TabsList>
+          <TabsTrigger value="brief">From a brief</TabsTrigger>
+          <TabsTrigger value="plan">Import a plan</TabsTrigger>
+        </TabsList>
+        <TabsContent value="brief">
+          <BriefForm act={act} onCreated={onCreated} />
+        </TabsContent>
+        <TabsContent value="plan">
+          <PlanForm act={act} onCreated={onCreated} />
+        </TabsContent>
+      </Tabs>
+    </div>
   );
 }
 
@@ -159,7 +136,7 @@ function BriefForm({ act, onCreated }: { act: Act; onCreated: (id: string) => vo
           Markdown. A communicator plans it into jobs, which wait for your approval here.
         </FieldDescription>
       </Field>
-      <DialogFooter>
+      <div className="flex justify-end">
         <Button disabled={!ready || busy} onClick={submit}>
           {busy ? (
             <>
@@ -169,7 +146,7 @@ function BriefForm({ act, onCreated }: { act: Act; onCreated: (id: string) => vo
             "Plan it"
           )}
         </Button>
-      </DialogFooter>
+      </div>
     </FieldGroup>
   );
 }
@@ -203,7 +180,7 @@ function PlanForm({ act, onCreated }: { act: Act; onCreated: (id: string) => voi
           changes.
         </FieldDescription>
       </Field>
-      <DialogFooter>
+      <div className="flex justify-end">
         <Button disabled={!plan.trim() || busy} onClick={submit}>
           {busy ? (
             <>
@@ -213,7 +190,7 @@ function PlanForm({ act, onCreated }: { act: Act; onCreated: (id: string) => voi
             "Import"
           )}
         </Button>
-      </DialogFooter>
+      </div>
     </FieldGroup>
   );
 }

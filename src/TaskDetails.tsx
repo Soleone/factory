@@ -16,13 +16,13 @@ import { dayOf, EntryMark, jobEntries, StepNumber } from "@/ActivityView";
 import { prUrl, type Item, type Job, type Snapshot } from "@/backend/types.ts";
 import {
   Dialog,
-  DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { AnchoredDialogContent } from "@/components/variants/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
@@ -162,7 +162,7 @@ export function TaskDetails({
       >
         <TaskTitle item={item} bare={bare} />
       </DialogTrigger>
-      <DialogContent className={job ? "sm:max-w-5xl" : "sm:max-w-3xl"}>
+      <AnchoredDialogContent className={job ? "sm:max-w-5xl" : "sm:max-w-3xl"}>
         <DialogHeader className="mr-8">
           <div className="flex items-start gap-3">
             <span className="mt-0.5">
@@ -199,7 +199,7 @@ export function TaskDetails({
           </div>
         )}
         {actions && <DialogFooter>{actions}</DialogFooter>}
-      </DialogContent>
+      </AnchoredDialogContent>
     </Dialog>
   );
 }

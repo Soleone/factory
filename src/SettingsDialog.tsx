@@ -32,13 +32,13 @@ import {
 } from "@/components/ui/combobox";
 import {
   Dialog,
-  DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { AnchoredDialogContent } from "@/components/variants/dialog";
 import {
   Field,
   FieldDescription,
@@ -63,7 +63,7 @@ export function SettingsDialog({ snapshot, act }: { snapshot: Snapshot; act: Act
       <DialogTrigger render={<Button variant="ghost" size="icon" aria-label="Settings" />}>
         <Settings2 />
       </DialogTrigger>
-      <DialogContent className="sm:max-w-xl">
+      <AnchoredDialogContent className="sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>Settings</DialogTitle>
           <DialogDescription>
@@ -72,7 +72,7 @@ export function SettingsDialog({ snapshot, act }: { snapshot: Snapshot; act: Act
           </DialogDescription>
         </DialogHeader>
         <SettingsForm snapshot={snapshot} act={act} onSaved={() => setOpen(false)} />
-      </DialogContent>
+      </AnchoredDialogContent>
     </Dialog>
   );
 }
