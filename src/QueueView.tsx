@@ -1,6 +1,6 @@
-import { ArrowDownIcon, ArrowUpIcon, XIcon } from "lucide-react";
+import { ArrowDownIcon, ArrowUpIcon, GripVerticalIcon, XIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import type { ReactNode, Ref } from "react";
+import { useState, type ReactNode, type Ref } from "react";
 import { api, type Act } from "@/api";
 import {
   TIERS,
@@ -200,6 +200,7 @@ export function QueueView({
   onAdd: (view: "candidates" | "job") => void;
 }) {
   const { jobs, status, on, settings } = snapshot;
+  const [dragging, setDragging] = useState<number>();
   const byId = new Map(jobs.map((job) => [job.id, job]));
   const picks = jobs.filter((job) => job.state === "queued" && job.source === "pick");
   const auto = jobs.filter((job) => job.state === "queued" && job.source === "auto");
@@ -300,31 +301,48 @@ export function QueueView({
                 <AnimatePresence mode="popLayout" initial={false}>
                   {picks.map((job, index) => (
                     <Glide key={job.id}>
-                      <Row
-                        leading={<StateIcon state={job.state} />}
-                        title={details(job, true)}
-                        meta={<Meta job={job} byId={byId} />}
+                      <div
+                        draggable
+                        onDragStart={() => setDragging(index)}
+                        onDragOver={(event) => dragging !== undefined && event.preventDefault()}
+                        onDrop={() => {
+                          if (dragging !== undefined && dragging !== index)
+                            void act(() => api.move(picks[dragging].id, index));
+                          setDragging(undefined);
+                        }}
+                        onDragEnd={() => setDragging(undefined)}
                       >
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          aria-label="Move up"
-                          disabled={index === 0}
-                          onClick={() => act(() => api.move(job.id, index - 1))}
+                        <Row
+                          leading={
+                            <span className="flex items-center gap-1">
+                              <GripVerticalIcon className="size-4 cursor-grab text-muted-foreground" />
+                              <StateIcon state={job.state} />
+                            </span>
+                          }
+                          title={details(job, true)}
+                          meta={<Meta job={job} byId={byId} />}
                         >
-                          <ArrowUpIcon />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          aria-label="Move down"
-                          disabled={index === picks.length - 1}
-                          onClick={() => act(() => api.move(job.id, index + 1))}
-                        >
-                          <ArrowDownIcon />
-                        </Button>
-                        {remove(job)}
-                      </Row>
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            aria-label="Move up"
+                            disabled={index === 0}
+                            onClick={() => act(() => api.move(job.id, index - 1))}
+                          >
+                            <ArrowUpIcon />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            aria-label="Move down"
+                            disabled={index === picks.length - 1}
+                            onClick={() => act(() => api.move(job.id, index + 1))}
+                          >
+                            <ArrowDownIcon />
+                          </Button>
+                          {remove(job)}
+                        </Row>
+                      </div>
                     </Glide>
                   ))}
                 </AnimatePresence>
