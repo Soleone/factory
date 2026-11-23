@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.3](https://github.com/Soleone/factory/compare/v0.4.2...v0.4.3) (2026-11-23)
+
+### Bug Fixes
+
+* **usage:** a bare pi agent shows the ring of pi's default provider ([db5bb54](https://github.com/Soleone/factory/commit/db5bb54a55fdf60e79bfe23713ac5ba45f47d056))
+
 ## [0.4.2](https://github.com/Soleone/factory/compare/v0.4.1...v0.4.2) (2026-11-23)
 
 ### Features
