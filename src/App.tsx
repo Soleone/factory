@@ -1,13 +1,16 @@
-import { useState } from "react";
+import { useEffect, useEffectEvent, useState, type ReactNode } from "react";
 import { PlusIcon } from "lucide-react";
 import { ActivityView } from "@/ActivityView";
 import { BlueprintsView } from "@/BlueprintsView";
 import { useFactory, type Act } from "@/api";
 import type { Snapshot, UsageWindow as Used } from "@/backend/types.ts";
 import { AgentSidebar } from "@/components/soleone/agent";
+import { isInteractiveTarget } from "@/components/soleone/theme";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/tooltip/tooltip";
 import { ThemePicker } from "@/components/soleone/theme-picker";
 import { UsageRing, type UsageWindow } from "@/components/soleone/usage-ring/usage-ring";
 import { Badge } from "@/components/ui/badge";
+import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ScrollingTabsContent, TabbedDialogContent } from "@/components/variants/dialog";
@@ -86,6 +89,7 @@ function Factory({
   const [tab, setTab] = useQueryParam("tab", landing);
   const [view, setView] = useQueryParam("view", "results");
   const [adding, setAdding] = useQueryParam("add", "");
+  useGoKeys(setTab);
   const { isMobile, setOpen, setOpenMobile } = useSidebar();
   /** Starts the Live Agent chat with a question about a result. */
   const ask = (question: string) => {
@@ -151,21 +155,21 @@ function Factory({
           {/* The tabs don't fit a phone; they scroll on their own rather than the page. */}
           <div className="min-w-0 overflow-x-auto overflow-y-hidden">
             <TabsList>
-              <TabsTrigger value="inbox">
+              <Tab value="inbox">
                 Inbox
                 {stopped.length > 0 ? (
                   <Badge variant="accent">{stopped.length + ready.length}</Badge>
                 ) : (
                   <Count n={ready.length} />
                 )}
-              </TabsTrigger>
-              <TabsTrigger value="queue">
+              </Tab>
+              <Tab value="queue">
                 Queue <Count n={queued} />
-              </TabsTrigger>
-              <TabsTrigger value="goals">
+              </Tab>
+              <Tab value="goals">
                 Goals <Count n={goals} />
-              </TabsTrigger>
-              <TabsTrigger value="results">Results</TabsTrigger>
+              </Tab>
+              <Tab value="results">Results</Tab>
             </TabsList>
           </div>
           <Button variant="outline" size="sm" className="ml-auto" onClick={() => setAdding("job")}>
@@ -241,6 +245,46 @@ function Factory({
         </TabbedDialogContent>
       </Dialog>
     </div>
+  );
+}
+
+/** The key after `g` that jumps to each tab. */
+const GO_KEYS = { inbox: "i", queue: "q", goals: "g", results: "r" };
+
+/** `g` then a tab's key jumps to that tab, unless the keys go to a field or a dialog. */
+function useGoKeys(go: (tab: string) => void) {
+  const jump = useEffectEvent(go);
+  useEffect(() => {
+    let armed = 0;
+    const listen = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey || event.repeat) return;
+      if (isInteractiveTarget(event.target)) return;
+      const tab =
+        Date.now() - armed < 1000 &&
+        Object.entries(GO_KEYS).find(([, key]) => key === event.key)?.[0];
+      armed = 0;
+      if (tab) {
+        event.preventDefault();
+        jump(tab);
+      } else if (event.key === "g") armed = Date.now();
+    };
+    window.addEventListener("keydown", listen);
+    return () => window.removeEventListener("keydown", listen);
+  }, []);
+}
+
+/** A main tab, with its shortcut on hover. */
+function Tab({ value, children }: { value: keyof typeof GO_KEYS; children: ReactNode }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<TabsTrigger value={value} />}>{children}</TooltipTrigger>
+      <TooltipContent>
+        <KbdGroup>
+          <Kbd>g</Kbd>
+          <Kbd>{GO_KEYS[value]}</Kbd>
+        </KbdGroup>
+      </TooltipContent>
+    </Tooltip>
   );
 }
 

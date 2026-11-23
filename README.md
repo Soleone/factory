@@ -62,7 +62,7 @@ factory result "<summary>" --confidence high --url LINK --followup "<task>" --un
 
 The prompt tells agents to decide what a reasonable engineer would and note the call. An assumption you answer with "fine" closes; any other answer queues a job to change it. A plain question pauses the job until you answer, on the page or with `factory answer`, and the same session picks up from there. `factory report` ends with what waits on you: unverified work and assumptions to confirm.
 
-On the page, everything that waits on you collects in the **Inbox**, which the page opens on while anything blocks work. On top, what holds work up until you act: questions, goal checkpoints and plans to approve, and jobs that failed twice. Below, what agents carried on past: PRs to merge, assumptions to confirm and work to verify. **Add work** gathers every way in: a job of your own, a goal, candidates and blueprints. Activity sits next to Results.
+On the page, everything that waits on you collects in the **Inbox**, which the page opens on while anything blocks work. On top, what holds work up until you act: questions, goal checkpoints and plans to approve, and jobs that failed twice. Below, what agents carried on past: PRs to merge, assumptions to confirm and work to verify. **Add work** gathers every way in: a job of your own, a goal, candidates and blueprints. Activity sits next to Results. `g` then `i`, `q`, `g` or `r` jumps to Inbox, Queue, Goals or Results.
 
 ## Live Agent
 
