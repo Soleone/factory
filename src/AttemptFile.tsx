@@ -3,7 +3,6 @@ import { XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
-  PopoverClose,
   PopoverContent,
   PopoverDescription,
   PopoverHeader,
@@ -29,8 +28,9 @@ export function AttemptFile({
 }) {
   const file = FILES[kind];
   const url = `/${log.replace(/agent\.log$/, file.name)}`;
+  const [open, setOpen] = useState(false);
   return (
-    <Popover>
+    <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger render={<Button variant="link" size="xs" />}>{file.label}</PopoverTrigger>
       <PopoverContent className="w-xl max-w-[calc(100vw-2rem)]">
         <div className="flex flex-wrap items-start justify-between gap-2">
@@ -47,9 +47,14 @@ export function AttemptFile({
             >
               Open raw {file.noun}
             </a>
-            <PopoverClose render={<Button variant="ghost" size="icon-sm" aria-label="Close" />}>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Close"
+              onClick={() => setOpen(false)}
+            >
               <XIcon />
-            </PopoverClose>
+            </Button>
           </div>
         </div>
         <FileBody url={url} noun={file.noun} />

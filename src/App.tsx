@@ -10,6 +10,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/to
 import { ThemePicker } from "@/components/soleone/theme-picker";
 import { UsageRing, type UsageWindow } from "@/components/soleone/usage-ring/usage-ring";
 import { Badge } from "@/components/ui/badge";
+import { AccentBadge } from "@/components/variants/badge";
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -128,7 +129,7 @@ function Factory({
             <Logo working={on} />
             Factory
           </h1>
-          <Badge variant={on ? "accent" : "outline"}>{on ? "on" : "off"}</Badge>
+          {on ? <AccentBadge>on</AccentBadge> : <Badge variant="outline">off</Badge>}
           {Object.entries(snapshot.usage).map(([pool, usage]) => (
             <UsageRing
               key={pool}
@@ -158,7 +159,7 @@ function Factory({
               <Tab value="inbox">
                 Inbox
                 {stopped.length > 0 ? (
-                  <Badge variant="accent">{stopped.length + ready.length}</Badge>
+                  <AccentBadge>{stopped.length + ready.length}</AccentBadge>
                 ) : (
                   <Count n={ready.length} />
                 )}
