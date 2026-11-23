@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.2](https://github.com/Soleone/factory/compare/v0.4.1...v0.4.2) (2026-11-23)
+
+### Features
+
+* **header:** a usage ring per provider, 5-hour and 7-day left at a glance ([e14c501](https://github.com/Soleone/factory/commit/e14c5010d2fc6a46fde0f1b720711b3f4bc6195d))
+
+### Bug Fixes
+
+* **usage:** tests never read the real accounts, and knip passes ([71a6496](https://github.com/Soleone/factory/commit/71a6496b55f5c701a26ef1213a859e6321b615a6))
+
 ## [0.4.1](https://github.com/Soleone/factory/compare/v0.4.0...v0.4.1) (2026-11-22)
 
 ### Features
