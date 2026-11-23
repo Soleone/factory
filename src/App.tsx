@@ -228,7 +228,7 @@ function Factory({
                 }}
               />
             </ScrollingTabsContent>
-            <ScrollingTabsContent value="candidates">
+            <ScrollingTabsContent value="candidates" className="flex flex-col overflow-hidden">
               <CandidatesView snapshot={snapshot} act={act} />
             </ScrollingTabsContent>
             <ScrollingTabsContent value="job">

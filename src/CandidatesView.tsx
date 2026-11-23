@@ -136,7 +136,7 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
   );
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex min-h-0 flex-1 flex-col gap-4">
       <p className="text-sm text-muted-foreground">
         Tasks that blueprints found in your repos. What you queue here runs before auto mode.
       </p>
@@ -226,7 +226,7 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
       {inRepo.length === 0 ? (
         empty
       ) : (
-        <div className="flex flex-col gap-6 md:flex-row">
+        <div className="flex min-h-0 flex-1 flex-col gap-6 md:flex-row">
           <nav className="flex flex-wrap gap-1 md:w-48 md:flex-none md:flex-col">
             {[[ALL, inRepo.length] as const, ...blueprints].map(([name, total]) => (
               <Tooltip key={name} disabled={!described.has(name)}>
@@ -250,7 +250,8 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
             ))}
           </nav>
 
-          <div className="min-w-0 flex-1">
+          {/* The one part that scrolls, so the filters and blueprints stay in view. */}
+          <div className="-m-1 min-w-0 flex-1 overflow-y-auto p-1 [scrollbar-gutter:stable]">
             <Section
               title={
                 <span className="flex items-center gap-2">
