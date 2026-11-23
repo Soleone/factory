@@ -29,7 +29,7 @@ import {
   workersOf,
 } from "./state.ts";
 import { noFacts, readStream, type Facts } from "./stream.ts";
-import { fiveHour, type Window } from "./usage.ts";
+import { fiveHour } from "./usage.ts";
 import {
   presetId,
   TIERS,
@@ -42,6 +42,7 @@ import {
   type Settings,
   type Status,
   type Tuning,
+  type UsageWindow,
   type Worker,
 } from "./types.ts";
 
@@ -64,7 +65,7 @@ export type RunOptions = {
   /** Tests record the waits for a limit reset instead of sleeping through them. */
   sleep?: (ms: number) => Promise<void>;
   /** Reads a pool's 5-hour window; tests swap in their own. */
-  usage?: (pool: string) => Promise<Window>;
+  usage?: (pool: string) => Promise<UsageWindow>;
 };
 
 const MINUTE = 60_000;
@@ -209,7 +210,7 @@ export async function run(options: RunOptions): Promise<string> {
     const done = (options.usage ?? fiveHour)(pool.name).then(
       ({ used, resets }) => {
         pool.used = used;
-        if (used >= 100 - reserve && resets > Date.now()) {
+        if (used >= 100 - reserve && resets && resets > Date.now()) {
           const wake = Math.min(resets + 2 * MINUTE, options.until ?? Infinity);
           Object.assign(pool, { until: new Date(wake).toISOString(), reserved: true });
           log(`${pool.name} used ${used}% of its 5 hours, keeps ${reserve}% until ${pool.until}`);

@@ -260,6 +260,11 @@ export type Worker = Tuning & {
 /** The pools whose 5-hour usage factory can read, so a reserve can be kept on them. */
 export const USAGE_POOLS = ["claude", "anthropic", "openai-codex"] as const;
 
+/** A usage window: the percent used, and when it resets in epoch ms; no reset while nothing was used. */
+export type UsageWindow = { used: number; resets?: number };
+/** A pool's two limits. */
+export type Usage = { fiveHour: UsageWindow; sevenDay: UsageWindow };
+
 /** What one usage limit counts against: an account at a provider. */
 export type Pool = {
   name: string;
@@ -297,6 +302,8 @@ export type Snapshot = {
   prs: Record<string, Pr>;
   /** Where each job on the merge train is, by job id; gone when serve restarts. */
   train: Record<string, TrainCar>;
+  /** The last usage read of each pool a run works on, by pool; a pool not read yet is missing. */
+  usage: Record<string, Usage>;
 };
 
 export type TrainCar =

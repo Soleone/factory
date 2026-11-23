@@ -269,6 +269,16 @@ function seed(): Snapshot {
       }),
     ),
     train: {},
+    usage: {
+      claude: {
+        fiveHour: { used: 58, resets: Date.now() + 112 * 60_000 },
+        sevenDay: { used: 71, resets: Date.now() + 52 * 3_600_000 },
+      },
+      "openai-codex": {
+        fiveHour: { used: 84, resets: Date.now() + 38 * 60_000 },
+        sevenDay: { used: 49, resets: Date.now() + 131 * 3_600_000 },
+      },
+    },
   };
 }
 

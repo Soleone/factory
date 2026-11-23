@@ -10,9 +10,10 @@ import {
 import { ActivityView } from "@/ActivityView";
 import { BlueprintsView } from "@/BlueprintsView";
 import { useFactory, type Act } from "@/api";
-import type { Snapshot } from "@/backend/types.ts";
+import type { Snapshot, UsageWindow as Used } from "@/backend/types.ts";
 import { AgentSidebar } from "@/components/soleone/agent";
 import { ThemePicker } from "@/components/soleone/theme-picker";
+import { UsageRing, type UsageWindow } from "@/components/soleone/usage-ring/usage-ring";
 import { Badge } from "@/components/ui/badge";
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -102,6 +103,14 @@ function Factory({
             Factory
           </h1>
           <Badge variant={on ? "accent" : "outline"}>{on ? "on" : "off"}</Badge>
+          {Object.entries(snapshot.usage).map(([pool, usage]) => (
+            <UsageRing
+              key={pool}
+              provider={pool === "openai-codex" ? "openai" : "claude"}
+              fiveHour={left(usage.fiveHour)}
+              sevenDay={left(usage.sevenDay)}
+            />
+          ))}
           <span className="text-sm text-muted-foreground">{run}</span>
         </div>
         <Controls snapshot={snapshot} act={act} />
@@ -178,3 +187,5 @@ function Factory({
     </div>
   );
 }
+
+const left = ({ used, resets }: Used): UsageWindow => ({ left: 100 - used, resets });

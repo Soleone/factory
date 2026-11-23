@@ -36,14 +36,17 @@ import {
 } from "./goals.ts";
 import { mirrorTasks } from "./tasksStore.ts";
 import { mergeTrain } from "./train.ts";
+import { usageCache } from "./usage.ts";
 import {
   checkSettings,
   output,
+  poolOf,
   readCandidates,
   readSettings,
   refreshCandidates,
   refreshingCandidates,
   runningPid,
+  workersOf,
   writeSettings,
 } from "./state.ts";
 import {
@@ -59,6 +62,7 @@ import {
   type Snapshot,
   type Status,
   type Tier,
+  USAGE_POOLS,
 } from "./types.ts";
 
 /** The built page; under pn dev, Vite serves it instead and proxies /api and /runs here. */
@@ -75,6 +79,7 @@ const TYPES: Record<string, string> = {
 /** The page and the API it uses: the same state and commands as the CLI, nothing more. */
 export function serve(state: string, port: number, host: string): Server {
   const prs = prCache();
+  const usage = usageCache();
   const train = mergeTrain(
     prs,
     (id, url, files) => queueConflicts(state, id, url, files),
@@ -135,7 +140,7 @@ export function serve(state: string, port: number, host: string): Server {
     return { url, pr };
   }
   const routes: Record<string, (body: never, id: string) => unknown> = {
-    "GET /api/state": () => snapshot(state, (urls) => prs.get(urls), train.cars()),
+    "GET /api/state": () => snapshot(state, (urls) => prs.get(urls), train.cars(), usage),
     "GET /api/candidates": () => {
       const cached = readCandidates(state);
       const items = cached?.items ?? [];
@@ -303,8 +308,10 @@ function snapshot(
   state: string,
   prs: (urls: string[]) => Snapshot["prs"],
   train: Snapshot["train"],
+  usage: (pools: string[]) => Snapshot["usage"],
 ): Snapshot {
   const statusPath = join(state, "status.json");
+  const settings = readSettings(state);
   const candidates = readCandidates(state);
   const jobs = readJobs(state);
   return {
@@ -312,7 +319,7 @@ function snapshot(
     status: existsSync(statusPath)
       ? (JSON.parse(readFileSync(statusPath, "utf8")) as Status)
       : null,
-    settings: readSettings(state),
+    settings,
     // Paths under runs/ are where this server serves them.
     jobs: jobs.map((job) => ({
       ...job,
@@ -325,7 +332,19 @@ function snapshot(
     },
     prs: prs(jobs.flatMap((job) => (job.state === "removed" ? [] : (prUrl(job) ?? [])))),
     train,
+    usage: usage(usagePools(settings)),
   };
+}
+
+/** The pools a run on these settings works on, of those whose usage factory can read. */
+function usagePools(settings: Settings): string[] {
+  const presets: Preset[] = [
+    ...Object.keys(settings.agents).map((agent) => ({ agent })),
+    ...settings.presets.filter((preset) => workersOf(preset, settings) > 0),
+  ];
+  return [...new Set(presets.map(poolOf))].filter((pool) =>
+    (USAGE_POOLS as readonly string[]).includes(pool),
+  );
 }
 
 /** A run asked for from the page, as the flags `factory run` takes. */
