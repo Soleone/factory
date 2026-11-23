@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { USAGE_POOLS, Usage, UsageWindow } from "./types.ts";
@@ -16,6 +16,12 @@ type ClaudeUsage = { five_hour: ClaudeWindow; seven_day: ClaudeWindow };
 
 const readJson = (...path: string[]) => JSON.parse(readFileSync(join(homedir(), ...path), "utf8"));
 const piAuth = () => readJson(".pi", "agent", "auth.json");
+
+/** The provider pi runs on when a preset names no model, or "pi" like poolOf where pi isn't set up. */
+export function piProvider(): string {
+  const path = join(homedir(), ".pi", "agent", "settings.json");
+  return (existsSync(path) && readJson(".pi", "agent", "settings.json").defaultProvider) || "pi";
+}
 
 const READERS: Record<(typeof USAGE_POOLS)[number], () => Promise<Usage>> = {
   claude: () => claudeUsage(readJson(".claude", ".credentials.json").claudeAiOauth.accessToken),

@@ -36,7 +36,7 @@ import {
 } from "./goals.ts";
 import { mirrorTasks } from "./tasksStore.ts";
 import { mergeTrain } from "./train.ts";
-import { usageCache } from "./usage.ts";
+import { piProvider, usageCache } from "./usage.ts";
 import {
   checkSettings,
   output,
@@ -342,7 +342,10 @@ function usagePools(settings: Settings): string[] {
     ...Object.keys(settings.agents).map((agent) => ({ agent })),
     ...settings.presets.filter((preset) => workersOf(preset, settings) > 0),
   ];
-  return [...new Set(presets.map(poolOf))].filter((pool) =>
+  // A bare pi works on pi's default provider, which poolOf can't see.
+  const pool = (preset: Preset) =>
+    preset.agent === "pi" && !preset.model && !preset.pool ? piProvider() : poolOf(preset);
+  return [...new Set(presets.map(pool))].filter((pool) =>
     (USAGE_POOLS as readonly string[]).includes(pool),
   );
 }
