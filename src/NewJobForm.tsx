@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { repoName } from "@/format";
+import { TierBadge } from "@/TierBadge";
 
 /** Queues one job of the user's own: a prompt for a tier, in a repo, without workwork. */
 export function NewJobForm({ act, onQueued }: { act: Act; onQueued: () => void }) {
@@ -61,7 +62,7 @@ export function NewJobForm({ act, onQueued }: { act: Act; onQueued: () => void }
           <Field>
             <FieldLabel>Tier</FieldLabel>
             <Select
-              items={TIERS.map((value) => ({ value, label: value }))}
+              items={TIERS.map((value) => ({ value, label: <TierBadge tier={value} /> }))}
               value={tier}
               onValueChange={(value) => value && setTier(value)}
             >
@@ -71,7 +72,7 @@ export function NewJobForm({ act, onQueued }: { act: Act; onQueued: () => void }
               <SelectContent alignItemWithTrigger={false}>
                 {TIERS.map((value) => (
                   <SelectItem key={value} value={value}>
-                    {value}
+                    <TierBadge tier={value} />
                   </SelectItem>
                 ))}
               </SelectContent>

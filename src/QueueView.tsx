@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/empty";
 import { ItemGroup } from "@/components/ui/item";
 import { clock, itemTitle, minutesSince, pinName, tuning } from "@/format";
-import { TierBadge } from "@/GoalsView";
+import { TierBadge } from "@/TierBadge";
 import { Row, Section } from "@/Row";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/tooltip/tooltip";
 import { StateIcon, StatePill, TaskDetails } from "@/TaskDetails";

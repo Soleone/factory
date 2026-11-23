@@ -2,7 +2,6 @@ import { useState, type ReactNode } from "react";
 import Markdown from "markdown-to-jsx/react";
 import {
   ArrowLeftIcon,
-  ChevronDownIcon,
   ChevronRightIcon,
   FlameIcon,
   GitBranchIcon,
@@ -22,6 +21,7 @@ import {
   type Tier,
 } from "@/backend/types.ts";
 import { Badge } from "@/components/ui/badge";
+import { TierBadge } from "@/TierBadge";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
@@ -664,28 +664,12 @@ function TierMenu({ node, act }: { node: Job; act: Act }) {
         >
           {TIERS.map((tier) => (
             <DropdownMenuRadioItem key={tier} value={tier}>
-              {tier}
+              <TierBadge tier={tier} />
             </DropdownMenuRadioItem>
           ))}
         </DropdownMenuRadioGroup>
       </DropdownMenuContent>
     </DropdownMenu>
-  );
-}
-
-const TIER_STYLE: Record<Tier, string> = {
-  communicator: "border-primary/50 text-primary",
-  builder: "border-transparent bg-secondary text-secondary-foreground",
-  grunt: "text-muted-foreground border-border",
-};
-
-/** Which tier runs a job, louder the more capable (and scarce) it is. */
-export function TierBadge({ tier, more }: { tier: Tier; more?: boolean }) {
-  return (
-    <Badge variant="outline" className={TIER_STYLE[tier]}>
-      {tier}
-      {more && <ChevronDownIcon data-icon="inline-end" />}
-    </Badge>
   );
 }
 

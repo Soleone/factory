@@ -31,6 +31,7 @@ import { AttemptFile } from "@/AttemptFile";
 import { Answer, Outcome } from "@/JobNotes";
 import { MARKDOWN } from "@/PrReview";
 import { PrLine, TrainLine } from "@/ResultsView";
+import { TierBadge } from "@/TierBadge";
 
 /** From `workwork --help`. */
 export const ATTENTION: Record<string, string> = {
@@ -340,15 +341,21 @@ function Story({ job, snapshot, act }: { job: Job; snapshot: Snapshot; act: Act 
 function Facts({ job, act }: { job: Job; act: Act }) {
   const assumed = openAssumptions(job);
   const facts = [
-    job.tier && `tier ${job.tier}${job.escalations ? `, moved up ${job.escalations}×` : ""}`,
+    job.escalations && `moved up a tier ${job.escalations}×`,
     job.gates.length > 0 && `gates ${job.gates.map((gate) => `\`${gate}\``).join(", ")}`,
     job.touches && `touches ${job.touches.length ? job.touches.join(", ") : "anything"}`,
     job.needs.length > 0 && `needs ${job.needs.join(", ")}`,
   ].filter(Boolean);
-  if (facts.length === 0 && job.unverified.length === 0 && assumed.length === 0) return null;
+  if (!job.tier && facts.length === 0 && job.unverified.length === 0 && assumed.length === 0)
+    return null;
   return (
     <div className="flex flex-col gap-2 text-sm">
-      {facts.length > 0 && <p className="text-xs text-muted-foreground">{facts.join(" · ")}</p>}
+      {(job.tier || facts.length > 0) && (
+        <p className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          {job.tier && <TierBadge tier={job.tier} />}
+          {facts.join(" · ")}
+        </p>
+      )}
       {job.unverified.map((need) => (
         <Now key={need} className="border-warning/40">
           <span className="flex flex-wrap items-center gap-2">

@@ -54,6 +54,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { AGENT_NAMES } from "@/backend/agents.ts";
 import { agentName, repoName } from "@/format";
 import { Choice, RunFields, TuningFields } from "@/RunFields";
+import { TierBadge } from "@/TierBadge";
 import { version } from "../package.json";
 
 /** A gear button that opens the defaults every run starts from, and what auto mode may queue. */
@@ -435,7 +436,8 @@ function TierFields({
         return (
           <Field key={tier}>
             <FieldLabel>
-              {tier} <span className="font-normal text-muted-foreground">{TIER_ABOUT[tier]}</span>
+              <TierBadge tier={tier} />
+              <span className="font-normal text-muted-foreground">{TIER_ABOUT[tier]}</span>
             </FieldLabel>
             <ol className="flex flex-col gap-1">
               {list.map((id, index) => (
