@@ -334,6 +334,15 @@ export const prUrl = (job: Job) =>
   job.notes.findLast((note) => note.kind === "factory" && note.url?.includes("/pull/"))?.url ??
   job.attempts.findLast((attempt) => attempt.url?.includes("/pull/"))?.url;
 
+/** Assumptions an agent carried on from that the user hasn't answered yet, with their index among the notes. */
+export const openAssumptions = (job: Job) =>
+  job.notes.flatMap((note, index) =>
+    note.kind === "assume" &&
+    !job.notes.some((other) => other.kind === "answer" && other.re === index)
+      ? [{ ...note, index }]
+      : [],
+  );
+
 /** Merging from the page skips GitHub's own page, so it only goes ahead when nothing argues against it. */
 export const canMerge = (pr: Pr) =>
   pr.state === "OPEN" &&

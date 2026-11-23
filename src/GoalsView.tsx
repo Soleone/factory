@@ -13,6 +13,7 @@ import { api, type Act } from "@/api";
 import {
   critical,
   depths,
+  openAssumptions,
   PLANNING,
   prUrl,
   TIERS,
@@ -42,7 +43,6 @@ import { ItemGroup } from "@/components/ui/item";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/tooltip/tooltip";
 import { ago, minutesSince, repoName } from "@/format";
 import { useQueryParam } from "@/hooks/use-query-param";
-import { openAssumptions } from "@/inbox";
 import { MARKDOWN } from "@/PrReview";
 import { Row, Section } from "@/Row";
 import { StateIcon, StatePill, TaskDetails } from "@/TaskDetails";
@@ -252,6 +252,7 @@ function GoalView({
         <Assumption
           key={`${node.id} ${note.at}`}
           node={node}
+          index={note.index}
           question={note.text}
           assumed={note.assumed ?? ""}
           act={act}
@@ -702,11 +703,13 @@ function Fact({ explain, children }: { explain: string; children: ReactNode }) {
 
 function Assumption({
   node,
+  index,
   question,
   assumed,
   act,
 }: {
   node: Job;
+  index: number;
   question: string;
   assumed: string;
   act: Act;
@@ -722,7 +725,7 @@ function Assumption({
         className="flex gap-2"
         onSubmit={(event) => {
           event.preventDefault();
-          void act(() => api.answer(node.id, text));
+          void act(() => api.answer(node.id, text, index));
         }}
       >
         <Input
@@ -733,7 +736,11 @@ function Assumption({
         <Button type="submit" variant="outline" size="sm" disabled={!text.trim()}>
           Answer
         </Button>
-        <Button type="button" size="sm" onClick={() => act(() => api.answer(node.id, "fine"))}>
+        <Button
+          type="button"
+          size="sm"
+          onClick={() => act(() => api.answer(node.id, "fine", index))}
+        >
           Fine
         </Button>
       </form>

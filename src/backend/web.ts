@@ -196,7 +196,8 @@ export function serve(state: string, port: number, host: string, usage = usageCa
       addOwnJob(state, body),
     "POST /api/jobs/remove": (_, id) => removeJob(state, id),
     "POST /api/jobs/retry": (_, id) => retryJob(state, id),
-    "POST /api/jobs/answer": (body: { text: string }, id) => answer(state, id, body.text),
+    "POST /api/jobs/answer": (body: { text: string; re?: number }, id) =>
+      answer(state, id, body.text, body.re),
     "POST /api/jobs/approve": (_, id) => approveGoal(state, id),
     "POST /api/jobs/pause": (_, id) => pauseGoal(state, id),
     "POST /api/jobs/resume": (_, id) => resumeGoal(state, id),

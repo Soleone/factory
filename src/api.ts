@@ -44,7 +44,8 @@ export const api = {
   remove: (id: string) => call("POST", `/api/jobs/${id}/remove`),
   retry: (id: string) => call("POST", `/api/jobs/${id}/retry`),
   /** Answers the question a blocked job's agent asked, which picks its session up again, or else its oldest assumption. */
-  answer: (id: string, text: string) => call("POST", `/api/jobs/${id}/answer`, { text }),
+  answer: (id: string, text: string, re?: number) =>
+    call("POST", `/api/jobs/${id}/answer`, { text, re }),
   /** A goal's approve, pause, resume or cancel. */
   goal: (id: string, action: "approve" | "pause" | "resume" | "cancel") =>
     call("POST", `/api/jobs/${id}/${action}`),

@@ -167,9 +167,9 @@ function InboxRow({
               {item.note.text}
             </>
           }
-          below={<AssumeAnswer job={job} act={act} />}
+          below={<AssumeAnswer job={job} index={item.note.index} act={act} />}
         >
-          <Button size="sm" onClick={() => act(() => api.answer(job.id, "fine"))}>
+          <Button size="sm" onClick={() => act(() => api.answer(job.id, "fine", item.note.index))}>
             Fine
           </Button>
         </Row>

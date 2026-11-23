@@ -13,7 +13,7 @@ import Markdown from "markdown-to-jsx/react";
 import { useEffect, useState, type ReactNode } from "react";
 import { api, type Act } from "@/api";
 import { dayOf, EntryMark, jobEntries, StepNumber } from "@/ActivityView";
-import { prUrl, type Item, type Job, type Snapshot } from "@/backend/types.ts";
+import { openAssumptions, prUrl, type Item, type Job, type Snapshot } from "@/backend/types.ts";
 import {
   Dialog,
   DialogDescription,
@@ -31,7 +31,6 @@ import { AttemptFile } from "@/AttemptFile";
 import { Answer, Outcome } from "@/JobNotes";
 import { MARKDOWN } from "@/PrReview";
 import { PrLine, TrainLine } from "@/ResultsView";
-import { openAssumptions } from "@/inbox";
 
 /** From `workwork --help`. */
 export const ATTENTION: Record<string, string> = {
@@ -366,26 +365,27 @@ function Facts({ job, act }: { job: Job; act: Act }) {
             Assumed <strong>{note.assumed}</strong>, asked: {note.text}
           </span>
           <span className="flex gap-2">
-            <Button size="sm" onClick={() => act(() => api.answer(job.id, "fine"))}>
+            <Button size="sm" onClick={() => act(() => api.answer(job.id, "fine", note.index))}>
               Fine
             </Button>
             <span className="text-xs text-muted-foreground">or answer below to queue a change</span>
           </span>
-          <AssumeAnswer job={job} act={act} />
+          <AssumeAnswer job={job} index={note.index} act={act} />
         </Now>
       ))}
     </div>
   );
 }
 
-export function AssumeAnswer({ job, act }: { job: Job; act: Act }) {
+/** Answers the assumption at index among the job's notes. */
+export function AssumeAnswer({ job, index, act }: { job: Job; index: number; act: Act }) {
   const [text, setText] = useState("");
   return (
     <form
       className="flex gap-2"
       onSubmit={(event) => {
         event.preventDefault();
-        void act(() => api.answer(job.id, text));
+        void act(() => api.answer(job.id, text, index));
       }}
     >
       <Input

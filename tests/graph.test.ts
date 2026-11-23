@@ -245,6 +245,19 @@ describe("assumptions", () => {
         .map((job) => job.id),
     ).toContain(change.id);
   });
+  test("an answer that names an assumption goes to it, even while the job waits on a question", () => {
+    const { state, add, byId } = graph();
+    add("x");
+    startJob(state, "x", "claude");
+    addNote(state, "x", { kind: "assume", text: "tabs or spaces?", assumed: "spaces" });
+    addNote(state, "x", { kind: "assume", text: "dark mode too?", assumed: "no" });
+    addNote(state, "x", { kind: "ask", text: "which API?" });
+    record(state, { type: "pause", id: "x", reason: "asked" });
+    expect(answer(state, "x", "fine", 1)).toBeUndefined();
+    expect(byId("x")).toMatchObject({ state: "blocked", blocked: "asked" });
+    expect(byId("x").notes.at(-1)).toMatchObject({ kind: "answer", re: 1 });
+    expect(() => answer(state, "x", "fine", 1)).toThrow("no open assumption 1");
+  });
 });
 
 test("a plain old fixture file still parses", () => {

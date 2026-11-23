@@ -6,6 +6,7 @@ import { ATTENTION, output } from "./state.ts";
 import {
   chains,
   itemKey,
+  openAssumptions,
   prUrl,
   PLANNING,
   TIERS,
@@ -539,25 +540,17 @@ export function addNote(state: string, id: string, note: NoteBody): void {
   append(state, { at: new Date().toISOString(), type: "note", id, note });
 }
 
-/** Assumptions the user hasn't answered yet. */
-export const openAssumptions = (job: Job) =>
-  job.notes.flatMap((note, index) =>
-    note.kind === "assume" &&
-    !job.notes.some((other) => other.kind === "answer" && other.re === index)
-      ? [{ ...note, index }]
-      : [],
-  );
-
 const FINE = /^\s*(fine|ok|okay|yes|good|agreed)[.!]?\s*$/i;
 
 /**
- * The user's answer: to the question a blocked job asked, which queues it again, or else to its
- * oldest open assumption. An answer to an assumption that isn't "fine" queues a job after it, in its
- * tier, to change what was assumed; returns that job.
+ * The user's answer: to the assumption at index `re` among the job's notes, or else to the question
+ * a blocked job asked, which queues it again, or else to its oldest open assumption. An answer to an
+ * assumption that isn't "fine" queues a job after it, in its tier, to change what was assumed;
+ * returns that job.
  */
-export function answer(state: string, id: string, text: string): Job | undefined {
+export function answer(state: string, id: string, text: string, re?: number): Job | undefined {
   const job = find(state, id, "queued", "running", "blocked", "done", "failed");
-  if (job.state === "blocked" && job.blocked === "asked") {
+  if (re === undefined && job.state === "blocked" && job.blocked === "asked") {
     append(state, {
       at: new Date().toISOString(),
       type: "note",
@@ -566,8 +559,13 @@ export function answer(state: string, id: string, text: string): Job | undefined
     });
     return undefined;
   }
-  const assumption = openAssumptions(job)[0];
-  if (!assumption) throw new Error(`job ${id} has no question or assumption to answer`);
+  const assumption = openAssumptions(job).find((note) => re === undefined || note.index === re);
+  if (!assumption)
+    throw new Error(
+      re === undefined
+        ? `job ${id} has no question or assumption to answer`
+        : `job ${id} has no open assumption ${re}`,
+    );
   append(state, {
     at: new Date().toISOString(),
     type: "note",

@@ -1,4 +1,4 @@
-import { prUrl, type Job, type Note, type Snapshot } from "./backend/types.ts";
+import { openAssumptions, prUrl, type Job, type Note, type Snapshot } from "./backend/types.ts";
 
 /** Something that waits on the user, as the Inbox lists it. */
 export type InboxItem =
@@ -6,16 +6,8 @@ export type InboxItem =
   | { kind: "checkpoint"; job: Job }
   | { kind: "failed"; job: Job }
   | { kind: "review"; job: Job }
-  | { kind: "assume"; job: Job; note: Note }
+  | { kind: "assume"; job: Job; note: Note & { index: number } }
   | { kind: "unverified"; job: Job; need: string };
-
-/** Assumptions an agent carried on from that the user hasn't answered yet. */
-export const openAssumptions = (job: Job) =>
-  job.notes.filter(
-    (note, index) =>
-      note.kind === "assume" &&
-      !job.notes.some((other) => other.kind === "answer" && other.re === index),
-  );
 
 /**
  * What waits on the user: `stopped` holds work until they act, oldest first; `ready` is what agents

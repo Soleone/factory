@@ -8,7 +8,6 @@ import {
   addOwnJob,
   addNote,
   answer,
-  openAssumptions,
   queueReview,
   readJobs,
   record,
@@ -35,6 +34,7 @@ import { createRepo } from "./repos.ts";
 import { logPath, turnOff, turnOn } from "./power.ts";
 import { output, pidPath, readSettings, runningPid, STATE, writeSettings } from "./state.ts";
 import {
+  openAssumptions,
   prUrl,
   type Confidence,
   type Item,
@@ -68,8 +68,10 @@ const USAGE = `factory: works workwork candidates and long goals with headless c
   factory tail                 follow what happens to every job, one line each
   factory remove <job>         take a job out of the queue or the results, with its kept branches
   factory retry <job>          queue a failed job again, with the same agent
-  factory answer <job> "<text>" answer the question a blocked job asked, and queue it again; or
-                               the oldest assumption it made: anything but "fine" queues a change
+  factory answer <job> "<text>" [--assumption N]
+                               answer the question a blocked job asked, and queue it again; or
+                               an assumption it made (N, else the oldest): anything but "fine"
+                               queues a change
   factory verify <job> [NEED]  you checked what the job couldn't (all of it, or one need)
   factory auto on|off          let auto mode keep the queue topped up from workwork, or not
   factory report [--all]       the last run (or every run): outcome, agent, job, PR/issue link or log
@@ -129,6 +131,7 @@ async function main(): Promise<void> {
       brief: { type: "string" },
       json: { type: "boolean" },
       assume: { type: "string" },
+      assumption: { type: "string" },
       done: { type: "string" },
       of: { type: "string" },
       unverified: { type: "string", multiple: true },
@@ -159,7 +162,8 @@ async function main(): Promise<void> {
   if (command === "retry") return args.forEach((id) => retryJob(STATE, id));
   if (command === "auto") return auto(args[0]);
   if (command === "answer") {
-    const change = answer(STATE, args[0], text(args[1]));
+    const re = values.assumption === undefined ? undefined : Number(values.assumption);
+    const change = answer(STATE, args[0], text(args[1]), re);
     return change && console.log(`queued ${change.id} to change it: ${change.item.title}`);
   }
   if (command === "verify") return record(STATE, { type: "verify", id: args[0], need: args[1] });
@@ -565,7 +569,7 @@ function checklist(jobs: Job[]): string {
   const assumed = jobs.flatMap((job) =>
     openAssumptions(job).map(
       (note) =>
-        `  ${job.id} ${job.item.title}: assumed ${note.assumed}, asked ${note.text}  (factory answer ${job.id} "fine")`,
+        `  ${job.id} ${job.item.title}: assumed ${note.assumed}, asked ${note.text}  (factory answer ${job.id} "fine" --assumption ${note.index})`,
     ),
   );
   return [...unverified, ...(assumed.length ? ["assumptions to confirm:", ...assumed] : [])].join(
