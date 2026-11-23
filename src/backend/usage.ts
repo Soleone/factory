@@ -35,7 +35,7 @@ const READERS: Record<(typeof USAGE_POOLS)[number], () => Promise<Usage>> = {
   },
 };
 
-export const usage = (pool: string): Promise<Usage> => READERS[pool as keyof typeof READERS]();
+const usage = (pool: string): Promise<Usage> => READERS[pool as keyof typeof READERS]();
 export const fiveHour = async (pool: string): Promise<UsageWindow> => (await usage(pool)).fiveHour;
 
 async function claudeUsage(token: string): Promise<Usage> {

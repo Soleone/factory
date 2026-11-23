@@ -1272,7 +1272,7 @@ esac`;
     process.env.PATH = `${bin}:${process.env.PATH}`;
     const previousSource = process.env.SRC;
     process.env.SRC = source;
-    const server = serve(state, 0, "127.0.0.1");
+    const server = serve(state, 0, "127.0.0.1", () => ({}));
     await once(server, "listening");
     const { port } = server.address() as AddressInfo;
     const url = `http://127.0.0.1:${port}/api`;
@@ -1306,7 +1306,7 @@ esac`;
     process.env.PATH = `${bin}:${process.env.PATH}`;
     const previousSource = process.env.SRC;
     process.env.SRC = source;
-    const server = serve(state, 0, "127.0.0.1");
+    const server = serve(state, 0, "127.0.0.1", () => ({}));
     await once(server, "listening");
     const { port } = server.address() as AddressInfo;
     const post = (body: object) =>
@@ -1327,7 +1327,7 @@ esac`;
 
   test("serve queues a job of your own for a tier, titled by its prompt unless given one", async () => {
     const base = setup([]);
-    const server = serve(base.state, 0, "127.0.0.1");
+    const server = serve(base.state, 0, "127.0.0.1", () => ({}));
     await once(server, "listening");
     const { port } = server.address() as AddressInfo;
     const post = (body: object) =>
@@ -1356,7 +1356,7 @@ esac`;
       join(base.state, "candidates.json"),
       JSON.stringify({ at: new Date().toISOString(), items: base.items }),
     );
-    const server = serve(base.state, 0, "127.0.0.1");
+    const server = serve(base.state, 0, "127.0.0.1", () => ({}));
     await once(server, "listening");
     const { port } = server.address() as AddressInfo;
     const url = (path: string) => `http://127.0.0.1:${port}${path}`;
@@ -1383,7 +1383,7 @@ esac`;
     agents({ claude: OK });
     const job = base.pick("a");
     await work(options(base));
-    const server = serve(base.state, 0, "127.0.0.1");
+    const server = serve(base.state, 0, "127.0.0.1", () => ({}));
     await once(server, "listening");
     const { port } = server.address() as AddressInfo;
     const url = (path: string) => `http://127.0.0.1:${port}${path}`;
@@ -1430,7 +1430,7 @@ esac`;
     });
     const jobs = [base.pick("a"), base.pick("b")];
     await work(options(base));
-    const server = serve(base.state, 0, "127.0.0.1");
+    const server = serve(base.state, 0, "127.0.0.1", () => ({}));
     await once(server, "listening");
     const { port } = server.address() as AddressInfo;
     const url = (path: string) => `http://127.0.0.1:${port}${path}`;
@@ -1471,7 +1471,7 @@ esac`;
     const bin = mkdtempSync(join(scratch, `${name}-`));
     script(bin, name, fake);
     process.env.PATH = `${bin}:${process.env.PATH}`;
-    const server = serve(state, 0, "127.0.0.1");
+    const server = serve(state, 0, "127.0.0.1", () => ({}));
     await once(server, "listening");
     const { port } = server.address() as AddressInfo;
     const url = `http://127.0.0.1:${port}/api/chat`;
@@ -1784,7 +1784,7 @@ esac; done`,
         "post-receive",
         `printf '%s\\n' '${JSON.stringify(OPEN_PR)}' > ${github.viewPath}`,
       );
-      const server = serve(base.state, 0, "127.0.0.1");
+      const server = serve(base.state, 0, "127.0.0.1", () => ({}));
       await once(server, "listening");
       const { port } = server.address() as AddressInfo;
       const url = `http://127.0.0.1:${port}`;

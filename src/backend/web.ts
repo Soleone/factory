@@ -77,9 +77,9 @@ const TYPES: Record<string, string> = {
 };
 
 /** The page and the API it uses: the same state and commands as the CLI, nothing more. */
-export function serve(state: string, port: number, host: string): Server {
+// Tests pass their own usage, so they never read the real accounts.
+export function serve(state: string, port: number, host: string, usage = usageCache()): Server {
   const prs = prCache();
-  const usage = usageCache();
   const train = mergeTrain(
     prs,
     (id, url, files) => queueConflicts(state, id, url, files),
