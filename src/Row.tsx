@@ -22,7 +22,7 @@ export function Row({
   meta: ReactNode;
   /** Blocks that can't sit in the description's paragraph, like a form. */
   below?: ReactNode;
-  /** How much of its time a running job has used, from 0 to 1, as a bar along the bottom. */
+  /** How far along, from 0 to 1, as a bar along the bottom. */
   progress?: number;
   children?: ReactNode;
 }) {
@@ -32,7 +32,7 @@ export function Row({
         <span
           aria-hidden
           className="absolute bottom-0 left-0 h-0.5 w-(--progress) bg-primary transition-all duration-700"
-          style={{ "--progress": `${Math.min(progress, 1) * 100}%` } as CSSProperties}
+          style={{ "--progress": `${progress * 100}%` } as CSSProperties}
         />
       )}
       {leading && <ItemMedia>{leading}</ItemMedia>}
