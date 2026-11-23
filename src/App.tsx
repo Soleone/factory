@@ -10,7 +10,7 @@ import { UsageRing, type UsageWindow } from "@/components/soleone/usage-ring/usa
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { AnchoredDialogContent } from "@/components/variants/dialog";
+import { ScrollingTabsContent, TabbedDialogContent } from "@/components/variants/dialog";
 
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -207,18 +207,18 @@ function Factory({
         </TabsContent>
       </Tabs>
       <Dialog open={adding !== ""} onOpenChange={(open) => !open && setAdding("")}>
-        <AnchoredDialogContent className="sm:max-w-3xl">
+        <TabbedDialogContent className="sm:max-w-3xl">
           <DialogHeader>
             <DialogTitle>Add work</DialogTitle>
           </DialogHeader>
-          <Tabs value={adding} onValueChange={setAdding}>
+          <Tabs className="min-h-0" value={adding} onValueChange={setAdding}>
             <TabsList variant="line">
               <TabsTrigger value="job">Job</TabsTrigger>
               <TabsTrigger value="goal">Goal</TabsTrigger>
               <TabsTrigger value="candidates">Candidates</TabsTrigger>
               <TabsTrigger value="blueprints">Blueprints</TabsTrigger>
             </TabsList>
-            <TabsContent value="goal">
+            <ScrollingTabsContent value="goal">
               <NewGoalForm
                 act={act}
                 onCreated={(id) => {
@@ -227,18 +227,18 @@ function Factory({
                   setTab("goals");
                 }}
               />
-            </TabsContent>
-            <TabsContent value="candidates">
+            </ScrollingTabsContent>
+            <ScrollingTabsContent value="candidates">
               <CandidatesView snapshot={snapshot} act={act} />
-            </TabsContent>
-            <TabsContent value="job">
+            </ScrollingTabsContent>
+            <ScrollingTabsContent value="job">
               <NewJobForm act={act} onQueued={() => setAdding("")} />
-            </TabsContent>
-            <TabsContent value="blueprints">
+            </ScrollingTabsContent>
+            <ScrollingTabsContent value="blueprints">
               <BlueprintsView act={act} />
-            </TabsContent>
+            </ScrollingTabsContent>
           </Tabs>
-        </AnchoredDialogContent>
+        </TabbedDialogContent>
       </Dialog>
     </div>
   );
