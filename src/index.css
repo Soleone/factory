@@ -67,6 +67,10 @@
   [role="button"]:not(:disabled) {
     cursor: pointer;
   }
+  /* Keep the scrollbar's room even when the page doesn't scroll, so switching views doesn't shift the layout sideways. */
+  html {
+    scrollbar-gutter: stable;
+  }
 }
 
 /* Theme colors: an accent tile with the mark knocked out to the page canvas. */
