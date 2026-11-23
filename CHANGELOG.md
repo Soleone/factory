@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.5.2](https://github.com/Soleone/factory/compare/v0.5.1...v0.5.2) (2026-11-23)
+
+### Features
+
+* **ui:** results can be filtered by project ([18c8ae1](https://github.com/Soleone/factory/commit/18c8ae106ef998b9ff9e5311e1201f0e9b801456))
+
+### Bug Fixes
+
+* **run:** a question, a lost session or one job's error no longer stops the night ([05eb5a5](https://github.com/Soleone/factory/commit/05eb5a5d2cdbc1eb23a39e4c4b9942623402e031))
+* **ui:** a tier looks the same everywhere it shows ([c6e9f9d](https://github.com/Soleone/factory/commit/c6e9f9ddfd923d7003b88b65ef721034ad3b4a90))
+* **ui:** switching tabs no longer shifts the header sideways ([6f19f4e](https://github.com/Soleone/factory/commit/6f19f4eaf7609e97dedac7dbda60bea995ec2625))
+* **ui:** the Queue count matches its rows, and pools say who's ready ([190ce52](https://github.com/Soleone/factory/commit/190ce52fcb522473d251ac1c8974c290d05bb678))
+
 ## [0.5.1](https://github.com/Soleone/factory/compare/v0.5.0...v0.5.1) (2026-11-23)
 
 ### Bug Fixes
