@@ -28,8 +28,15 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { NeutralCheckbox } from "@/components/variants/checkbox";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { ItemGroup } from "@/components/ui/item";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/tooltip/tooltip";
-import { agentName, clock, itemTitle } from "@/format";
+import { agentName, clock, itemTitle, repoName } from "@/format";
 import { Answer } from "@/JobNotes";
 import { Row } from "@/Row";
 import { ATTENTION, StatePill, TaskDetails, taskState, type TaskState } from "@/TaskDetails";
@@ -114,10 +121,17 @@ export function ResultsView({
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [dismissing, setDismissing] = useState(false);
   const seen = useLastSeen();
+  const [project, setProject] = useState<string | null>(null);
   const { prs, train } = snapshot;
-  const jobs = snapshot.jobs
+  const results = snapshot.jobs
     .filter((job) => job.state !== "removed" && job.attempts.length > 0)
     .sort((a, b) => b.attempts.at(-1)!.start.localeCompare(a.attempts.at(-1)!.start));
+  const repos = [...new Set(results.map((job) => job.item.repo))].sort((a, b) =>
+    repoName(a).localeCompare(repoName(b)),
+  );
+  // A project whose results were all dismissed falls back to showing everything.
+  const shownRepo = project && repos.includes(project) ? project : null;
+  const jobs = shownRepo ? results.filter((job) => job.item.repo === shownRepo) : results;
   const [finishedOpen, setFinishedOpen] = useState(true);
   if (jobs.length === 0)
     return (
@@ -231,8 +245,29 @@ export function ResultsView({
     );
   };
 
+  const projects = [
+    { value: null, label: "All projects" },
+    ...repos.map((repo) => ({ value: repo, label: repoName(repo) })),
+  ];
+
   return (
     <div className="flex flex-col gap-6 pt-2">
+      {repos.length > 1 && (
+        <div className="px-3">
+          <Select items={projects} value={shownRepo} onValueChange={setProject}>
+            <SelectTrigger aria-label="Project" size="sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent alignItemWithTrigger={false}>
+              {projects.map(({ value, label }) => (
+                <SelectItem key={label} value={value}>
+                  {label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
       {selection.length > 0 && (
         <div
           role="group"
