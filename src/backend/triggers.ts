@@ -5,7 +5,7 @@ import { itemKey, prUrl, type Item, type Job } from "./types.ts";
 import { output, readSettings } from "./state.ts";
 
 /** Work an event asks for, if any. `keys` name the events, so each one queues a job once. */
-export type Fired = { keys: string[]; item?: Item; prompt?: string };
+type Fired = { keys: string[]; item?: Item; prompt?: string };
 
 export type Run = {
   conclusion: string;
