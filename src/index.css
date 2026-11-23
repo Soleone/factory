@@ -51,11 +51,6 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-/* App roles on top of the theme's semantic tokens. */
-:root {
-  --warning: var(--om-yellow);
-}
-
 @layer base {
   * {
     @apply border-border outline-ring/50;
