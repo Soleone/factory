@@ -27,7 +27,7 @@ const pi: Protocol = {
  * the agent keeps its session (Pi's in chat-sessions/, Claude Code's in its own folder) and the page's
  * records are in chat.jsonl.
  */
-export function chat(state: string) {
+export function chat(state: string, address: () => string) {
   const savedPath = join(state, "chat.jsonl");
   const conversationPath = join(state, "chat.json");
   let session: { child: ChildProcessWithoutNullStreams; protocol: Protocol } | undefined;
@@ -72,7 +72,10 @@ export function chat(state: string) {
       folder: join(state, "chat-sessions"),
     });
     const protocol = agent === "claude" ? claudeChat(tuning.effort) : pi;
-    const child = spawn(command, args, { cwd: state });
+    const child = spawn(command, args, {
+      cwd: state,
+      env: { ...process.env, FACTORY_URL: address() },
+    });
     createInterface({ input: child.stdout }).on("line", (line) => {
       // Only JSON records are for the page, and nothing from an agent New chat let go.
       if (line.startsWith("{") && session?.child === child)
@@ -151,9 +154,10 @@ function context(): string {
 - To queue candidates: \`${factory} add <id>... --repo <repo>\`, optionally with \`--agent ${AGENT_NAMES.join("|")}\`. Picked jobs go ahead of auto ones.
 - A blueprint is the reusable prompt behind candidates; \`workwork blueprints\` lists them, and on-request ones never show up in candidates.json. \`${factory} add --blueprint <name> --repo <repo>\` queues what one finds in a repo.
 - \`--after <job>\` holds a job until that one is done. \`${factory} review <job> --agent <name>\` queues a review of a job's PR by another agent than the one that wrote it.
+- When the user asks you to review results, read each PR with \`gh pr view <url>\` and \`gh pr diff <url>\` and say what you'd merge and what not, and why. \`${factory} merge <job>...\` puts PRs on the merge train, which merges them one at a time per repo, rebasing as it goes and queueing a job for real conflicts; \`${factory} report --all\` shows how each ride ended.
 - Attention: none needs no review, skim a quick look, decide needs the user's judgment. Prefer a few that fit together over many that touch the same files, since those conflict when merged.
 
 - Goals are one large task, planned into a graph of jobs. When the user wants one, work out a brief with them: what done looks like, constraints, links to specs, and how to verify it (the commands that prove it works). Write it to a file in this folder, then \`${factory} goal new "<title>" --repo <repo> --brief <file>\`, or \`--project <name>\` instead of \`--repo\` for a new project, which creates the repo under the source folder and on GitHub. A decomposer plans it, and the user approves the plan on the Goals tab: never approve one yourself.
 
-Propose what to queue and why, briefly, and add jobs or goals only once the user agrees. Never start, stop or run the factory, never change files or git state other than through those commands, and never merge or close PRs: the user does those from the page.`;
+Propose what to queue and why, briefly, and add jobs or goals only once the user agrees. Merge only the PRs the user asked you to, through the train. Never start, stop or run the factory, never change files or git state other than through those commands, and never close PRs: the user does that from the page.`;
 }

@@ -1,8 +1,9 @@
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { once } from "node:events";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
+import { promisify } from "node:util";
 import { dirname, join } from "node:path";
 import { afterEach, beforeAll, describe, expect, test } from "vite-plus/test";
 import { agent, classify, resetTime } from "../src/backend/agents.ts";
@@ -1481,11 +1482,13 @@ esac`;
     const { port } = server.address() as AddressInfo;
     const url = (path: string) => `http://127.0.0.1:${port}${path}`;
     try {
-      const start = await fetch(url("/api/train"), {
-        method: "POST",
-        body: JSON.stringify({ ids: jobs.map((job) => job.id) }),
-      });
-      expect(start.status, await start.text()).toBe(200);
+      // Through the CLI, as the Live Agent does.
+      const { stdout } = await promisify(execFile)(
+        process.execPath,
+        ["src/backend/cli.ts", "merge", ...jobs.map((job) => job.id)],
+        { env: { ...process.env, DATA: scratch, FACTORY_URL: url("") } },
+      );
+      expect(stdout).toMatch(/^on the merge train/);
       let train: Snapshot["train"] = {};
       while (Object.keys(train).length < 2 || Object.values(train).some(onTrain)) {
         train = ((await (await fetch(url("/api/state"))).json()) as Snapshot).train;

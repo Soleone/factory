@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import type { AddressInfo } from "node:net";
 import { dirname, extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AGENT_NAMES } from "./agents.ts";
@@ -90,7 +91,10 @@ export function serve(
     (id, url, files) => queueConflicts(state, id, url, files),
     (id, text) => addNote(state, id, { kind: "train", text }),
   );
-  const planner = chat(state);
+  const planner = chat(state, () => {
+    const { port } = server.address() as AddressInfo;
+    return `http://${host}:${port}`;
+  });
   let stopMirror = mirrorTasks(state, readSettings(state), console.log);
   // Listing takes a second or two per agent, and the lists rarely change while serve runs.
   const models = new Map<string, Promise<Model[]>>();
@@ -261,7 +265,7 @@ export function serve(
     "POST /api/off": () => turnOff(state),
   };
 
-  return createServer(async (request, response) => {
+  const server = createServer(async (request, response) => {
     // Job ids and run folders are [\w.-] only, so the path needs no decoding.
     const path = new URL(request.url ?? "/", "http://factory").pathname;
     // /api/jobs/<id>/<action> is routed as /api/jobs/<action> with the id.
@@ -308,6 +312,7 @@ export function serve(
       if (host !== "127.0.0.1" && host !== "localhost")
         console.log("factory: anyone who reaches this address can run agents on this machine");
     });
+  return server;
 }
 
 function snapshot(

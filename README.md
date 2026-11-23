@@ -67,7 +67,7 @@ On the page, everything that waits on you collects in the **Inbox**, which the p
 
 ## Live Agent
 
-Live Agent, the robot button right of the tabs, is a chat with an agent about what to queue. It reads the candidates, the queue and past results, proposes a few jobs that won't step on each other, and adds them through the CLI once you agree. It never turns the factory on, merges or closes PRs, or changes your repos. That is an instruction to the agent, not a sandbox: it has a shell, like the agents doing jobs. Results that failed, or that the train skipped, have an **Ask** button that starts the chat with the question already written.
+Live Agent, the robot button right of the tabs, is a chat with an agent about what to queue. It reads the candidates, the queue and past results, proposes a few jobs that won't step on each other, and adds them through the CLI once you agree. Ask it to review results and it reads their PRs, says what it would merge, and puts the ones you agree on on the merge train (`factory merge <job>...`). It never turns the factory on, closes PRs, or changes your repos. That is an instruction to the agent, not a sandbox: it has a shell, like the agents doing jobs. Results that failed, or that the train skipped, have an **Ask** button that starts the chat with the question already written.
 
 Settings > Live Agent picks the agent (Claude Code or Pi), its model and effort. Model choices are short lists: Pi's scoped models (`enabledModels` in Pi's settings) and Claude Code's current models. The chat survives a restart of `factory serve`.
 
@@ -83,6 +83,7 @@ factory add <id>... [--repo DIR] [--agent NAME] [--model M] [--effort E] [--afte
 factory add --prompt FILE --tier grunt [--repo DIR]   # a job of your own, without workwork
 factory remove <job> | retry <job> | answer <job> "<text>" | verify <job> [NEED]
 factory review <job> --agent pi   # another agent reviews the job's PR once it's done
+factory merge <job>...           # put their PRs on the merge train of the running serve
 factory wait <job> [--timeout MIN]
 factory tail                      # follow every job event, one line each
 factory auto on|off

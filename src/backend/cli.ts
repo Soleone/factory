@@ -63,6 +63,8 @@ const USAGE = `factory: works workwork candidates and long goals with headless c
                                one job of your own, without workwork, for a tier
   factory review <job> --agent NAME
                                queue a review of the job's PR by another agent, once the job is done
+  factory merge <job>...       put the jobs' PRs on the merge train of the running factory serve
+                               (at $FACTORY_URL, default http://127.0.0.1:7040)
   factory wait <job> [--timeout MIN]
                                block until the job is done, failed or blocked; exits 1 at the timeout
   factory tail                 follow what happens to every job, one line each
@@ -181,6 +183,7 @@ async function main(): Promise<void> {
   if (command === "goal") return goal(args, values);
   if (command === "result") return result(args[0], values);
   if (command === "review") return review(args[0], values.agent);
+  if (command === "merge") return merge(args);
   if (command === "wait") return wait(args[0], values.timeout);
   if (command === "tail") return tail();
   if (command === "add") return add(args, values);
@@ -392,6 +395,20 @@ function review(id: string | undefined, name: string | undefined): void {
   console.log(job ? `queued ${job.id}: ${job.item.title}` : `a review of ${id} is already queued`);
 }
 
+/** The train lives in serve, which merges and rebases as the page does. */
+async function merge(ids: string[]): Promise<void> {
+  if (ids.length === 0) throw new Error("factory merge wants a job");
+  const serve = process.env.FACTORY_URL ?? "http://127.0.0.1:7040";
+  const response = await fetch(`${serve}/api/train`, {
+    method: "POST",
+    body: JSON.stringify({ ids }),
+  }).catch(() => {
+    throw new Error(`no factory serve at ${serve}: the merge train runs there`);
+  });
+  if (!response.ok) throw new Error(((await response.json()) as { error: string }).error);
+  console.log(`on the merge train: ${ids.join(", ")}; factory report --all shows how each ends`);
+}
+
 const SETTLED: Job["state"][] = ["done", "failed", "blocked", "removed"];
 
 async function wait(id: string | undefined, timeout?: string): Promise<void> {
@@ -591,8 +608,8 @@ function attemptReport(jobs: Job[], all: boolean, run?: string): string {
     const details = [attempt.url ?? attempt.log];
     const number = job.attempts.indexOf(attempt) + 1;
     for (const note of job.notes)
-      if (note.attempt === number && (note.kind === "result" || note.kind === "ask"))
-        details.push(`${note.kind === "ask" ? "asks" : "result"}: ${note.text}`);
+      if (note.attempt === number && ["result", "ask", "train"].includes(note.kind))
+        details.push(`${note.kind === "ask" ? "asks" : note.kind}: ${note.text}`);
     if (attempt.error) details.push(attempt.error.split("\n")[0]);
     if (attempt.branch) details.push(`unpushed work kept on branch ${attempt.branch}`);
     const numbers = attemptNumbers(attempt);
