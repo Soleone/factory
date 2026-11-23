@@ -78,7 +78,12 @@ const TYPES: Record<string, string> = {
 
 /** The page and the API it uses: the same state and commands as the CLI, nothing more. */
 // Tests pass their own usage, so they never read the real accounts.
-export function serve(state: string, port: number, host: string, usage = usageCache()): Server {
+export function serve(
+  state: string,
+  port: number,
+  host: string,
+  usage = usageCache(join(state, "usage.json")),
+): Server {
   const prs = prCache();
   const train = mergeTrain(
     prs,

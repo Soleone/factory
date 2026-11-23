@@ -269,6 +269,8 @@ export const USAGE_POOLS = ["claude", "anthropic", "openai-codex"] as const;
 export type UsageWindow = { used: number; resets?: number };
 /** A pool's two limits. */
 export type Usage = { fiveHour: UsageWindow; sevenDay: UsageWindow };
+/** A pool's limits as of a read, in epoch ms. */
+export type ReadUsage = Usage & { at: number };
 
 /** What one usage limit counts against: an account at a provider. */
 export type Pool = {
@@ -307,8 +309,8 @@ export type Snapshot = {
   prs: Record<string, Pr>;
   /** Where each job on the merge train is, by job id; gone when serve restarts. */
   train: Record<string, TrainCar>;
-  /** The last usage read of each pool a run works on, by pool; a pool not read yet is missing. */
-  usage: Record<string, Usage>;
+  /** The last good usage read of each pool a run works on, by pool; a pool never read is missing. */
+  usage: Record<string, ReadUsage>;
 };
 
 export type TrainCar =

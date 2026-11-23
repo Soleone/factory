@@ -1,7 +1,7 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { USAGE_POOLS, Usage, UsageWindow } from "./types.ts";
+import type { ReadUsage, USAGE_POOLS, Usage, UsageWindow } from "./types.ts";
 
 // Neither endpoint is documented; both are what Claude Code's /usage and Codex's status bar read,
 // and the shapes match @marckrenn/pi-sub-core's. The tokens are the ones claude and pi keep fresh.
@@ -55,23 +55,29 @@ async function claudeUsage(token: string): Promise<Usage> {
   return { fiveHour: window(data.five_hour), sevenDay: window(data.seven_day) };
 }
 
-/** The last usage read of each pool asked for, read again in the background once a minute old. */
-export function usageCache() {
-  const cache = new Map<string, { at: number; usage?: Usage }>();
-  return (pools: string[]): Record<string, Usage> => {
-    const read: Record<string, Usage> = {};
+/**
+ * The last usage read of each pool asked for, read again in the background once a minute old. Each
+ * good read is kept in that file, so a restart, or a token that expired while nothing ran, still shows one.
+ */
+export function usageCache(file: string) {
+  const known: Record<string, ReadUsage> = existsSync(file)
+    ? JSON.parse(readFileSync(file, "utf8"))
+    : {};
+  const tried = new Map<string, number>();
+  return (pools: string[]): Record<string, ReadUsage> => {
+    const read: Record<string, ReadUsage> = {};
     for (const pool of pools) {
-      const entry = cache.get(pool);
-      if (!entry || Date.now() - entry.at > MINUTE) {
-        const next = { at: Date.now(), usage: entry?.usage };
-        cache.set(pool, next);
+      if (Date.now() - (tried.get(pool) ?? 0) > MINUTE) {
+        tried.set(pool, Date.now());
         usage(pool).then(
-          (fresh) => (next.usage = fresh),
+          (fresh) => {
+            known[pool] = { ...fresh, at: Date.now() };
+            writeFileSync(file, JSON.stringify(known));
+          },
           (error: Error) => console.error(`factory: can't read ${pool}'s usage: ${error.message}`),
         );
       }
-      const known = cache.get(pool)!.usage;
-      if (known) read[pool] = known;
+      if (known[pool]) read[pool] = known[pool];
     }
     return read;
   };

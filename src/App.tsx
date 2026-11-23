@@ -136,6 +136,7 @@ function Factory({
               provider={pool === "openai-codex" ? "openai" : "claude"}
               fiveHour={left(usage.fiveHour)}
               sevenDay={left(usage.sevenDay)}
+              asOf={staleAt(usage.at)}
             />
           ))}
           <span className="text-sm text-muted-foreground">{run}</span>
@@ -294,4 +295,8 @@ function Count({ n }: { n: number }) {
   return n > 0 ? <span className="font-normal text-muted-foreground tabular-nums">{n}</span> : null;
 }
 
-const left = ({ used, resets }: Used): UsageWindow => ({ left: 100 - used, resets });
+// Reads come every minute, so one this old means they're failing, most often on an expired token.
+const staleAt = (at: number) => (Date.now() - at > 3 * 60_000 ? at : undefined);
+// An old read may predate a reset, after which the window is whole again.
+const left = ({ used, resets }: Used): UsageWindow =>
+  resets !== undefined && resets < Date.now() ? { left: 100 } : { left: 100 - used, resets };

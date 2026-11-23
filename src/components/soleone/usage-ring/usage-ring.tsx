@@ -17,20 +17,24 @@ const PROVIDERS = {
 
 const WARN_AT = 20
 const MINUTE = 60_000
+const DAY = 1440 * MINUTE
 
 /**
  * One provider's usage as a ring: the outline is what's left of the 7-day window, the number what's
- * left of the 5-hour window. The tooltip has both resets.
+ * left of the 5-hour window. The tooltip has both resets. With asOf, the reading is an old one and
+ * the ring fades.
  */
 export function UsageRing({
   provider,
   fiveHour,
   sevenDay,
+  asOf,
   className,
 }: {
   provider: UsageProvider
   fiveHour: UsageWindow
   sevenDay: UsageWindow
+  asOf?: number
   className?: string
 }) {
   const { name, color, Logo } = PROVIDERS[provider]
@@ -42,7 +46,11 @@ export function UsageRing({
       <TooltipTrigger
         render={<span tabIndex={0} />}
         aria-label={`${name}: ${fiveHour.left}% of 5 hours and ${sevenDay.left}% of 7 days left`}
-        className={cn("inline-flex cursor-default select-none rounded-full", className)}
+        className={cn(
+          "inline-flex cursor-default select-none rounded-full",
+          asOf !== undefined && "opacity-50",
+          className,
+        )}
       >
         <svg width={28} height={28} viewBox="0 0 36 36" aria-hidden>
           <circle cx={18} cy={18} r={15.6} fill="none" stroke="var(--border)" strokeWidth={3} />
@@ -83,6 +91,9 @@ export function UsageRing({
           <Row label="5 hours" window={fiveHour} />
           <Row label="7 days" window={sevenDay} withDay />
         </div>
+        {asOf !== undefined && (
+          <div className="mt-1 opacity-70">As of {clock(asOf, Date.now() - asOf > DAY)}, no newer reading</div>
+        )}
       </TooltipContent>
     </Tooltip>
   )
