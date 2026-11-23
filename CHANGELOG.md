@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.5.3](https://github.com/Soleone/factory/compare/v0.5.2...v0.5.3) (2026-11-23)
+
+### Features
+
+* **agent:** the Live Agent reviews results and merges them through the train ([a9cb012](https://github.com/Soleone/factory/commit/a9cb0122d89fee95d9e553bd98df2d8fd1846e72))
+* **workers:** workers come only from presets, and tiers show as roles ([881d2c5](https://github.com/Soleone/factory/commit/881d2c5ed00f1e5ebbade1a2c90d43ad370a532b))
+
+### Bug Fixes
+
+* **ui:** the Claude ring stays, faded, when its usage can't be read ([25abeb9](https://github.com/Soleone/factory/commit/25abeb9d14c46fb2d2b4f728a3afa8b8c1d54628))
+
 ## [0.5.2](https://github.com/Soleone/factory/compare/v0.5.1...v0.5.2) (2026-11-23)
 
 ### Features
