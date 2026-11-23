@@ -42,6 +42,7 @@ import { ItemGroup } from "@/components/ui/item";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/tooltip/tooltip";
 import { ago, minutesSince, repoName } from "@/format";
 import { useQueryParam } from "@/hooks/use-query-param";
+import { openAssumptions } from "@/inbox";
 import { NewGoalDialog } from "@/NewGoalDialog";
 import { MARKDOWN } from "@/PrReview";
 import { Row, Section } from "@/Row";
@@ -244,14 +245,7 @@ function GoalView({
   );
   const planned = nodes.filter((node) => !planning.includes(node));
   const unverified = nodes.flatMap((node) => node.unverified.map((need) => ({ node, need })));
-  const assumed = nodes.flatMap((node) =>
-    node.notes.flatMap((note, index) =>
-      note.kind === "assume" &&
-      !node.notes.some((other) => other.kind === "answer" && other.re === index)
-        ? [{ node, note }]
-        : [],
-    ),
-  );
+  const assumed = nodes.flatMap((node) => openAssumptions(node).map((note) => ({ node, note })));
 
   const checkpoint = goal.blocked === "checkpoint";
   const checks = (unverified.length > 0 || assumed.length > 0) && (

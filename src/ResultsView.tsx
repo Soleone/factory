@@ -49,11 +49,9 @@ function canDismiss(job: Job) {
 
 const hasBranch = (job: Job) => job.attempts.some((attempt) => attempt.branch);
 
-/** Results that wait on the user come first; the rest are history. */
+/** What waits on the user is in the Inbox; here everything is history, running or finished. */
 function sectionOf(state: TaskState) {
-  if (state === "blocked" || state === "failed" || state === "review") return "needs";
-  if (state === "queued" || state === "running") return "running";
-  return "finished";
+  return state === "queued" || state === "running" || state === "blocked" ? "running" : "finished";
 }
 
 const SEEN = "factory.results.seen";
@@ -82,7 +80,7 @@ function useLastSeen(): string {
 }
 
 /** What the train can try: it waits for running checks and rebases conflicts, but can't fix the rest. */
-function canBoard(job: Job, prs: Prs, train: Snapshot["train"]) {
+export function canBoard(job: Job, prs: Prs, train: Snapshot["train"]) {
   const url = prUrl(job);
   const pr = url ? prs[url] : undefined;
   return (
@@ -103,7 +101,7 @@ function dayLabel(iso: string) {
 
 const lastEnd = (job: Job) => job.attempts.at(-1)!.end;
 
-/** Results that wait on you on top, then running ones, then finished ones folded away, each by day. */
+/** Running results, then finished ones, each by day. */
 export function ResultsView({
   snapshot,
   act,
@@ -117,17 +115,10 @@ export function ResultsView({
   const [dismissing, setDismissing] = useState(false);
   const seen = useLastSeen();
   const { prs, train } = snapshot;
-  const active = snapshot.jobs.filter((job) => job.state !== "removed");
-  const reviewed = new Set(
-    active.filter((job) => job.item.blueprint === "review").map((job) => itemKey(job.item)),
-  );
-  const agents = Object.keys(snapshot.settings.agents);
-  const jobs = active
-    .filter((job) => job.attempts.length > 0)
+  const jobs = snapshot.jobs
+    .filter((job) => job.state !== "removed" && job.attempts.length > 0)
     .sort((a, b) => b.attempts.at(-1)!.start.localeCompare(a.attempts.at(-1)!.start));
-  const [finishedOpen, setFinishedOpen] = useState(
-    () => !jobs.some((job) => sectionOf(taskState(job, prs)) === "needs"),
-  );
+  const [finishedOpen, setFinishedOpen] = useState(true);
   if (jobs.length === 0)
     return (
       <Empty>
@@ -140,10 +131,9 @@ export function ResultsView({
       </Empty>
     );
 
-  const sections = { needs: [] as Job[], running: [] as Job[], finished: [] as Job[] };
+  const sections = { running: [] as Job[], finished: [] as Job[] };
   for (const job of jobs) sections[sectionOf(taskState(job, prs))].push(job);
   const selection = jobs.filter((job) => canDismiss(job) && selected.has(job.id));
-  const ready = sections.needs.filter((job) => canBoard(job, prs, train));
   const boarding = selection.filter((job) => canBoard(job, prs, train));
 
   const select = (ids: string[], checked: boolean) => {
@@ -178,15 +168,7 @@ export function ResultsView({
   };
 
   const merge = (merging: Job[]) => {
-    const count = merging.length === 1 ? "1 PR" : `${merging.length} PRs`;
-    if (
-      !window.confirm(
-        `Merge ${count} one after another? Conflicting ones get rebased; ones that still conflict are skipped.`,
-      )
-    )
-      return;
-    void act(() => api.mergeTrain(merging.map((job) => job.id)));
-    setSelected(new Set());
+    if (mergeTrain(merging, act)) setSelected(new Set());
   };
 
   const list = (shown: Job[]) => {
@@ -209,13 +191,9 @@ export function ResultsView({
               onAsk={onAsk}
               asked={snapshot.settings.chat.agent}
               unread={seen !== "" && lastEnd(job) > seen}
-              reviewer={
-                job.item.blueprint !== "review" && !reviewed.has(itemKey(job.item))
-                  ? agents.find((agent) => agent !== job.agent)
-                  : undefined
-              }
+              reviewer={reviewerOf(job, snapshot)}
               disabled={dismissing && selected.has(job.id)}
-              selection={
+              leading={
                 canDismiss(job) && (
                   <NeutralCheckbox
                     aria-label={`Select ${itemTitle(job.item)}`}
@@ -277,23 +255,6 @@ export function ResultsView({
           </div>
         </div>
       )}
-      <section className="flex flex-col gap-3">
-        <div className="flex min-h-8 items-center gap-3 px-3">
-          {heading("Needs you", sections.needs)}
-          {ready.length > 1 && (
-            <MergeButton className="ml-auto" disabled={dismissing} onClick={() => merge(ready)}>
-              Merge all ready ({ready.length})
-            </MergeButton>
-          )}
-        </div>
-        {sections.needs.length > 0 ? (
-          list(sections.needs)
-        ) : (
-          <p className="px-3 text-sm text-muted-foreground">
-            Nothing needs you. New PRs and questions land here.
-          </p>
-        )}
-      </section>
       {sections.running.length > 0 && (
         <section className="flex flex-col gap-3">
           <div className="flex min-h-8 items-center px-3">
@@ -327,7 +288,33 @@ export function ResultsView({
   );
 }
 
-function MergeButton({
+/** Puts PRs on the merge train after the user agrees; says whether they did. */
+export function mergeTrain(merging: Job[], act: Act) {
+  const count = merging.length === 1 ? "1 PR" : `${merging.length} PRs`;
+  if (
+    !window.confirm(
+      `Merge ${count} one after another? Conflicting ones get rebased; ones that still conflict are skipped.`,
+    )
+  )
+    return false;
+  void act(() => api.mergeTrain(merging.map((job) => job.id)));
+  return true;
+}
+
+/** Another agent to review the job's PR, unless it is a review or has one already. */
+export function reviewerOf(job: Job, snapshot: Snapshot) {
+  if (job.item.blueprint === "review") return undefined;
+  const reviewed = snapshot.jobs.some(
+    (other) =>
+      other.state !== "removed" &&
+      other.item.blueprint === "review" &&
+      itemKey(other.item) === itemKey(job.item),
+  );
+  if (reviewed) return undefined;
+  return Object.keys(snapshot.settings.agents).find((agent) => agent !== job.agent);
+}
+
+export function MergeButton({
   className,
   disabled,
   onClick,
@@ -351,7 +338,7 @@ function MergeButton({
   );
 }
 
-function Result({
+export function Result({
   job,
   snapshot,
   act,
@@ -361,7 +348,8 @@ function Result({
   unread,
   reviewer,
   disabled: dismissing,
-  selection,
+  leading,
+  holding,
 }: {
   job: Job;
   snapshot: Snapshot;
@@ -375,7 +363,10 @@ function Result({
   /** Another agent to review its PR, unless it has a review already. */
   reviewer?: string;
   disabled: boolean;
-  selection: ReactNode;
+  /** A checkbox to select it, or an icon for what it waits on. */
+  leading: ReactNode;
+  /** Unfinished jobs that wait for this one. */
+  holding?: number;
 }) {
   const [pending, setPending] = useState<"merge" | "rebase" | "close">();
   const last = job.attempts.at(-1)!;
@@ -431,7 +422,7 @@ function Result({
         <>
           {/* A bar along the row's left edge marks what ended since the last visit. */}
           {unread && <span aria-hidden className="absolute inset-y-0 left-0 w-1 bg-foreground" />}
-          {selection || <span className="size-4" />}
+          {leading || <span className="size-4" />}
         </>
       }
       title={
@@ -494,6 +485,11 @@ function Result({
             label={state === "failed" && last.outcome !== "failed" ? last.outcome : undefined}
           />
           <Facts job={job} last={last} pr={pr} url={url} car={car} />
+          {holding ? (
+            <span className="shrink-0 text-warning">
+              holds {holding} {holding === 1 ? "job" : "jobs"}
+            </span>
+          ) : null}
         </span>
       }
       below={ask && <Answer job={job} question={ask} act={act} />}

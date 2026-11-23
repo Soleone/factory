@@ -31,6 +31,7 @@ import { AttemptFile } from "@/AttemptFile";
 import { Answer, Outcome } from "@/JobNotes";
 import { MARKDOWN } from "@/PrReview";
 import { PrLine, TrainLine } from "@/ResultsView";
+import { openAssumptions } from "@/inbox";
 
 /** From `workwork --help`. */
 export const ATTENTION: Record<string, string> = {
@@ -338,12 +339,7 @@ function Story({ job, snapshot, act }: { job: Job; snapshot: Snapshot; act: Act 
 
 /** What the job is held to and what's left for the user to check, for jobs that have any. */
 function Facts({ job, act }: { job: Job; act: Act }) {
-  const assumed = job.notes.flatMap((note, index) =>
-    note.kind === "assume" &&
-    !job.notes.some((other) => other.kind === "answer" && other.re === index)
-      ? [note]
-      : [],
-  );
+  const assumed = openAssumptions(job);
   const facts = [
     job.tier && `tier ${job.tier}${job.escalations ? `, moved up ${job.escalations}×` : ""}`,
     job.gates.length > 0 && `gates ${job.gates.map((gate) => `\`${gate}\``).join(", ")}`,
@@ -382,7 +378,7 @@ function Facts({ job, act }: { job: Job; act: Act }) {
   );
 }
 
-function AssumeAnswer({ job, act }: { job: Job; act: Act }) {
+export function AssumeAnswer({ job, act }: { job: Job; act: Act }) {
   const [text, setText] = useState("");
   return (
     <form

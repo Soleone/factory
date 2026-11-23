@@ -207,6 +207,7 @@ function seed(): Snapshot {
         agent: "pi",
         added: at,
         state: failed ? "failed" : index === 3 ? "blocked" : "done",
+        blocked: index === 3 ? "asked" : undefined,
         attempts: [
           {
             run,

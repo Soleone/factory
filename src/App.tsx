@@ -1,12 +1,5 @@
 import { useState } from "react";
-import {
-  Activity,
-  DraftingCompass,
-  Inbox,
-  ListOrdered,
-  PackageCheck,
-  Workflow,
-} from "lucide-react";
+import { PlusIcon } from "lucide-react";
 import { ActivityView } from "@/ActivityView";
 import { BlueprintsView } from "@/BlueprintsView";
 import { useFactory, type Act } from "@/api";
@@ -15,6 +8,8 @@ import { AgentSidebar } from "@/components/soleone/agent";
 import { ThemePicker } from "@/components/soleone/theme-picker";
 import { UsageRing, type UsageWindow } from "@/components/soleone/usage-ring/usage-ring";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useSidebar } from "@/components/ui/sidebar";
@@ -27,7 +22,19 @@ import { QueueView } from "@/QueueView";
 import { ResultsView } from "@/ResultsView";
 import { SettingsDialog } from "@/SettingsDialog";
 import { clock, runStart } from "@/format";
-import { useQueryParam } from "@/hooks/use-query-param";
+import { setQueryParam, useQueryParam } from "@/hooks/use-query-param";
+import { inbox } from "@/inbox";
+import { InboxView } from "@/InboxView";
+
+// Links from before the tabs were merged still open what they named, before any view reads the query.
+const old = new URLSearchParams(location.search).get("tab");
+if (old === "candidates" || old === "blueprints") {
+  setQueryParam("tab", "queue");
+  setQueryParam("add", old);
+} else if (old === "activity") {
+  setQueryParam("tab", "results");
+  setQueryParam("view", "activity");
+}
 
 export function App() {
   const { snapshot, error, act } = useFactory();
@@ -69,13 +76,24 @@ function Factory({
   act: Act;
   onAsk: (question: string) => void;
 }) {
-  const [tab, setTab] = useQueryParam("tab", "queue");
+  const { stopped, ready } = inbox(snapshot);
+  // Decided once, so the page doesn't jump to Queue when the last question gets answered.
+  const [landing] = useState(stopped.length > 0 ? "inbox" : "queue");
+  const [tab, setTab] = useQueryParam("tab", landing);
+  const [view, setView] = useQueryParam("view", "results");
+  const [adding, setAdding] = useQueryParam("add", "");
   const { isMobile, setOpen, setOpenMobile } = useSidebar();
+  /** Starts the Live Agent chat with a question about a result. */
+  const ask = (question: string) => {
+    onAsk(question);
+    (isMobile ? setOpenMobile : setOpen)(true);
+  };
   const { on, status } = snapshot;
   const goals = snapshot.jobs.filter(
     (job) => job.goal && job.state !== "removed" && job.state !== "done",
-  );
-  const waiting = goals.filter((goal) => goal.blocked === "checkpoint").length;
+  ).length;
+  const queued = snapshot.jobs.filter((job) => job.state === "queued").length;
+
   const run =
     on && status
       ? [
@@ -129,63 +147,94 @@ function Factory({
           {/* The tabs don't fit a phone; they scroll on their own rather than the page. */}
           <div className="min-w-0 overflow-x-auto overflow-y-hidden">
             <TabsList>
+              <TabsTrigger value="inbox">
+                Inbox
+                {stopped.length > 0 ? (
+                  <Badge variant="accent">{stopped.length + ready.length}</Badge>
+                ) : (
+                  <Count n={ready.length} />
+                )}
+              </TabsTrigger>
               <TabsTrigger value="queue">
-                <ListOrdered />
-                Queue
+                Queue <Count n={queued} />
               </TabsTrigger>
               <TabsTrigger value="goals">
-                <Workflow />
-                Goals
-                {waiting > 0 && <Badge variant="accent">{waiting}</Badge>}
+                Goals <Count n={goals} />
               </TabsTrigger>
-              <TabsTrigger value="candidates">
-                <Inbox />
-                Candidates
-              </TabsTrigger>
-              <TabsTrigger value="blueprints">
-                <DraftingCompass />
-                Blueprints
-              </TabsTrigger>
-              <TabsTrigger value="results">
-                <PackageCheck />
-                Results
-              </TabsTrigger>
-              <TabsTrigger value="activity">
-                <Activity />
-                Activity
-              </TabsTrigger>
+              <TabsTrigger value="results">Results</TabsTrigger>
             </TabsList>
           </div>
-          <div className="ml-auto" />
+          <Button
+            variant="outline"
+            size="sm"
+            className="ml-auto"
+            onClick={() => setAdding("candidates")}
+          >
+            <PlusIcon /> Add work
+          </Button>
         </div>
+        <TabsContent value="inbox">
+          <InboxView
+            snapshot={snapshot}
+            act={act}
+            onAsk={ask}
+            onOpenGoal={(id) => {
+              setQueryParam("goal", id);
+              setTab("goals");
+            }}
+          />
+        </TabsContent>
         <TabsContent value="queue">
-          <QueueView snapshot={snapshot} act={act} onCandidates={() => setTab("candidates")} />
+          <QueueView snapshot={snapshot} act={act} onCandidates={() => setAdding("candidates")} />
         </TabsContent>
         <TabsContent value="goals">
           <GoalsView snapshot={snapshot} act={act} />
         </TabsContent>
-        <TabsContent value="candidates">
-          <CandidatesView snapshot={snapshot} act={act} />
-        </TabsContent>
-        <TabsContent value="blueprints">
-          <BlueprintsView act={act} />
-        </TabsContent>
-        <TabsContent value="activity">
-          <ActivityView snapshot={snapshot} act={act} />
-        </TabsContent>
         <TabsContent value="results">
-          <ResultsView
-            snapshot={snapshot}
-            act={act}
-            onAsk={(question) => {
-              onAsk(question);
-              (isMobile ? setOpenMobile : setOpen)(true);
-            }}
-          />
+          <div className="pt-2">
+            <Tabs value={view} onValueChange={setView}>
+              <TabsList variant="line">
+                <TabsTrigger value="results">Results</TabsTrigger>
+                <TabsTrigger value="activity">Activity</TabsTrigger>
+              </TabsList>
+              <TabsContent value="results">
+                <ResultsView snapshot={snapshot} act={act} onAsk={ask} />
+              </TabsContent>
+              <TabsContent value="activity">
+                <ActivityView snapshot={snapshot} act={act} />
+              </TabsContent>
+            </Tabs>
+          </div>
         </TabsContent>
       </Tabs>
+      <Sheet open={adding !== ""} onOpenChange={(open) => !open && setAdding("")}>
+        <SheetContent className="w-full overflow-y-auto data-[side=right]:sm:max-w-3xl">
+          <SheetHeader>
+            <SheetTitle>Add work</SheetTitle>
+          </SheetHeader>
+          <div className="px-4 pb-4">
+            <Tabs value={adding || "candidates"} onValueChange={setAdding}>
+              <TabsList variant="line">
+                <TabsTrigger value="candidates">Candidates</TabsTrigger>
+                <TabsTrigger value="blueprints">Blueprints</TabsTrigger>
+              </TabsList>
+              <TabsContent value="candidates">
+                <CandidatesView snapshot={snapshot} act={act} />
+              </TabsContent>
+              <TabsContent value="blueprints">
+                <BlueprintsView act={act} />
+              </TabsContent>
+            </Tabs>
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   );
+}
+
+/** A tab's quiet count; none when there's nothing. */
+function Count({ n }: { n: number }) {
+  return n > 0 ? <span className="font-normal text-muted-foreground tabular-nums">{n}</span> : null;
 }
 
 const left = ({ used, resets }: Used): UsageWindow => ({ left: 100 - used, resets });
