@@ -22,6 +22,7 @@ import {
   type Pr,
   type Snapshot,
   type TrainCar,
+  workersOf,
 } from "@/backend/types.ts";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -346,7 +347,10 @@ export function reviewerOf(job: Job, snapshot: Snapshot) {
       itemKey(other.item) === itemKey(job.item),
   );
   if (reviewed) return undefined;
-  return Object.keys(snapshot.settings.agents).find((agent) => agent !== job.agent);
+  return snapshot.settings.presets
+    .filter((preset) => workersOf(preset) > 0)
+    .map((preset) => preset.agent)
+    .find((agent) => agent !== job.agent);
 }
 
 export function MergeButton({

@@ -40,8 +40,8 @@ import {
   type Item,
   type Job,
   type Status,
+  presetId,
   type Tier,
-  type Tuning,
 } from "./types.ts";
 import { serve } from "./web.ts";
 // Bundled into dist, so it works from source and from the package alike.
@@ -104,11 +104,9 @@ For the agent working a job (the job is $FACTORY_JOB, or --job ID):
                                you couldn't check
 
 Run options (defaults from settings.json):
-  --agents claude,pi           which registered agents work this run
-  --limit N|none               usage-limit hits per agent before it stops; none: wait for each reset
+  --workers ID=N               this run's count for a worker, e.g. --workers claude=0; repeat per worker
+  --limit N|none               usage-limit hits per provider before its workers stop; none: wait for each reset
   --until HH:MM                start nothing new after this local time
-  --model NAME=MODEL           e.g. --model claude=opus; repeat per agent
-  --effort NAME=LEVEL          e.g. --effort pi=high; repeat per agent
   --idle MIN                   minutes without a sign of life before an attempt times out
 
 State: ${STATE}`;
@@ -117,7 +115,7 @@ async function main(): Promise<void> {
   const { values, positionals } = parseArgs({
     allowPositionals: true,
     options: {
-      agents: { type: "string" },
+      workers: { type: "string", multiple: true },
       limit: { type: "string" },
       until: { type: "string" },
       model: { type: "string", multiple: true },
@@ -214,27 +212,22 @@ async function main(): Promise<void> {
 
 /** The run's options: flags where given, settings.json for the rest. */
 function runOptions(values: {
-  agents?: string;
+  workers?: string[];
   limit?: string;
   until?: string;
-  model?: string[];
-  effort?: string[];
   idle?: string;
 }): RunOptions {
   const settings = readSettings(STATE);
-  const names = values.agents?.split(",") ?? Object.keys(settings.agents);
-  const agents: Record<string, Tuning> = {};
-  for (const name of names) {
-    agent(name);
-    agents[name] = { ...settings.agents[name] };
+  const ids = settings.presets.map(presetId);
+  const workers: Record<string, number> = {};
+  for (const pair of values.workers ?? []) {
+    const [id, value] = pair.split("=");
+    if (!ids.includes(id) || !/^\d+$/.test(value ?? ""))
+      throw new Error(
+        `--workers wants ID=N for a worker in settings (${ids.join(", ")}), got ${pair}`,
+      );
+    workers[id] = Number(value);
   }
-  for (const field of ["model", "effort"] as const)
-    for (const pair of values[field] ?? []) {
-      const [name, value] = pair.split("=");
-      if (!agents[name] || !value)
-        throw new Error(`--${field} wants NAME=VALUE for an agent of this run, got ${pair}`);
-      agents[name][field] = value;
-    }
   const limit =
     values.limit === undefined
       ? settings.limit
@@ -243,7 +236,7 @@ function runOptions(values: {
         : count(values.limit, "--limit");
   const until = values.until ?? settings.until;
   return {
-    agents,
+    workers,
     limit,
     until: until === undefined ? undefined : nextTime(until),
     idleMs: count(values.idle ?? String(settings.idle), "--idle") * 60_000,

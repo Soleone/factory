@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
-import type { Blueprint, Candidates, Job, Model, Preset, Snapshot, Tier } from "./backend/types.ts";
+import type {
+  Blueprint,
+  Candidates,
+  Job,
+  Model,
+  Pin,
+  RunRequest,
+  Snapshot,
+  Tier,
+} from "./backend/types.ts";
 import type { clonableRepos } from "./backend/repos.ts";
 import type { DialogAnswer } from "./pi";
 
@@ -35,9 +44,11 @@ export const api = {
   jobPrompt: (id: string) => call<string>("GET", `/api/jobs/${id}/prompt`),
   repos: () => call<Awaited<ReturnType<typeof clonableRepos>>>("GET", "/api/repos"),
   clone: (name: string) => call("POST", "/api/repos/clone", { name }),
-  /** Without a pin, the job goes to whichever agent is free first, on its run's model and effort. */
-  queue: (items: { repo: string; id: string }[], pin?: Preset) =>
+  /** Without a pin, the job goes to the first free worker, on its model and effort. */
+  queue: (items: { repo: string; id: string }[], pin?: Pin) =>
     call("POST", "/api/jobs", { items, pin }),
+  /** A waiting job's new role or worker; an empty pin lets any free worker take it. */
+  pin: (id: string, pin: Pin) => call("POST", `/api/jobs/${id}/pin`, pin),
   /** A job of your own: a prompt for a tier, without workwork. */
   ownJob: (job: { repo: string; prompt: string; tier: Tier; title: string }) =>
     call<Job>("POST", "/api/jobs/own", job),
@@ -69,8 +80,7 @@ export const api = {
   move: (id: string, index: number) => call("POST", `/api/jobs/${id}/move`, { index }),
   models: () => call<Record<string, Model[]>>("GET", "/api/models"),
   saveSettings: (settings: Snapshot["settings"]) => call("PUT", "/api/settings", settings),
-  turnOn: (run: Pick<Snapshot["settings"], "agents" | "limit" | "until">) =>
-    call("POST", "/api/on", run),
+  turnOn: (run: RunRequest) => call("POST", "/api/on", run),
   turnOff: () => call("POST", "/api/off"),
   chat: (message: string) => call("POST", "/api/chat", { message }),
   abortChat: () => call("POST", "/api/chat/abort"),

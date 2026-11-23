@@ -17,8 +17,8 @@ Needs node 22+, git, [workwork](https://github.com/Soleone/workwork) 0.3 or late
 - **Jobs** are what the agents work. A model only ever does one job, as a child process that exits. Scheduling, checks, merges, limits and retries are plain code.
 - **Sessions:** an attempt at a job is one agent session. Factory talks to it as often as it needs: when the agent stops without reporting a result, or one of the job's checks (gates) fails, it sends up to two follow-ups in the same session, quoting how the run ended or what failed. After an answered question, a usage reset or a restart it resumes the session; a session that was never saved (a run stopped before the agent got going) starts over from the prompt, in the same worktree. Only a new attempt starts fresh, with the earlier attempts' notes and kept work.
 - **Live:** both runners stream JSON events, so the page shows each worker's current tool call ("editing src/sidebar.rs") and context size without the agent's help, and agents report steps in their own words. An attempt times out only after `idle` minutes (default 10) without a sign of life; a long run that keeps working is never cut off.
-- **Tiers:** a job can ask for `communicator` (taste and writing: decomposition, UX, copy), `builder` (architecture, tricky logic, reviews) or `grunt` (well-specified mechanical work). Settings list each tier's presets in order; a job runs on the first one whose usage limit isn't hit and has a free worker. A job that fails twice moves up a tier. Jobs without a tier (picks and auto mode) only run on the agents you start the run with, never on a tier's presets.
-- **Pools and workers:** a pool is one account's usage limit (claude, or pi's provider). Each preset can run several workers; a limit hit pauses every worker of the pool until the reset. More workers on one pool spend its allowance sooner; the gain is across pools.
+- **Tiers:** a job can ask for `communicator` (taste and writing: decomposition, UX, copy), `builder` (architecture, tricky logic, reviews) or `grunt` (well-specified mechanical work). Settings list each tier's presets in order; a job runs on the first one whose usage limit isn't hit and has a free worker. A job that fails twice moves up a tier. The page calls tiers roles. A pick can get one from the arrow next to Queue; without one, a job goes to the first free worker in settings order, and so does a job whose tier lists no running worker.
+- **Pools and workers:** every worker comes from a preset (the page's Workers tab), one each by default, in the order they take queue work; 0 keeps a preset for pinning jobs to only. A pool is one account's usage limit (claude, or pi's provider). Each preset can run several workers; a limit hit pauses every worker of the pool until the reset. More workers on one pool spend its allowance sooner; the gain is across pools.
 - **Compaction:** each preset compacts its context at `compactAt` tokens (200k, 90k for Haiku, below their price steps). Claude Code gets `--autocompact`; pi reads it from its own settings, so factory checks those at start-up and prints what to add if they don't match.
 - **Worktrees:** a pool of worktrees per repo, under the state folder, reused from job to job so installed dependencies survive. A job's worktree stays with it while it waits for an answer. Before a new job it's reset; untracked files go, ignored ones stay. Commits or changes an agent leaves unpushed are saved to `factory/<job>-<attempt>`. Your own checkout is never touched.
 - **Touches:** jobs that say which files they change (globs) never run at the same time as another job that may change the same ones.
@@ -92,7 +92,7 @@ factory goal new|import|check|show|approve|pause|resume|cancel|replan ...
 factory serve [--port 7040] [--host 127.0.0.1]
 ```
 
-Run options: `--agents claude,pi` (a worker each, for jobs without a tier), `--limit N|none` (per pool), `--until HH:MM` (start nothing new after), `--model claude=opus`, `--effort pi=high` (claude's `--effort`, pi's `--thinking`), `--idle MIN`.
+Run options: `--workers ID=N` (this run's count for a preset, repeat per preset), `--limit N|none` (per pool), `--until HH:MM` (start nothing new after), `--idle MIN`.
 
 `serve` listens on 127.0.0.1. Anyone who can reach it can queue jobs and turn the factory on, and the agents run with full permissions, so it amounts to running commands on your machine. Reach it from a phone through something like `tailscale serve`, not with `--host 0.0.0.0` on a network you don't trust.
 
@@ -102,7 +102,6 @@ Run options: `--agents claude,pi` (a worker each, for jobs without a tier), `--l
 
 ```json
 {
-  "agents": { "claude": {}, "pi": {} },
   "presets": [
     { "id": "opus", "agent": "claude", "model": "opus", "effort": "high" },
     {
@@ -133,7 +132,7 @@ Run options: `--agents claude,pi` (a worker each, for jobs without a tier), `--l
 }
 ```
 
-A preset may also set `pool` (default: claude, or pi's provider), `compactAt` and `followups` (default 2). `env` applies per repo to agents and gates; `{worktree}` becomes the worktree's path. A tier without presets runs on the run's agents.
+A preset's `workers` defaults to 1. It may also set `pool` (default: claude, or pi's provider), `compactAt` and `followups` (default 2). `env` applies per repo to agents and gates; `{worktree}` becomes the worktree's path. Settings from before 0.6 had `agents`, a hidden worker each; they become the first presets on the next read.
 
 ## State
 

@@ -1,6 +1,12 @@
 import { useState } from "react";
 import { api, type Act } from "@/api";
-import type { Snapshot } from "@/backend/types.ts";
+import {
+  presetId,
+  workersOf,
+  type Preset,
+  type RunRequest,
+  type Snapshot,
+} from "@/backend/types.ts";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -11,14 +17,17 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { AnchoredDialogContent } from "@/components/variants/dialog";
-import { Field, FieldLabel } from "@/components/ui/field";
+import { Field, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/tooltip/tooltip";
-import { RunFields, type Run } from "@/RunFields";
+import { RunFields } from "@/RunFields";
+import { WorkerName } from "@/WorkerName";
 
 /** Auto mode (fills the queue) and the factory's power button (works it). */
 export function Controls({ snapshot, act }: { snapshot: Snapshot; act: Act }) {
   const { settings, on } = snapshot;
-  const [run, setRun] = useState<Run>();
+  const [run, setRun] = useState<RunRequest>();
+  const count = (preset: Preset) => run?.workers[presetId(preset)] ?? workersOf(preset);
 
   return (
     <div className="flex items-center gap-4">
@@ -44,7 +53,7 @@ export function Controls({ snapshot, act }: { snapshot: Snapshot; act: Act }) {
               variant="outline"
               onClick={(event) => {
                 const defaults = {
-                  agents: settings.agents,
+                  workers: {},
                   limit: settings.limit,
                   until: settings.until,
                 };
@@ -68,10 +77,40 @@ export function Controls({ snapshot, act }: { snapshot: Snapshot; act: Act }) {
               auto mode queues.
             </DialogDescription>
           </DialogHeader>
-          {run && <RunFields value={run} onChange={setRun} />}
+          {run && (
+            <FieldGroup>
+              <FieldSet>
+                <FieldLegend variant="label">Workers</FieldLegend>
+                {settings.presets.map((preset) => {
+                  const id = presetId(preset);
+                  return (
+                    <Field key={id} orientation="horizontal">
+                      <FieldLabel htmlFor={`run-${id}`}>
+                        <WorkerName of={preset} />
+                      </FieldLabel>
+                      <Input
+                        id={`run-${id}`}
+                        type="number"
+                        min={0}
+                        className="w-20"
+                        value={count(preset)}
+                        onChange={(event) =>
+                          setRun({
+                            ...run,
+                            workers: { ...run.workers, [id]: Number(event.target.value) },
+                          })
+                        }
+                      />
+                    </Field>
+                  );
+                })}
+              </FieldSet>
+              <RunFields value={run} onChange={setRun} />
+            </FieldGroup>
+          )}
           <DialogFooter>
             <Button
-              disabled={!run || Object.keys(run.agents).length === 0}
+              disabled={!run || settings.presets.every((preset) => count(preset) === 0)}
               onClick={() =>
                 act(async () => {
                   await api.turnOn(run!);

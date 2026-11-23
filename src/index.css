@@ -36,6 +36,8 @@
   --color-primary-foreground: var(--primary-foreground);
   --color-primary: var(--primary);
   --color-warning: var(--warning);
+  /* Claude's brand orange, the same in both themes, as on its usage ring. */
+  --color-claude: #d97757;
   --color-popover-foreground: var(--popover-foreground);
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);

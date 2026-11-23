@@ -19,19 +19,13 @@ import { mirrorTasks } from "./tasksStore.ts";
 import { afterAttempt, builtinCheck, finishGoals, prepare } from "./goals.ts";
 import { addJobs, answer, autoPicks, endJob, ready, readJobs, record, startJob } from "./jobs.ts";
 import { findPr } from "./review.ts";
-import {
-  alive,
-  compactAt,
-  poolOf,
-  readCandidates,
-  readSettings,
-  refreshCandidates,
-  workersOf,
-} from "./state.ts";
+import { alive, compactAt, readCandidates, readSettings, refreshCandidates } from "./state.ts";
 import { noFacts, readStream, type Facts } from "./stream.ts";
 import { fiveHour } from "./usage.ts";
 import { watch } from "./triggers.ts";
 import {
+  poolOf,
+  workersOf,
   presetId,
   TIERS,
   type Attempt,
@@ -42,14 +36,13 @@ import {
   type Preset,
   type Settings,
   type Status,
-  type Tuning,
   type UsageWindow,
   type Worker,
 } from "./types.ts";
 
 export type RunOptions = {
-  /** The agents of this run, each with its model and effort; each gets a worker for untiered jobs. */
-  agents: Record<string, Tuning>;
+  /** This run's worker counts by preset id, over the settings'. */
+  workers?: Record<string, number>;
   /** Usage-limit hits per pool before its workers stop; null: always wait for the reset. */
   limit: number | null;
   /** Epoch ms after which nothing new starts. */
@@ -130,7 +123,9 @@ export async function run(options: RunOptions): Promise<string> {
   mkdirSync(runDir, { recursive: true });
   mkdirSync(join(state, "running"), { recursive: true });
   const settings = readSettings(state);
-  const slots = makeSlots(options.agents, settings);
+  const slots = makeSlots(settings, options.workers);
+  if (slots.length === 0)
+    throw new Error("no workers; give one a count above 0 under Settings, Workers");
   const pools = new Map<string, Pool>();
   for (const { worker } of slots) pools.set(worker.pool, { name: worker.pool, limits: 0 });
   const agents = new Set<number>();
@@ -298,7 +293,7 @@ export async function run(options: RunOptions): Promise<string> {
   /**
    * Which preset a tiered job runs on: the first in its tier's list (then higher tiers' when its goal
    * allows) whose pool isn't limited and that has a free worker; undefined: it waits. null: none of
-   * this run's presets serve the tier, so it falls back to the untiered agent workers.
+   * this run's presets serve the tier, so any free worker takes it.
    */
   function choose(job: Job, jobs: Job[], self: Worker): string | null | undefined {
     const goal = jobs.find((each) => each.id === job.of)?.goal;
@@ -322,7 +317,7 @@ export async function run(options: RunOptions): Promise<string> {
         if (begun?.preset === worker.preset || (!here && begun?.agent === worker.agent)) return job;
         continue;
       }
-      if (job.preset) {
+      if (job.preset && slots.some((slot) => slot.worker.preset === job.preset)) {
         if (job.preset === worker.preset) return job;
         continue;
       }
@@ -331,11 +326,21 @@ export async function run(options: RunOptions): Promise<string> {
         if (chosen === worker.preset) return job;
         if (chosen !== null) continue;
       }
-      // Untiered work (picks, auto) goes to the run's agent workers only: a preset serves its tiers.
-      if (!(worker.preset in options.agents)) continue;
-      if ((job.agent ?? worker.agent) === worker.agent) return job;
+      if (firstFree(job.agent, worker) === worker) return job;
     }
   }
+
+  /**
+   * Who takes a job without a worker of its own: the first free worker in settings order, of its agent
+   * when it names one. A pin on a preset this run has no worker for lands here, on the pin's tuning.
+   */
+  const firstFree = (agent: string | undefined, self: Worker) =>
+    slots.find(
+      ({ worker }) =>
+        (agent ?? worker.agent) === worker.agent &&
+        (worker === self || worker.state === "idle") &&
+        !pools.get(worker.pool)!.until,
+    )?.worker;
 
   async function work(slot: Slot, handed?: Handed): Promise<void> {
     const { worker } = slot;
@@ -781,18 +786,12 @@ type Turned =
   | { paused?: undefined; attempt: Attempt; text: string }
   | { paused: "asked" | "limited"; text: string };
 
-/**
- * One worker per agent of the run, for untiered jobs as before, plus each preset's workers. An agent
- * worker is its own preset, named after the agent.
- */
-export function makeSlots(agents: Record<string, Tuning>, settings: Settings): Slot[] {
-  const presets: [Preset, number][] = [
-    ...Object.entries(agents).map(([agent, tuning]): [Preset, number] => [
-      { agent, ...tuning, id: agent },
-      1,
-    ]),
-    ...settings.presets.map((preset): [Preset, number] => [preset, workersOf(preset, settings)]),
-  ];
+/** Each preset's workers, in settings order, with the run's counts over the settings'. */
+export function makeSlots(settings: Settings, counts: Record<string, number> = {}): Slot[] {
+  const presets = settings.presets.map((preset): [Preset, number] => [
+    preset,
+    counts[presetId(preset)] ?? workersOf(preset),
+  ]);
   return presets.flatMap(([preset, count]) =>
     Array.from({ length: count }, (_, index) => ({
       preset,

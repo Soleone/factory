@@ -15,6 +15,7 @@ import {
   moveJob,
   queueConflicts,
   queueFollowup,
+  pinJob,
   queueReview,
   readJobs,
   record,
@@ -41,13 +42,11 @@ import { piProvider, usageCache } from "./usage.ts";
 import {
   checkSettings,
   output,
-  poolOf,
   readCandidates,
   readSettings,
   refreshCandidates,
   refreshingCandidates,
   runningPid,
-  workersOf,
   writeSettings,
 } from "./state.ts";
 import {
@@ -58,7 +57,12 @@ import {
   type Model,
   type Blueprint,
   type Item,
+  type Pin,
   type Preset,
+  poolOf,
+  workersOf,
+  presetId,
+  type RunRequest,
   type Settings,
   type Snapshot,
   type Status,
@@ -199,8 +203,16 @@ export function serve(
       const [item] = candidates([body]);
       return output("workwork", ["prompt", item.id], item.repo);
     },
-    "POST /api/jobs": (body: { items: { repo: string; id: string }[]; pin?: Preset }) =>
-      addJobs(state, candidates(body.items), "pick", body.pin),
+    "POST /api/jobs": ({
+      items,
+      pin = {},
+    }: {
+      items: { repo: string; id: string }[];
+      pin?: Pin;
+    }) => {
+      const { agent, model, effort, preset, tier } = pin;
+      return addJobs(state, candidates(items), "pick", { agent, model, effort, preset, tier });
+    },
     "POST /api/jobs/own": (body: { repo: string; prompt: string; tier: Tier; title?: string }) =>
       addOwnJob(state, body),
     "POST /api/jobs/remove": (_, id) => removeJob(state, id),
@@ -212,6 +224,7 @@ export function serve(
     "POST /api/jobs/resume": (_, id) => resumeGoal(state, id),
     "POST /api/jobs/cancel": (_, id) => cancelGoal(state, id),
     "POST /api/jobs/tier": (body: { tier: Tier }, id) => retierNode(state, id, body.tier),
+    "POST /api/jobs/pin": (body: Pin, id) => pinJob(state, id, body),
     "POST /api/jobs/drop": (_, id) => dropNode(state, id),
     "POST /api/jobs/replan": (body: { why: string }, id) => {
       if (!body.why?.trim()) throw new Error("a replan wants a reason");
@@ -258,8 +271,13 @@ export function serve(
       stopMirror();
       stopMirror = mirrorTasks(state, readSettings(state), console.log);
     },
-    "POST /api/on": (body: Pick<Settings, "agents" | "limit" | "until">) => {
-      checkSettings({ ...readSettings(state), ...body });
+    "POST /api/on": (body: RunRequest) => {
+      const settings = readSettings(state);
+      const counted = settings.presets.map((preset) => ({
+        ...preset,
+        workers: body.workers[presetId(preset)] ?? preset.workers,
+      }));
+      checkSettings({ ...settings, presets: counted, limit: body.limit, until: body.until });
       return turnOn(state, runArgs(body));
     },
     "POST /api/off": () => turnOff(state),
@@ -349,10 +367,7 @@ function snapshot(
 
 /** The pools a run on these settings works on, of those whose usage factory can read. */
 function usagePools(settings: Settings): string[] {
-  const presets: Preset[] = [
-    ...Object.keys(settings.agents).map((agent) => ({ agent })),
-    ...settings.presets.filter((preset) => workersOf(preset, settings) > 0),
-  ];
+  const presets = settings.presets.filter((preset) => workersOf(preset) > 0);
   // A bare pi works on pi's default provider, which poolOf can't see.
   const pool = (preset: Preset) =>
     preset.agent === "pi" && !preset.model && !preset.pool ? piProvider() : poolOf(preset);
@@ -362,13 +377,10 @@ function usagePools(settings: Settings): string[] {
 }
 
 /** A run asked for from the page, as the flags `factory run` takes. */
-function runArgs({ agents, limit, until }: Pick<Settings, "agents" | "limit" | "until">): string[] {
-  const args = ["--agents", Object.keys(agents).join(","), "--limit", String(limit ?? "none")];
+function runArgs({ workers, limit, until }: RunRequest): string[] {
+  const args = ["--limit", String(limit ?? "none")];
   if (until) args.push("--until", until);
-  for (const [name, { model, effort }] of Object.entries(agents)) {
-    if (model) args.push("--model", `${name}=${model}`);
-    if (effort) args.push("--effort", `${name}=${effort}`);
-  }
+  for (const [id, count] of Object.entries(workers)) args.push("--workers", `${id}=${count}`);
   return args;
 }
 

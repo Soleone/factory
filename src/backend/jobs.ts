@@ -15,6 +15,7 @@ import {
   type Item,
   type Job,
   type Note,
+  type Pin,
   type Settings,
   type Tier,
   upgradeItem,
@@ -36,6 +37,8 @@ export type Event = { at: string } & (
   | { type: "block"; id: string; reason: Blocked; why?: string }
   /** A replan's change to a job that hasn't started. */
   | { type: "update"; id: string; change: Change }
+  /** What a waiting job runs on now, replacing its old pin. */
+  | { type: "pin"; id: string; pin: Pin }
   /** The user checked a need it couldn't verify; no need: all of them. */
   | { type: "verify"; id: string; need?: string }
 );
@@ -178,6 +181,10 @@ export function replay(events: Event[]): Job[] {
       job.state = "done";
       job.blocked = undefined;
       job.why = undefined;
+    }
+    if (event.type === "pin") {
+      for (const key of PIN_KEYS) delete job[key];
+      Object.assign(job, event.pin);
     }
     if (event.type === "update")
       Object.assign(
@@ -500,6 +507,18 @@ function find(state: string, id: string, ...states: Job["state"][]): Job {
   if (!job) throw new Error(`no job ${id}`);
   if (!states.includes(job.state)) throw new Error(`job ${id} is ${job.state}`);
   return job;
+}
+
+const PIN_KEYS = ["agent", "model", "effort", "preset", "tier"] as const;
+
+/** The user changes what a waiting job runs on: a tier, a worker, or neither for any free worker. */
+export function pinJob(state: string, id: string, pin: Pin): void {
+  const job = find(state, id, "queued");
+  if (job.open || job.of) throw new Error(`job ${id} has started or belongs to a goal`);
+  if (pin.tier && !TIERS.includes(pin.tier))
+    throw new Error(`a tier is ${TIERS.join(", ")}, not ${pin.tier}`);
+  const kept = Object.fromEntries(PIN_KEYS.flatMap((key) => (pin[key] ? [[key, pin[key]]] : [])));
+  append(state, { at: new Date().toISOString(), type: "pin", id, pin: kept });
 }
 
 /** Takes a job out of the queue or the results, and deletes the branches its attempts kept. */

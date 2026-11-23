@@ -1,17 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, type Act } from "@/api";
 import { ChevronDownIcon, RefreshCwIcon } from "lucide-react";
-import { AGENT_NAMES } from "@/backend/agents.ts";
-import type { Item, Job, Preset, Snapshot } from "@/backend/types.ts";
+import type { Item, Job, Pin, Settings, Snapshot } from "@/backend/types.ts";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -36,7 +31,8 @@ import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/tooltip/tooltip";
 import { CloneDialog } from "@/CloneDialog";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { ago, itemTitle, pinName, repoName } from "@/format";
+import { ago, itemTitle, repoName } from "@/format";
+import { PinMenuItems } from "@/PinMenu";
 import { Row, Section } from "@/Row";
 import { StateIcon, StatePill, TaskDetails, taskState } from "@/TaskDetails";
 
@@ -112,7 +108,7 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
         `${itemTitle(item)} ${item.id} ${item.label}`.toLowerCase().includes(word),
       ),
   );
-  const queue = (wanted: Item[], pin?: Preset) => act(() => api.queue(wanted, pin));
+  const queue = (wanted: Item[], pin?: Pin) => act(() => api.queue(wanted, pin));
   const open = matches.filter((item) => !jobs.has(key(item)));
 
   const empty = (
@@ -261,7 +257,7 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
                   {open.length > 0 && open.length <= 20 && (
                     <QueueButton
                       label={`Queue all ${open.length}`}
-                      presets={snapshot.settings.presets}
+                      settings={snapshot.settings}
                       onQueue={(pin) => queue(open, pin)}
                     />
                   )}
@@ -274,7 +270,7 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
                   const queueButton = (
                     <QueueButton
                       label="Queue"
-                      presets={snapshot.settings.presets}
+                      settings={snapshot.settings}
                       onQueue={(pin) => queue([item], pin)}
                     />
                   );
@@ -317,15 +313,15 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
   );
 }
 
-/** Queues for whichever agent is free first, or, from the arrow's menu, for one agent or preset. */
+/** Queues for the first free worker, or, from the arrow's menu, for a role or one worker. */
 function QueueButton({
   label,
-  presets,
+  settings,
   onQueue,
 }: {
   label: string;
-  presets: Preset[];
-  onQueue: (pin?: Preset) => void;
+  settings: Settings;
+  onQueue: (pin?: Pin) => void;
 }) {
   return (
     <ButtonGroup>
@@ -343,29 +339,10 @@ function QueueButton({
           >
             <ChevronDownIcon />
           </TooltipTrigger>
-          <TooltipContent>{label} for a specific agent or preset</TooltipContent>
+          <TooltipContent>{label} for a role or a specific worker</TooltipContent>
         </Tooltip>
         <DropdownMenuContent align="end" className="w-auto">
-          <DropdownMenuGroup>
-            <DropdownMenuLabel>Agent</DropdownMenuLabel>
-            {AGENT_NAMES.map((agent) => (
-              <DropdownMenuItem key={agent} onClick={() => onQueue({ agent })}>
-                {agent}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuGroup>
-          <DropdownMenuSeparator />
-          <DropdownMenuGroup>
-            <DropdownMenuLabel>Preset</DropdownMenuLabel>
-            {presets.length === 0 && (
-              <DropdownMenuItem disabled>Add presets in Settings</DropdownMenuItem>
-            )}
-            {presets.map((preset, index) => (
-              <DropdownMenuItem key={index} onClick={() => onQueue(preset)}>
-                {pinName(preset)}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuGroup>
+          <PinMenuItems settings={settings} onPin={onQueue} />
         </DropdownMenuContent>
       </DropdownMenu>
     </ButtonGroup>

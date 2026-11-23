@@ -3,14 +3,12 @@ import { AnimatePresence, motion } from "motion/react";
 import { useState, type ReactNode, type Ref } from "react";
 import { api, type Act } from "@/api";
 import {
-  TIERS,
   type Job,
   type Settings,
   type Snapshot,
   type Status,
   type Worker,
 } from "@/backend/types.ts";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Empty,
@@ -20,133 +18,118 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { ItemGroup } from "@/components/ui/item";
-import { clock, itemTitle, minutesSince, pinName, tuning } from "@/format";
+import { clock, itemTitle, minutesSince } from "@/format";
+import { PinChip } from "@/PinMenu";
+import { ProviderLogo, providerOf, WorkerName } from "@/WorkerName";
 import { TierBadge } from "@/TierBadge";
 import { Row, Section } from "@/Row";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/tooltip/tooltip";
 import { StateIcon, StatePill, TaskDetails } from "@/TaskDetails";
 
 function jobMeta(job: Job, byId: Map<string, Job>): string {
-  const pin = job.agent ? pinName({ ...job, agent: job.agent }) : "";
   const waiting = job.after.flatMap((id) => {
     const before = byId.get(id);
     return before && before.state !== "done" ? [itemTitle(before.item)] : [];
   });
   const after = waiting.length > 0 && `after ${waiting.join(", ")}`;
-  return [job.item.blueprint, job.item.attention, pin, after].filter(Boolean).join(" · ");
+  return [job.item.blueprint, job.item.attention, after].filter(Boolean).join(" · ");
 }
 
-function Meta({ job, byId }: { job: Job; byId: Map<string, Job> }) {
+function Meta({
+  job,
+  byId,
+  settings,
+  act,
+}: {
+  job: Job;
+  byId: Map<string, Job>;
+  settings: Settings;
+  act: Act;
+}) {
   return (
     <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
       <StatePill state={job.state} />
+      <PinChip job={job} settings={settings} act={act} />
       {jobMeta(job, byId)}
     </span>
   );
 }
 
-/** A worker's name as its tiers say it, the same chip in the pool and on the job it picks up, so it moves from one to the other. */
-function WorkerChip({ worker, settings }: { worker: Worker; settings: Settings }) {
-  const tiers = TIERS.filter((tier) => settings.tiers[tier].includes(worker.preset));
-  return (
-    <motion.span
-      layoutId={`worker-${worker.id}`}
-      transition={{ duration: 0.35 }}
-      className="inline-flex"
-    >
-      <Badge variant={worker.job ? "default" : "secondary"}>
-        {tiers.length > 0 ? tiers.join(", ") : "untiered"}
-        <span className="opacity-60">#{worker.id.split("#").at(-1)}</span>
-      </Badge>
-    </motion.span>
-  );
-}
-
-const WORKER_DOT: Record<Worker["state"], string> = {
-  idle: "bg-success",
+/** Working is the one filled, accented dot; ready is an empty ring. */
+const DOT: Record<Worker["state"], string> = {
+  idle: "border border-muted-foreground",
   working: "bg-primary",
-  sleeping: "bg-muted-foreground",
+  sleeping: "bg-muted-foreground/40",
   stopped: "bg-destructive",
 };
 
-/** What a worker can do now: ready only when it's idle without a job. */
-function slot(worker: Worker): string {
-  if (worker.job) return "busy";
-  return worker.state === "idle" ? "ready" : worker.state;
-}
-
-/**
- * Each pool as a bar of its workers, busy ones filled, and the free ones listed:
- * they leave the list while they work a job.
- */
-function Workers({ status, settings }: { status: Status; settings: Settings }) {
+/** Each provider's workers as same-size dots, a row per kind of worker, filled while one works. */
+function Pool({ status }: { status: Status }) {
   return (
     <aside className="flex flex-col gap-5 lg:col-start-2">
       {status.pools.map((pool) => {
         const workers = status.workers.filter((worker) => worker.pool === pool.name);
-        const free = workers.filter((worker) => !worker.job);
-        const counts = ["ready", "busy", "sleeping", "stopped"].flatMap((name) => {
-          const n = workers.filter((worker) => slot(worker) === name).length;
-          return n > 0 ? [`${n} ${name}`] : [];
-        });
+        const busy = workers.filter((worker) => worker.job).length;
+        const kinds = [...new Set(workers.map((worker) => worker.preset))];
         const pause =
           pool.stopped ??
           (pool.until
             ? `${pool.reserved ? "keeps its reserve" : "sleeps"} until ${clock(pool.until)}`
             : "");
-        const notes = [
-          pool.used !== undefined &&
-            `${pool.used}% of 5h used, keeps ${settings.reserves[pool.name] ?? 0}%`,
-          pool.limits > 0 &&
-            `hit its usage limit ${pool.limits}${status.limit === null ? "" : ` of ${status.limit}`} times`,
-        ].filter(Boolean);
         return (
-          <section key={pool.name} className="flex flex-col gap-1.5 text-sm">
-            <h2 className="flex items-baseline justify-between gap-2 font-medium text-muted-foreground">
-              <span className="whitespace-nowrap">{pool.name}</span>
-              <span className="text-right text-xs font-normal tabular-nums">
-                {counts.join(" · ")}
+          <section key={pool.name} className="flex flex-col gap-2 text-sm">
+            <h2 className="flex items-center justify-between gap-2 font-medium text-muted-foreground">
+              <span className="flex items-center gap-1.5 whitespace-nowrap">
+                <ProviderLogo pool={pool.name} />
+                {providerOf(pool.name).name}
+              </span>
+              <span className="text-xs font-normal tabular-nums">
+                {busy} of {workers.length} busy
               </span>
             </h2>
-            <div className="flex gap-0.5">
-              {workers.map((worker) => (
-                <span
-                  key={worker.id}
-                  className={`h-1.5 flex-1 rounded-full ${worker.job ? WORKER_DOT.working : WORKER_DOT[worker.state]}`}
-                />
-              ))}
-            </div>
-            {notes.length > 0 && (
-              <p className="text-xs text-muted-foreground">{notes.join(" · ")}</p>
+            <ul className="flex flex-col gap-1.5">
+              {kinds.map((kind) => {
+                const same = workers.filter((worker) => worker.preset === kind);
+                return (
+                  <li key={kind} className="flex items-center justify-between gap-3">
+                    <WorkerName of={same[0]} logo={false} />
+                    <span className="flex shrink-0 gap-1">
+                      {same.map((worker) => (
+                        <Tooltip key={worker.id}>
+                          <TooltipTrigger
+                            render={
+                              <span
+                                className={`size-2.5 rounded-full ${DOT[worker.job ? "working" : worker.state]}`}
+                              />
+                            }
+                          />
+                          <TooltipContent>
+                            {worker.id},{" "}
+                            {worker.job
+                              ? "working"
+                              : worker.state === "idle"
+                                ? "ready"
+                                : worker.state}
+                            {worker.until
+                              ? ` until ${clock(worker.until)}`
+                              : worker.reason
+                                ? `: ${worker.reason}`
+                                : ` since ${clock(worker.since)}`}
+                          </TooltipContent>
+                        </Tooltip>
+                      ))}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+            {pool.limits > 0 && (
+              <p className="text-xs text-muted-foreground">
+                hit its usage limit {pool.limits}
+                {status.limit === null ? "" : ` of ${status.limit}`} times
+              </p>
             )}
             {pause && <p className="text-xs text-warning">{pause}</p>}
-            <ul className="flex flex-col gap-1">
-              {free.map((worker) => (
-                <li key={worker.id}>
-                  <Tooltip>
-                    <TooltipTrigger render={<span className="flex items-center gap-2" />}>
-                      <span
-                        className={`size-1.5 shrink-0 rounded-full ${WORKER_DOT[worker.state]}`}
-                      />
-                      <WorkerChip worker={worker} settings={settings} />
-                      <span className="truncate text-xs text-muted-foreground">
-                        {worker.state === "idle" ? tuning(worker) : worker.state}
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      {worker.id}, {worker.state}
-                      {worker.until
-                        ? ` until ${clock(worker.until)}`
-                        : worker.reason
-                          ? `: ${worker.reason}`
-                          : ` since ${clock(worker.since)}`}
-                      {worker.preset === worker.agent &&
-                        `. The run's own ${worker.agent} worker, for jobs without a tier, like maintenance picks.`}
-                    </TooltipContent>
-                  </Tooltip>
-                </li>
-              ))}
-            </ul>
           </section>
         );
       })}
@@ -155,17 +138,7 @@ function Workers({ status, settings }: { status: Status; settings: Settings }) {
 }
 
 /** A job a worker has now, with the worker on it and what it does. */
-function Running({
-  worker,
-  job,
-  title,
-  settings,
-}: {
-  worker: Worker;
-  job: Job;
-  title: ReactNode;
-  settings: Settings;
-}) {
+function Running({ worker, job, title }: { worker: Worker; job: Job; title: ReactNode }) {
   const step = job.notes.findLast(
     (note) => note.kind === "step" && note.attempt === job.attempts.length + 1,
   );
@@ -177,9 +150,8 @@ function Running({
       meta={
         <span className="flex flex-col gap-1">
           <span className="flex flex-wrap items-center gap-2">
-            <WorkerChip worker={worker} settings={settings} />
+            <WorkerName of={worker} />
             {[
-              tuning(worker),
               `${minutesSince(worker.since)} min`,
               worker.context && `${Math.round(worker.context / 1000)}k context`,
             ]
@@ -290,7 +262,7 @@ export function QueueView({
 
   return (
     <div className={`grid gap-8 pt-2 ${on && status ? "lg:grid-cols-[1fr_15rem]" : ""}`}>
-      {on && status && <Workers status={status} settings={settings} />}
+      {on && status && <Pool status={status} />}
       <div className="flex min-w-0 flex-col gap-8 lg:row-start-1">
         {running.length > 0 && (
           <Section title={`Running (${running.length})`}>
@@ -304,7 +276,6 @@ export function QueueView({
                       worker={worker}
                       job={job}
                       title={details(job, false)}
-                      settings={settings}
                     />
                   )
                 );
@@ -356,7 +327,7 @@ export function QueueView({
                             </span>
                           }
                           title={details(job, true)}
-                          meta={<Meta job={job} byId={byId} />}
+                          meta={<Meta job={job} byId={byId} settings={settings} act={act} />}
                         >
                           <Button
                             variant="ghost"
@@ -414,7 +385,7 @@ export function QueueView({
           {auto.length === 0 ? (
             <p className="text-sm text-muted-foreground">
               {settings.auto.on
-                ? "Auto mode tops this up to 5 jobs per agent while the factory is on."
+                ? "Auto mode tops this up to 5 jobs per worker while the factory is on."
                 : "Auto mode is off. Turn it on to keep the queue topped up from workwork."}
             </p>
           ) : (
@@ -425,7 +396,7 @@ export function QueueView({
                     <Row
                       leading={<StateIcon state={job.state} />}
                       title={details(job, true)}
-                      meta={<Meta job={job} byId={byId} />}
+                      meta={<Meta job={job} byId={byId} settings={settings} act={act} />}
                     >
                       {remove(job)}
                     </Row>

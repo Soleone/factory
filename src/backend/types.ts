@@ -3,14 +3,14 @@
 /** Unset means the agent's own default. */
 export type Tuning = { model?: string; effort?: string };
 
-/** An agent with a model and effort, saved to queue jobs with in one click, and what tiers run on. */
+/** A worker: an agent with a model and effort. Runs work on these, tiers list them, and the Queue arrow pins jobs to them. */
 export type Preset = Tuning & {
   agent: string;
   /** Stable, so tiers can name it; unset: agent/model/effort. */
   id?: string;
   /** The account its usage limit counts against; unset: claude, or pi's provider. */
   pool?: string;
-  /** Process slots a run gives it; unset: 1 when a tier lists it, else 0. */
+  /** Process slots a run gives it; unset: 1. At 0 it runs nothing on its own, only jobs pinned to it. */
   workers?: number;
   /** Context tokens at which the runner compacts; unset: 90k for Haiku, 200k otherwise. */
   compactAt?: number;
@@ -28,24 +28,34 @@ export type Tier = (typeof TIERS)[number];
 export const presetId = (preset: Preset) =>
   preset.id ?? [preset.agent, preset.model, preset.effort].filter(Boolean).join("/");
 
+export const workersOf = (preset: Preset) => preset.workers ?? 1;
+
+/** The account a preset's usage counts against: claude's, or pi's provider. */
+export const poolOf = (preset: Preset) =>
+  preset.pool ?? (preset.agent === "pi" ? (preset.model?.split("/")[0] ?? "pi") : preset.agent);
+
 /**
  * A model the settings offer for an agent: what --model takes, how to show it, and its efforts.
  * Scoped models are the agent's short list (Pi's Ctrl+P scope), shown above the rest.
  */
 export type Model = { value: string; label: string; efforts: string[]; scoped: boolean };
 
+/** What the Queue arrow pins a job to: a worker's preset and tuning, so a run without it still has the tuning, or a tier. */
+export type Pin = Partial<Pick<Job, "agent" | "model" | "effort" | "preset" | "tier">>;
+
+/** A run asked for from the page: this run's worker counts by preset id, over the settings'. */
+export type RunRequest = Pick<Settings, "limit" | "until"> & { workers: Record<string, number> };
+
 /** stopped: the factory was turned off with --kill while the agent worked. timeout: no output for `idle` minutes. */
 export type Outcome = "done" | "failed" | "limited" | "timeout" | "stopped";
 
 /** The global settings; a run starts from these unless told otherwise. */
 export type Settings = {
-  /** The registered agents, each with its model and effort (unset: the agent's default). */
-  agents: Record<string, Tuning>;
   /** The agent the Plan chat talks to, with its model and effort; a change starts a new chat. */
   chat: Tuning & { agent: string };
-  /** Agents with a model and effort to queue candidates with, like pi on its biggest model. */
+  /** The workers, in the order they take queue work: the first free one gets the next job. */
   presets: Preset[];
-  /** Usage-limit hits per agent per run before that agent stops; null: never stop, wait for the reset. */
+  /** Usage-limit hits per provider per run before its workers stop; null: never stop, wait for the reset. */
   limit: number | null;
   /** HH:MM local time after which a run starts nothing new. */
   until?: string;

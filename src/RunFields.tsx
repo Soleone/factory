@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "@/api";
-import { AGENT_NAMES, EFFORTS } from "@/backend/agents.ts";
+import { EFFORTS } from "@/backend/agents.ts";
 import type { Model, Settings, Tuning } from "@/backend/types.ts";
-import { NeutralCheckbox } from "@/components/variants/checkbox";
 import {
   Combobox,
   ComboboxCollection,
@@ -20,8 +19,6 @@ import {
   FieldDescription,
   FieldGroup,
   FieldLabel,
-  FieldSet,
-  FieldLegend,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
@@ -32,11 +29,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-export type Run = Pick<Settings, "agents" | "limit" | "until">;
+export type Run = Pick<Settings, "limit" | "until">;
 
 const DEFAULT = "default";
 const LIMITS = [
-  { value: "1", label: "Stop that agent" },
+  { value: "1", label: "Stop its workers" },
   { value: "2", label: "Wait for 1 reset, then stop" },
   { value: "3", label: "Wait for 2 resets, then stop" },
   { value: "4", label: "Wait for 3 resets, then stop" },
@@ -44,46 +41,22 @@ const LIMITS = [
   { value: "none", label: "Wait and always continue" },
 ];
 
-/** Which agents work, with which model and effort, and when they stop: for a run or as the defaults. */
-export function RunFields({ value, onChange }: { value: Run; onChange: (run: Run) => void }) {
-  const setAgent = (name: string, change: Settings["agents"][string] | undefined) => {
-    const agents = { ...value.agents };
-    if (change) agents[name] = change;
-    else delete agents[name];
-    onChange({ ...value, agents });
-  };
-
+/** When a run stops: for one run or as the defaults. */
+export function RunFields<T extends Run>({
+  value,
+  onChange,
+}: {
+  value: T;
+  onChange: (run: T) => void;
+}) {
   return (
     <FieldGroup>
-      <FieldSet>
-        <FieldLegend variant="label">Agents</FieldLegend>
-        {AGENT_NAMES.map((name) => {
-          const tuning = value.agents[name];
-          return (
-            <Field key={name} orientation="horizontal">
-              <NeutralCheckbox
-                id={`agent-${name}`}
-                checked={tuning !== undefined}
-                onCheckedChange={(checked) => setAgent(name, checked ? {} : undefined)}
-              />
-              <FieldLabel htmlFor={`agent-${name}`} className="w-14 flex-none!">
-                {name}
-              </FieldLabel>
-              <TuningFields
-                agent={name}
-                value={tuning}
-                onChange={(change) => setAgent(name, change)}
-              />
-            </Field>
-          );
-        })}
-      </FieldSet>
       <Field>
         <FieldContent>
-          <FieldLabel>When an agent hits its usage limit</FieldLabel>
+          <FieldLabel>When a provider hits its usage limit</FieldLabel>
           <FieldDescription>
-            Waiting pauses that agent until its plan resets, then it goes on. Once every agent has
-            stopped, the factory turns off.
+            Waiting pauses that provider's workers until its plan resets, then they go on. Once
+            every worker has stopped, the factory turns off.
           </FieldDescription>
         </FieldContent>
         <Select
@@ -125,7 +98,7 @@ export function RunFields({ value, onChange }: { value: Run; onChange: (run: Run
 let models: Promise<Record<string, Model[]>> | undefined;
 
 /** The short list of models each agent offers, asked once per page; empty until it arrives. */
-function useModels(): Record<string, Model[]> {
+export function useModels(): Record<string, Model[]> {
   const [loaded, setLoaded] = useState<Record<string, Model[]>>({});
   useEffect(() => {
     models ??= api.models();

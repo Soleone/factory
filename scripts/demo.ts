@@ -3,10 +3,14 @@ import type { Plugin } from "vite-plus";
 import {
   canMerge,
   canRebase,
+  poolOf,
+  presetId,
   prUrl,
+  workersOf,
   type Item,
   type Job,
-  type Preset,
+  type Pin,
+  type RunRequest,
   type Settings,
   type Snapshot,
 } from "../src/backend/types.ts";
@@ -230,10 +234,10 @@ function seed(): Snapshot {
     status: null,
     jobs,
     settings: {
-      agents: { claude: {}, pi: {} },
       chat: { agent: "pi" },
       presets: [
-        { agent: "claude", model: "opus", effort: "high", id: "opus" },
+        { agent: "claude", model: "opus", effort: "medium" },
+        { agent: "claude", model: "opus", effort: "high", id: "opus", workers: 0 },
         { agent: "pi", model: "openai/gpt-6.2-sol", effort: "high", id: "sol", workers: 2 },
         { agent: "pi", model: "openai-codex/gpt-6-luna", effort: "max", id: "luna", workers: 3 },
       ],
@@ -419,7 +423,7 @@ function dispatch(snapshot: Snapshot, route: string, body: unknown): unknown {
       return `# workwork: ${id}\n\nBlueprint: ${item?.blueprint}\nAttention: ${item?.attention}\n\n## Task\n\nDemo task: ${item?.title?.toLowerCase()}. Keep the change small and covered by a test.\n\n## Done when\n\n- \`pnpm test\` passes.\n\n## Deliver\n\n- One commit, pushed as a PR labeled \`workwork\`.\n\n## Standard\n\nNot shown in the page.\n`;
     }
     case "POST /api/jobs": {
-      const selection = body as { items: Pick<Item, "repo" | "id">[]; pin?: Preset };
+      const selection = body as { items: Pick<Item, "repo" | "id">[]; pin?: Pin };
       for (const wanted of selection.items) {
         const item = items.find(({ repo, id }) => repo === wanted.repo && id === wanted.id);
         if (!item || jobs.some((job) => job.item === item && job.state !== "removed")) continue;
@@ -478,8 +482,21 @@ function dispatch(snapshot: Snapshot, route: string, body: unknown): unknown {
       snapshot.settings = body as Settings;
       return null;
     case "POST /api/on": {
-      const { agents, until, limit } = body as Pick<Settings, "agents" | "until" | "limit">;
+      const { workers, until, limit } = body as RunRequest;
       const since = new Date().toISOString();
+      const slots = snapshot.settings.presets.flatMap((preset) =>
+        Array.from({ length: workers[presetId(preset)] ?? workersOf(preset) }, (_, index) => ({
+          id: `${presetId(preset)}#${index + 1}`,
+          agent: preset.agent,
+          model: preset.model,
+          effort: preset.effort,
+          preset: presetId(preset),
+          pool: poolOf(preset),
+          state: "idle" as const,
+          since,
+          reason: "Demo mode: no agents are launched",
+        })),
+      );
       snapshot.on = true;
       snapshot.status = {
         pid: 0,
@@ -487,17 +504,8 @@ function dispatch(snapshot: Snapshot, route: string, body: unknown): unknown {
         until,
         limit,
         idle: snapshot.settings.idle,
-        pools: Object.keys(agents).map((name) => ({ name, limits: 0 })),
-        workers: Object.entries(agents).map(([agent, tuning]) => ({
-          id: `${agent}#1`,
-          agent,
-          preset: agent,
-          pool: agent,
-          ...tuning,
-          state: "idle",
-          since,
-          reason: "Demo mode: no agents are launched",
-        })),
+        pools: [...new Set(slots.map((slot) => slot.pool))].map((name) => ({ name, limits: 0 })),
+        workers: slots,
       };
       return null;
     }
@@ -515,7 +523,7 @@ function dispatch(snapshot: Snapshot, route: string, body: unknown): unknown {
     );
   }
   const match =
-    /^POST \/api\/jobs\/(\w+)\/(remove|retry|move|merge|rebase|close|answer|approve|pause|resume|cancel|replan|verify)$/.exec(
+    /^POST \/api\/jobs\/(\w+)\/(remove|retry|move|merge|rebase|close|answer|approve|pause|resume|cancel|replan|verify|pin)$/.exec(
       route,
     );
   if (!match) return undefined;
@@ -525,6 +533,10 @@ function dispatch(snapshot: Snapshot, route: string, body: unknown): unknown {
   switch (action) {
     case "remove":
       job.state = "removed";
+      break;
+    case "pin":
+      for (const key of ["agent", "model", "effort", "preset", "tier"] as const) delete job[key];
+      Object.assign(job, body as Pin);
       break;
     case "retry":
     case "resume":

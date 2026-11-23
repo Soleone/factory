@@ -22,6 +22,7 @@ import {
   record,
   removeJob,
   retryJob,
+  pinJob,
   startJob,
 } from "../src/backend/jobs.ts";
 import {
@@ -36,7 +37,7 @@ import {
 import { stringify as toYaml } from "yaml";
 import { makeSlots, piSettingsWarnings, run, type RunOptions } from "../src/backend/loop.ts";
 import { agentModels } from "../src/backend/models.ts";
-import { readSettings, writeSettings } from "../src/backend/state.ts";
+import { checkSettings, readSettings, writeSettings } from "../src/backend/state.ts";
 import {
   onTrain,
   type Item,
@@ -242,6 +243,18 @@ describe("jobs that wait on others", () => {
     expect(nextJob(readJobs(state), "pi")?.id).toBe(review.id);
   });
 
+  test("a waiting job's pin can change until a worker takes it", () => {
+    const state = mkdtempSync(join(scratch, "state-"));
+    const [job] = addJobs(state, [item("r", "a")], "pick", { agent: "pi", model: "p/luna" });
+    pinJob(state, job.id, { tier: "grunt" });
+    expect(readJobs(state)[0]).toMatchObject({ tier: "grunt" });
+    expect(readJobs(state)[0]).not.toHaveProperty("agent");
+    pinJob(state, job.id, {});
+    expect(readJobs(state)[0]).not.toHaveProperty("tier");
+    startJob(state, job.id, "claude");
+    expect(() => pinJob(state, job.id, { tier: "grunt" })).toThrow("is running");
+  });
+
   test("a job waiting on one that failed is held, and goes on after a retry", () => {
     const state = mkdtempSync(join(scratch, "state-"));
     const [fix] = addJobs(state, [item("r", "a")], "pick", { agent: "claude" });
@@ -351,10 +364,10 @@ describe("the factory", () => {
 
   const options = (
     base: { state: string; workwork: string },
-    agents: RunOptions["agents"] = { claude: {} },
+    workers: RunOptions["workers"] = { pi: 0 },
   ): RunOptions => ({
     ...base,
-    agents,
+    workers,
     limit: 2,
     idleMs: 60_000,
     pollMs: 20,
@@ -664,7 +677,7 @@ ${lines
     const base = setup(["a"]);
     agents({ claude: "echo broken; exit 1", pi: OK });
     const job = base.pick("a");
-    const [failed] = await work(options(base, { claude: {}, pi: {} }));
+    const [failed] = await work(options(base, {}));
     expect(failed.attempts.map((attempt) => [attempt.agent, attempt.outcome])).toEqual([
       ["claude", "failed"],
       ["claude", "failed"],
@@ -672,7 +685,7 @@ ${lines
     expect(failed.state).toBe("failed");
     retryJob(base.state, job.id);
     agents({ claude: OK, pi: OK });
-    const [done] = await work(options(base, { claude: {}, pi: {} }));
+    const [done] = await work(options(base, {}));
     expect(done.attempts.map((attempt) => attempt.agent)).toEqual(["claude", "claude", "claude"]);
     expect(done.state).toBe("done");
   });
@@ -686,11 +699,12 @@ ${lines
     expect(jobs.map((job) => job.state)).toEqual(["queued", "done"]);
   });
 
-  test("the run's model and effort per agent, unless the job has its own", async () => {
+  test("the worker's model and effort, unless the job has its own", async () => {
     const base = setup(["a"]);
     agents({ claude: `echo "args: $*"; ${RESULT}` });
+    tiered(base.state, { presets: [{ agent: "claude", model: "opus", effort: "high" }] });
     base.pick("a", { effort: "low" });
-    const [job] = await work(options(base, { claude: { model: "opus", effort: "high" } }));
+    const [job] = await work(options(base, {}));
     expect(job.attempts[0]).toMatchObject({ model: "opus", effort: "low", outcome: "done" });
     expect(readFileSync(job.attempts[0].log, "utf8")).toContain("--model opus --effort low");
   });
@@ -907,20 +921,33 @@ ${lines
     expect(sh(base.repo, "git", "worktree", "list").trim().split("\n")).toHaveLength(3);
   });
 
-  test("untiered jobs go to the run's agent workers, never to a tier's preset", async () => {
-    const base = setup(["a", "b"]);
-    agents({ pi: "exit 1", claude: RESULT });
+  test("untiered jobs go to the first free worker in settings order, tiers' presets included", async () => {
+    const base = setup(["a"]);
+    agents({ pi: RESULT, claude: RESULT });
     tiered(base.state, {
-      presets: [{ agent: "pi", model: "openai-codex/luna", id: "luna", workers: 2 }],
+      presets: [
+        { agent: "pi", model: "openai-codex/luna", id: "luna" },
+        { agent: "claude", id: "c" },
+      ],
       tiers: { communicator: [], builder: [], grunt: ["luna"] },
     });
     base.pick("a");
-    base.pick("b");
-    const jobs = await work(options(base));
-    expect(jobs.flatMap((job) => job.attempts)).toMatchObject([
-      { outcome: "done", preset: "claude" },
-      { outcome: "done", preset: "claude" },
-    ]);
+    const [job] = await work(options(base, {}));
+    expect(job.attempts).toMatchObject([{ outcome: "done", preset: "luna" }]);
+  });
+
+  test("a pin on a worker this run doesn't have runs on a free worker of its agent, with its tuning", async () => {
+    const base = setup(["a"]);
+    agents({ claude: `echo "args: $*"; ${RESULT}` });
+    tiered(base.state, {
+      presets: [
+        { agent: "claude", id: "c" },
+        { agent: "claude", model: "opus", effort: "high", id: "big", workers: 0 },
+      ],
+    });
+    base.pick("a", { preset: "big", agent: "claude", model: "opus", effort: "high" });
+    const [job] = await work(options(base, {}));
+    expect(job.attempts).toMatchObject([{ outcome: "done", preset: "c", model: "opus" }]);
   });
 
   test("agents and gates get the repo's env, with {worktree} filled in", async () => {
@@ -974,23 +1001,42 @@ ${lines
     }
   });
 
-  test("workers: one per run agent, and each preset's, by default one when a tier lists it", () => {
+  test("workers: each preset's, one by default, with the run's counts over the settings'", () => {
     const settings = {
       ...readSettings(mkdtempSync(join(scratch, "state-"))),
       presets: [
         { agent: "pi", model: "p/a", id: "a" },
-        { agent: "pi", model: "p/b", id: "b" },
+        { agent: "pi", model: "p/b", id: "b", workers: 0 },
         { agent: "claude", model: "haiku", id: "h", workers: 2 },
       ],
-      tiers: { communicator: [], builder: ["a"], grunt: [] },
     };
-    expect(
-      makeSlots({ claude: {} }, settings).map((slot) => [slot.worker.id, slot.worker.pool]),
-    ).toEqual([
-      ["claude#1", "claude"],
+    expect(makeSlots(settings).map((slot) => [slot.worker.id, slot.worker.pool])).toEqual([
       ["a#1", "p"],
       ["h#1", "claude"],
       ["h#2", "claude"],
+    ]);
+    expect(makeSlots(settings, { a: 0, b: 1 }).map((slot) => slot.worker.id)).toEqual([
+      "b#1",
+      "h#1",
+      "h#2",
+    ]);
+  });
+
+  test("old settings: the run agents become the first workers, merged into a preset with their tuning", () => {
+    const settings = checkSettings({
+      agents: { claude: { model: "opus" }, pi: {} },
+      presets: [
+        { agent: "pi", model: "p/luna", id: "luna" },
+        { agent: "claude", model: "opus" },
+        { agent: "claude", model: "haiku" },
+      ],
+      tiers: { communicator: [], builder: [], grunt: ["luna"] },
+    });
+    expect(settings.presets).toEqual([
+      { agent: "claude", model: "opus", workers: 1 },
+      { agent: "pi", workers: 1 },
+      { agent: "pi", model: "p/luna", id: "luna", workers: 1 },
+      { agent: "claude", model: "haiku", workers: 0 },
     ]);
   });
 
@@ -1123,7 +1169,7 @@ esac; ${RESULT}`;
     );
     approveGoal(state, goal.id);
     const jobs = await work(
-      options(base, { claude: {}, pi: {} }),
+      options(base, {}),
       (jobs) => jobs.find((job) => job.id === goal.id)!.state === "done",
     );
     const conflicts = jobs.filter((job) => job.item.blueprint === "conflicts");
@@ -1279,7 +1325,7 @@ esac`;
     const goal = await importPlan(state, plan(repo, nodes));
     approveGoal(state, goal.id);
     const jobs = await work(
-      options(base, { claude: {}, pi: {} }),
+      options(base, {}),
       (jobs) => jobs.find((job) => job.id === goal.id)!.state === "done",
     );
     expect(jobs.filter((job) => job.item.blueprint === "replan").map((job) => job.state)).toEqual([

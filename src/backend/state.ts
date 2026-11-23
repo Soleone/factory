@@ -12,6 +12,7 @@ import {
   type Item,
   type Preset,
   type Settings,
+  type Tuning,
   upgradeItem,
 } from "./types.ts";
 
@@ -40,9 +41,8 @@ export function alive(pid: number): boolean {
 export const ATTENTION = ["none", "skim", "decide"];
 
 const DEFAULTS: Settings = {
-  agents: { claude: {}, pi: {} },
   chat: { agent: "pi" },
-  presets: [],
+  presets: [{ agent: "claude" }, { agent: "pi" }],
   limit: 1,
   reserves: {},
   idle: 10,
@@ -66,26 +66,27 @@ export function writeSettings(state: string, settings: Settings): void {
 }
 
 /** Settings come from a file people edit and from the page, so they are checked on the way in. */
-export function checkSettings(raw: Partial<Settings> & { timeout?: number }): Settings {
+export function checkSettings(
+  raw: Partial<Settings> & { timeout?: number; agents?: Record<string, Tuning> },
+): Settings {
   // timeout was a wall clock and has no match in idle minutes, so an old file's is dropped.
-  const { timeout: _, ...rest } = raw;
+  const { timeout: _, agents, ...rest } = raw;
   const settings = {
     ...DEFAULTS,
     ...rest,
+    ...(agents && { presets: upgradeAgents(agents, rest) }),
     tiers: { ...DEFAULTS.tiers, ...rest.tiers },
     auto: { ...DEFAULTS.auto, ...upgradeAuto(rest.auto) },
     triggers: { ...DEFAULTS.triggers, ...rest.triggers },
   };
-  for (const name of Object.keys(settings.agents))
-    if (!AGENT_NAMES.includes(name))
-      throw new Error(`unknown agent ${name} (known: ${AGENT_NAMES.join(", ")})`);
   if (!AGENT_NAMES.includes(settings.chat.agent))
     throw new Error(`unknown chat agent ${settings.chat.agent} (known: ${AGENT_NAMES.join(", ")})`);
-  for (const preset of settings.presets)
+  for (const preset of settings.presets) {
     if (!AGENT_NAMES.includes(preset.agent))
       throw new Error(`unknown preset agent ${preset.agent} (known: ${AGENT_NAMES.join(", ")})`);
-  if (Object.keys(settings.agents).length === 0)
-    throw new Error("settings need at least one agent");
+    if (preset.workers !== undefined && !(Number.isInteger(preset.workers) && preset.workers >= 0))
+      throw new Error(`workers wants a whole number from 0, got ${preset.workers}`);
+  }
   if (settings.limit !== null && !(Number.isInteger(settings.limit) && settings.limit > 0))
     throw new Error(`limit wants a whole number above 0 or null, got ${settings.limit}`);
   for (const [pool, reserve] of Object.entries(settings.reserves)) {
@@ -116,6 +117,31 @@ export function checkSettings(raw: Partial<Settings> & { timeout?: number }): Se
   for (const attention of settings.auto.attention)
     if (!ATTENTION.includes(attention)) throw new Error(`unknown attention ${attention}`);
   return settings;
+}
+
+/**
+ * Before 0.6 each run agent got a hidden worker for untiered jobs, and a preset got one only once a
+ * tier listed it. The agents become the first workers, merged into a preset with the same tuning.
+ */
+function upgradeAgents(
+  agents: Record<string, Tuning>,
+  { presets = [], tiers = DEFAULTS.tiers }: Partial<Settings>,
+): Preset[] {
+  const listed = new Set(Object.values(tiers).flat());
+  const rest = presets.map((preset) => ({
+    ...preset,
+    workers: preset.workers ?? (listed.has(presetId(preset)) ? 1 : 0),
+  }));
+  const first = Object.entries(agents).map(([agent, tuning]) => {
+    const same = rest.findIndex(
+      (preset) =>
+        preset.agent === agent && preset.model === tuning.model && preset.effort === tuning.effort,
+    );
+    if (same === -1) return { agent, ...tuning, workers: 1 };
+    const [preset] = rest.splice(same, 1);
+    return { ...preset, workers: Math.max(preset.workers, 1) };
+  });
+  return [...first, ...rest];
 }
 
 type LegacyAuto = Partial<Settings["auto"]> & { levels?: string[]; plays?: string[] };
@@ -179,15 +205,6 @@ export async function output(
   return stdout;
 }
 
-/** The account a preset's usage counts against: claude's, or pi's provider. */
-export const poolOf = (preset: Preset) =>
-  preset.pool ?? (preset.agent === "pi" ? (preset.model?.split("/")[0] ?? "pi") : preset.agent);
-
 /** Haiku 5.5 costs more above 100k, the others above 272k, so each compacts below its step. */
 export const compactAt = (preset: Preset) =>
   preset.compactAt ?? (/haiku/i.test(preset.model ?? "") ? 90_000 : 200_000);
-
-/** A preset gets a worker by default once a tier lists it. */
-export const workersOf = (preset: Preset, settings: Settings) =>
-  preset.workers ??
-  (Object.values(settings.tiers).some((list) => list.includes(presetId(preset))) ? 1 : 0);
