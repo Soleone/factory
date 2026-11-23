@@ -32,13 +32,7 @@ async function piModels(): Promise<Model[]> {
   const scoped: string[] = existsSync(settings)
     ? (JSON.parse(readFileSync(settings, "utf8")).enabledModels ?? [])
     : [];
-  const answer = await ask(
-    "pi",
-    ["--mode", "rpc", "--no-session", "--offline"],
-    { type: "get_available_models" },
-    (record) => record.type === "response" && record.command === "get_available_models",
-  );
-  const known: PiModel[] = answer.data.models;
+  const known = await availablePiModels();
   // In the scope's order. A pattern names provider/id, or else just the id; * matches anything.
   const scope = new Set(scoped.flatMap((each) => matches(known, each)));
   const rest = known.filter((model) => !scope.has(model));
@@ -59,15 +53,19 @@ function matches(known: PiModel[], pattern: string): PiModel[] {
   return full.length > 0 ? full : known.filter((model) => glob.test(model.id));
 }
 
-/** Each model's context window, by provider/id, as pi knows it. */
-export async function piWindows(): Promise<Record<string, number>> {
+async function availablePiModels(): Promise<PiModel[]> {
   const answer = await ask(
     "pi",
     ["--mode", "rpc", "--no-session", "--offline"],
     { type: "get_available_models" },
     (record) => record.type === "response" && record.command === "get_available_models",
   );
-  const known: PiModel[] = answer.data.models;
+  return answer.data.models;
+}
+
+/** Each model's context window, by provider/id, as pi knows it. */
+export async function piWindows(): Promise<Record<string, number>> {
+  const known = await availablePiModels();
   return Object.fromEntries(
     known.flatMap((model) =>
       model.contextWindow ? [[`${model.provider}/${model.id}`, model.contextWindow]] : [],
