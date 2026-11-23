@@ -351,7 +351,14 @@ describe("the factory", () => {
   const options = (
     base: { state: string; workwork: string },
     agents: RunOptions["agents"] = { claude: {} },
-  ): RunOptions => ({ ...base, agents, limit: 2, idleMs: 60_000, pollMs: 20 });
+  ): RunOptions => ({
+    ...base,
+    agents,
+    limit: 2,
+    idleMs: 60_000,
+    pollMs: 20,
+    watch: async () => [],
+  });
 
   const busy = (jobs: Job[]) =>
     jobs.some((job) => job.state === "queued" || job.state === "running");

@@ -48,6 +48,7 @@ import {
   FieldSet,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { AGENT_NAMES } from "@/backend/agents.ts";
@@ -67,8 +68,8 @@ export function SettingsDialog({ snapshot, act }: { snapshot: Snapshot; act: Act
         <DialogHeader>
           <DialogTitle>Settings</DialogTitle>
           <DialogDescription>
-            Defaults for every run, and what auto mode may queue. Closing without saving discards
-            changes.
+            Defaults for every run, and what may queue work on its own. Closing without saving
+            discards changes.
           </DialogDescription>
         </DialogHeader>
         <SettingsForm snapshot={snapshot} act={act} onSaved={() => setOpen(false)} />
@@ -132,6 +133,7 @@ function SettingsForm({
           <TabsTrigger value="presets">Presets</TabsTrigger>
           <TabsTrigger value="tiers">Tiers</TabsTrigger>
           <TabsTrigger value="auto">Auto mode</TabsTrigger>
+          <TabsTrigger value="triggers">Triggers</TabsTrigger>
           <TabsTrigger value="chat">Live Agent</TabsTrigger>
         </TabsList>
         <div className="mt-2 grid">
@@ -213,6 +215,12 @@ function SettingsForm({
                 />
               </Field>
             </FieldGroup>
+          </StackedTabsContent>
+          <StackedTabsContent value="triggers">
+            <TriggerFields
+              value={draft.triggers}
+              onChange={(triggers) => setDraft({ ...draft, triggers })}
+            />
           </StackedTabsContent>
           <StackedTabsContent value="chat">
             <FieldGroup>
@@ -552,5 +560,48 @@ function MultiPicker({
         </ComboboxList>
       </ComboboxContent>
     </Combobox>
+  );
+}
+
+function TriggerFields({
+  value,
+  onChange,
+}: {
+  value: Settings["triggers"];
+  onChange: (triggers: Settings["triggers"]) => void;
+}) {
+  const set = (change: Partial<Settings["triggers"]>) => onChange({ ...value, ...change });
+  return (
+    <FieldGroup>
+      <FieldDescription>
+        While the factory is on, it checks GitHub every 5 minutes in the repos it has jobs in, and
+        queues one job per event.
+      </FieldDescription>
+      <Field orientation="horizontal">
+        <Switch id="ci" checked={value.ci} onCheckedChange={(ci) => set({ ci })} />
+        <FieldLabel htmlFor="ci">CI failing on the default branch queues a fix</FieldLabel>
+      </Field>
+      <Field orientation="horizontal">
+        <Switch
+          id="reviews"
+          checked={value.reviews}
+          onCheckedChange={(reviews) => set({ reviews })}
+        />
+        <FieldLabel htmlFor="reviews">
+          Your review or comment on a factory PR queues a job to address it
+        </FieldLabel>
+      </Field>
+      <Field orientation="horizontal">
+        <FieldLabel htmlFor="label">
+          Open issues with this label queue a job (empty: none)
+        </FieldLabel>
+        <Input
+          id="label"
+          className="w-32"
+          value={value.label}
+          onChange={(event) => set({ label: event.target.value })}
+        />
+      </Field>
+    </FieldGroup>
   );
 }

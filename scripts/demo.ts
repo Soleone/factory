@@ -245,6 +245,7 @@ function seed(): Snapshot {
       capabilities: [],
       env: {},
       auto: { on: true, attention: ["none"], blueprints: [], repos: [] },
+      triggers: { ci: true, label: "factory", reviews: true },
     },
     candidates: { at, count: items.length, refreshing: false },
     prs: Object.fromEntries(

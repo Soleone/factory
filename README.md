@@ -26,6 +26,7 @@ Needs node 22+, git, [workwork](https://github.com/Soleone/workwork) 0.3 or late
 ### Maintenance
 
 - Picks go first, in the order you give them; auto jobs follow. While the factory is on, auto mode keeps up to 5 of its jobs per worker queued, cheapest attention first, with repos taking turns, and never re-queues a candidate that already had a job.
+- **Triggers:** while the factory is on, it checks GitHub every 5 minutes in the repos it has jobs in, and queues one job per event: CI failing on the default branch queues a fix, an open issue labeled `factory` queues a job for it, and your review or comment on a factory PR queues a job that pushes to the same branch. Remarks made while an agent worked on that PR don't count, since agents post with your account. Settings turns each one off or changes the label.
 - **Limits:** a limit of 1 (the default) stops a pool at its first usage-limit hit, so only the current allowance gets used. A limit of 2 waits for one reset; "none" always waits. Three quick failures in a row stop a worker, so a broken login can't burn through the queue.
 - **Reserves:** `reserves` keeps a percent of a pool's 5-hour window for other apps on the same subscription. Once the window reaches it, the pool starts nothing new until the window resets; jobs already running finish, so leave room for them. Factory reads the window at most once a minute, for `claude` and pi's `anthropic` and `openai-codex`; when a read fails, nothing is held and the usage-limit hits still apply.
 - **Failures:** a job that fails gets one more attempt; then it waits for you to retry it, and jobs that wait on it are held until then.
@@ -139,6 +140,7 @@ In `$DATA/apps/factory/` when `DATA` is set, otherwise `~/.local/share/factory/`
 
 - `settings.json`
 - `jobs.jsonl`: append-only events, so the CLI, the factory and the page never overwrite each other; the queue, goals and results are what replaying it gives
+- `triggers.json`: the events triggers already queued a job for
 - `candidates.json`: the cached `workwork --all --json`, refreshed from the page, or by auto mode when older than 6 hours
 - `runs/<run>/<job>-<attempt>/`: `prompt.md`, `turn-N.md` for each later turn, and `agent.log` with the runner's event stream
 - `running/<job>.json`: an attempt in progress or paused: its session, worktree and turn

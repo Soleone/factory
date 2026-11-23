@@ -30,6 +30,7 @@ import {
 } from "./state.ts";
 import { noFacts, readStream, type Facts } from "./stream.ts";
 import { fiveHour } from "./usage.ts";
+import { watch } from "./triggers.ts";
 import {
   presetId,
   TIERS,
@@ -66,6 +67,8 @@ export type RunOptions = {
   sleep?: (ms: number) => Promise<void>;
   /** Reads a pool's 5-hour window; tests swap in their own. */
   usage?: (pool: string) => Promise<UsageWindow>;
+  /** Queues jobs for events on GitHub and says what it queued; tests swap in their own. */
+  watch?: (state: string) => Promise<string[]>;
 };
 
 const MINUTE = 60_000;
@@ -74,6 +77,7 @@ const AUTO_PER_WORKER = 5;
 const STALE_CANDIDATES = 6 * 60 * MINUTE;
 const FOLLOWUPS = 2;
 const GATE_TIMEOUT = 30 * MINUTE;
+const WATCH_EVERY = 5 * MINUTE;
 
 /**
  * An attempt under way, kept in running/<job id>.json until it's recorded: its session, its worktree,
@@ -223,6 +227,18 @@ export async function run(options: RunOptions): Promise<string> {
     return done;
   }
 
+  /** The triggers' part: look for new events every few minutes, in the background. */
+  let watched = 0;
+  let watching: Promise<void> | undefined;
+  function lookOut(): void {
+    if (watching || Date.now() - watched < WATCH_EVERY) return;
+    watched = Date.now();
+    watching = (options.watch ?? watch)(state)
+      .then((lines) => lines.forEach(log))
+      .catch((error: Error) => log(`triggers failed: ${error.message}`))
+      .finally(() => (watching = undefined));
+  }
+
   /** Auto mode's part: keep a few of its jobs queued. Reads settings each time, so the toggle applies at once. */
   function topUp(): void {
     topping ??= fillFromAuto()
@@ -307,6 +323,7 @@ export async function run(options: RunOptions): Promise<string> {
     const pool = pools.get(worker.pool)!;
     while (!ended()) {
       topUp();
+      lookOut();
       if (pool.stopped) return set(worker, { state: "stopped", reason: pool.stopped });
       if (!handed) await keepReserve(pool);
       if (pool.until) {

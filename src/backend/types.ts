@@ -65,6 +65,11 @@ export type Settings = {
   env: Record<string, Record<string, string>>;
   /** Auto mode tops up the queue from workwork; empty repos or blueprints means all of them. */
   auto: { on: boolean; attention: string[]; blueprints: string[]; repos: string[] };
+  /**
+   * While a run works, what queues a job in the repos factory has jobs in: CI failing on the
+   * default branch, an open issue with `label` (empty: none), a person's remarks on a job's PR.
+   */
+  triggers: { ci: boolean; label: string; reviews: boolean };
 };
 
 /** A workwork candidate, as `workwork --json` prints it. `id` is workwork's, not a job's. */

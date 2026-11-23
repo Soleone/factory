@@ -51,6 +51,7 @@ const DEFAULTS: Settings = {
   capabilities: [],
   env: {},
   auto: { on: false, attention: ATTENTION, blueprints: [], repos: [] },
+  triggers: { ci: true, label: "factory", reviews: true },
 };
 
 const settingsPath = (state: string) => join(state, "settings.json");
@@ -73,6 +74,7 @@ export function checkSettings(raw: Partial<Settings> & { timeout?: number }): Se
     ...rest,
     tiers: { ...DEFAULTS.tiers, ...rest.tiers },
     auto: { ...DEFAULTS.auto, ...upgradeAuto(rest.auto) },
+    triggers: { ...DEFAULTS.triggers, ...rest.triggers },
   };
   for (const name of Object.keys(settings.agents))
     if (!AGENT_NAMES.includes(name))
