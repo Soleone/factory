@@ -24,7 +24,7 @@ import { Controls } from "@/Controls";
 import { GoalsView } from "@/GoalsView";
 import { Logo } from "@/Logo";
 import { PlanView } from "@/PlanView";
-import { QueueView } from "@/QueueView";
+import { QueueView, queued } from "@/QueueView";
 import { ResultsView } from "@/ResultsView";
 import { SettingsDialog } from "@/SettingsDialog";
 import { clock, runStart } from "@/format";
@@ -101,7 +101,7 @@ function Factory({
   const goals = snapshot.jobs.filter(
     (job) => job.goal && job.state !== "removed" && job.state !== "done",
   ).length;
-  const queued = snapshot.jobs.filter((job) => job.state === "queued").length;
+  const lined = Object.values(queued(snapshot.jobs)).flat().length;
 
   const run =
     on && status
@@ -165,7 +165,7 @@ function Factory({
                 )}
               </Tab>
               <Tab value="queue">
-                Queue <Count n={queued} />
+                Queue <Count n={lined} />
               </Tab>
               <Tab value="goals">
                 Goals <Count n={goals} />

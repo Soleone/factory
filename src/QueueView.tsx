@@ -69,28 +69,56 @@ const WORKER_DOT: Record<Worker["state"], string> = {
   stopped: "bg-destructive",
 };
 
-/** The free workers by pool, small and to the side: they leave it while they work a job. */
+/** What a worker can do now: ready only when it's idle without a job. */
+function slot(worker: Worker): string {
+  if (worker.job) return "busy";
+  return worker.state === "idle" ? "ready" : worker.state;
+}
+
+/**
+ * Each pool as a bar of its workers, busy ones filled, and the free ones listed:
+ * they leave the list while they work a job.
+ */
 function Workers({ status, settings }: { status: Status; settings: Settings }) {
   return (
-    <aside className="flex flex-col gap-4 lg:col-start-2">
+    <aside className="flex flex-col gap-5 lg:col-start-2">
       {status.pools.map((pool) => {
         const workers = status.workers.filter((worker) => worker.pool === pool.name);
         const free = workers.filter((worker) => !worker.job);
+        const counts = ["ready", "busy", "sleeping", "stopped"].flatMap((name) => {
+          const n = workers.filter((worker) => slot(worker) === name).length;
+          return n > 0 ? [`${n} ${name}`] : [];
+        });
         const pause =
           pool.stopped ??
           (pool.until
             ? `${pool.reserved ? "keeps its reserve" : "sleeps"} until ${clock(pool.until)}`
             : "");
+        const notes = [
+          pool.used !== undefined &&
+            `${pool.used}% of 5h used, keeps ${settings.reserves[pool.name] ?? 0}%`,
+          pool.limits > 0 &&
+            `hit its usage limit ${pool.limits}${status.limit === null ? "" : ` of ${status.limit}`} times`,
+        ].filter(Boolean);
         return (
           <section key={pool.name} className="flex flex-col gap-1.5 text-sm">
             <h2 className="flex items-baseline justify-between gap-2 font-medium text-muted-foreground">
-              {pool.name}
-              <span className="text-xs font-normal tabular-nums">
-                {free.length} of {workers.length} free · limits {pool.limits}/{status.limit ?? "∞"}
-                {pool.used !== undefined &&
-                  ` · ${pool.used}% of 5h, reserve ${settings.reserves[pool.name] ?? 0}%`}
+              <span className="whitespace-nowrap">{pool.name}</span>
+              <span className="text-right text-xs font-normal tabular-nums">
+                {counts.join(" · ")}
               </span>
             </h2>
+            <div className="flex gap-0.5">
+              {workers.map((worker) => (
+                <span
+                  key={worker.id}
+                  className={`h-1.5 flex-1 rounded-full ${worker.job ? WORKER_DOT.working : WORKER_DOT[worker.state]}`}
+                />
+              ))}
+            </div>
+            {notes.length > 0 && (
+              <p className="text-xs text-muted-foreground">{notes.join(" · ")}</p>
+            )}
             {pause && <p className="text-xs text-warning">{pause}</p>}
             <ul className="flex flex-col gap-1">
               {free.map((worker) => (
@@ -176,6 +204,23 @@ function Running({
   );
 }
 
+/** The queued jobs the Queue tab lists, so its count and its rows agree. */
+export function queued(jobs: Job[]) {
+  const byId = new Map(jobs.map((job) => [job.id, job]));
+  const waiting = jobs.filter((job) => job.state === "queued");
+  return {
+    picks: waiting.filter((job) => job.source === "pick"),
+    auto: waiting.filter((job) => job.source === "auto"),
+    // A goal's nodes wait while the goal does (for approval, or paused); milestones never run themselves.
+    fromGoals: waiting.filter(
+      (job) =>
+        job.of &&
+        byId.get(job.of)?.state === "queued" &&
+        !jobs.some((each) => each.parent === job.id),
+    ),
+  };
+}
+
 /** Glides to its new place when the order changes, and slides out to the right when it leaves the queue. */
 function Glide({ ref, children }: { ref?: Ref<HTMLDivElement>; children: ReactNode }) {
   return (
@@ -202,16 +247,7 @@ export function QueueView({
   const { jobs, status, on, settings } = snapshot;
   const [dragging, setDragging] = useState<number>();
   const byId = new Map(jobs.map((job) => [job.id, job]));
-  const picks = jobs.filter((job) => job.state === "queued" && job.source === "pick");
-  const auto = jobs.filter((job) => job.state === "queued" && job.source === "auto");
-  // A goal's nodes wait while the goal does (for approval, or paused); milestones never run themselves.
-  const fromGoals = jobs.filter(
-    (job) =>
-      job.state === "queued" &&
-      job.of &&
-      byId.get(job.of)?.state === "queued" &&
-      !jobs.some((each) => each.parent === job.id),
-  );
+  const { picks, auto, fromGoals } = queued(jobs);
   const details = (job: Job, removable: boolean) => (
     <TaskDetails
       item={job.item}
