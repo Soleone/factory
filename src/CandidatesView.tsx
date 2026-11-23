@@ -136,7 +136,10 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
   );
 
   return (
-    <div className="flex flex-col gap-4 pt-2">
+    <div className="flex flex-col gap-4">
+      <p className="text-sm text-muted-foreground">
+        Tasks that blueprints found in your repos. What you queue here runs before auto mode.
+      </p>
       <div className="flex flex-wrap items-center gap-2">
         <Input
           className="max-w-xs"
