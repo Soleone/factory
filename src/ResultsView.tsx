@@ -369,7 +369,8 @@ export function Result({
   holding?: number;
 }) {
   const [pending, setPending] = useState<"merge" | "rebase" | "close">();
-  const last = job.attempts.at(-1)!;
+  // A goal runs no attempt of its own, yet the Inbox lists its final PR.
+  const last = job.attempts.at(-1);
   const url = prUrl(job);
   const pr = url ? snapshot.prs[url] : undefined;
   const state = taskState(job, snapshot.prs);
@@ -380,7 +381,7 @@ export function Result({
     car?.step === "skipped"
       ? `The merge train skipped ${url}, "${itemTitle(job.item)}": ${car.reason}. Why, and what should I do about it?`
       : job.state === "failed"
-        ? `Job ${job.id}, "${itemTitle(job.item)}" (workwork ${job.item.id} in ${job.item.repo}), failed${last.error ? `: ${last.error}` : ""}. Its log is ${last.log}. Why did it fail, and should I retry it, pin another agent, or drop it?`
+        ? `Job ${job.id}, "${itemTitle(job.item)}" (workwork ${job.item.id} in ${job.item.repo}), failed${last?.error ? `: ${last.error}` : ""}.${last ? ` Its log is ${last.log}.` : ""} Why did it fail, and should I retry it, pin another agent, or drop it?`
         : undefined;
 
   async function changePr(action: NonNullable<typeof pending>) {
@@ -482,7 +483,9 @@ export function Result({
         <span className="flex min-w-0 items-center gap-2">
           <StatePill
             state={state}
-            label={state === "failed" && last.outcome !== "failed" ? last.outcome : undefined}
+            label={
+              state === "failed" && last && last.outcome !== "failed" ? last.outcome : undefined
+            }
           />
           <Facts job={job} last={last} pr={pr} url={url} car={car} />
           {holding ? (
@@ -531,7 +534,7 @@ function Facts({
   car,
 }: {
   job: Job;
-  last: Attempt;
+  last?: Attempt;
   pr?: Pr;
   url?: string;
   car?: TrainCar;
@@ -569,7 +572,7 @@ function Facts({
   // Free text goes last, so truncating it never hides who ran the job or when.
   const text =
     job.state === "failed"
-      ? last.error && (
+      ? last?.error && (
           <span key="error" className="text-destructive">
             {last.error.split("\n")[0]}
           </span>
@@ -577,7 +580,7 @@ function Facts({
       : !url && job.state === "done" && (result?.text ?? "nothing to change");
   return (
     <span className="min-w-0 truncate">
-      {[...facts, agentName(last.agent), clock(last.end), text]
+      {[...facts, last && agentName(last.agent), last && clock(last.end), text]
         .filter(Boolean)
         .map((fact, index) => (
           <span key={index}>
