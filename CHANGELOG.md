@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.5.0](https://github.com/Soleone/factory/compare/v0.4.3...v0.5.0) (2026-11-23)
+
+### Features
+
+* **add-work:** one Add work dialog for jobs, goals, candidates and blueprints ([80046ef](https://github.com/Soleone/factory/commit/80046efaf29e10e670b64d48d850af99ae256e6c))
+* **candidates:** filters and blueprints stay put while the list scrolls ([1b53a65](https://github.com/Soleone/factory/commit/1b53a6500487e25f0da425a18a0a5face90808e6))
+* **candidates:** one line on what candidates are, like the other Add work views ([b5ff400](https://github.com/Soleone/factory/commit/b5ff40036c900fc9eb4d0d2b895c5b5414d450d7))
+* **inbox:** one Inbox for what waits on you, and four tabs ([6b33329](https://github.com/Soleone/factory/commit/6b33329601022a46f8524e368f3a1f65365e2578))
+* **queue:** drag your picks to reorder them, like tier presets ([57d9eb9](https://github.com/Soleone/factory/commit/57d9eb9f86d2d9b9375bbab9b2955d306f0b875b))
+* **tabs:** g then i, q, g or r jumps to a tab ([b6577d3](https://github.com/Soleone/factory/commit/b6577d3d7345f9cbf02ebf2c61ef7bbd3f13b93a))
+* **triggers:** CI going red, labeled issues and PR feedback queue jobs ([739edf1](https://github.com/Soleone/factory/commit/739edf1b46cceaf27df1d085f5cd223176568b6e))
+
+### Bug Fixes
+
+* **answers:** an answer to an assumption goes to that assumption ([5027420](https://github.com/Soleone/factory/commit/5027420e6ded03cf810bf148453424c260154868))
+* **dialogs:** no sideways shift when a dialog starts to scroll ([265a657](https://github.com/Soleone/factory/commit/265a65727fce1a57d4ee20cc978de10dcd65b344))
+* **usage-ring:** keep the normal pointer over the number ([3ed08b2](https://github.com/Soleone/factory/commit/3ed08b2b9666279babf1b75e67c619b81b8a2906))
+
 ## [0.4.3](https://github.com/Soleone/factory/compare/v0.4.2...v0.4.3) (2026-11-23)
 
 ### Bug Fixes
