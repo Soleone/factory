@@ -18,6 +18,7 @@ type PiMessage =
       errorMessage?: string;
       provider?: string;
       model?: string;
+      usage?: { totalTokens: number };
     }
   | { role: "toolResult"; toolCallId: string; content: Part[]; isError: boolean }
   | { role: "system" | "bashExecution" | "custom" };
@@ -126,6 +127,18 @@ function stream(content: Part[], event: StreamEvent): Part[] {
     next[index] = { type: "toolCall", id: event.id, name: event.toolName, arguments: {} };
   else if (event.type === "toolcall_end" && "toolCall" in event) next[index] = event.toolCall;
   return next;
+}
+
+/** Tokens the context held after the last reply that finished, as Pi's footer counts them. */
+export function contextTokens({ messages }: Transcript): number | undefined {
+  const last = messages.findLast(
+    (message) =>
+      message.role === "assistant" &&
+      message.stopReason !== "error" &&
+      message.stopReason !== "aborted" &&
+      message.usage,
+  );
+  return last?.role === "assistant" ? last.usage?.totalTokens : undefined;
 }
 
 export function agentMessages({ messages, busy }: Transcript): AgentMessage[] {

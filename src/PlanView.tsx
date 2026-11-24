@@ -5,7 +5,7 @@ import type { ChatEntry } from "@/backend/chat.ts";
 import type { Snapshot } from "@/backend/types.ts";
 import { AgentPanel, AgentSessionSwitcher, type AgentReferences } from "@/components/soleone/agent";
 import { agentName, itemTitle } from "@/format";
-import { agentMessages, applyRecord, emptyTranscript } from "@/pi";
+import { agentMessages, applyRecord, contextTokens, emptyTranscript } from "@/pi";
 import { ChatAgentFields } from "@/RunFields";
 import { StateIcon, taskState } from "@/TaskDetails";
 
@@ -104,6 +104,7 @@ export function PlanView({
         onPromptChange={onPromptChange}
         busy={transcript.busy}
         model={transcript.model}
+        contextTokens={contextTokens(transcript)}
         modelPicker={
           <>
             <ChatAgentFields
