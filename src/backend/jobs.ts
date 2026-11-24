@@ -31,7 +31,7 @@ export type Event = { at: string } & (
   | { type: "remove" | "requeue" | "retry" | "merged" | "unblock"; id: string }
   | { type: "move"; id: string; index: number }
   | { type: "start"; id: string; agent: string; preset?: string }
-  | { type: "attempt"; id: string; attempt: Attempt }
+  | { type: "attempt"; id: string; attempt: Attempt; startupRejected?: true }
   | { type: "note"; id: string; note: NoteBody }
   /** The open attempt waits: for the user's answer, its pool's limit to reset, or to run alone. */
   | { type: "pause"; id: string; reason: "asked" | "limited" | "alone" }
@@ -140,6 +140,8 @@ export function readEvents(state: string): Event[] {
 export function replay(events: Event[]): Job[] {
   const jobs = new Map<string, Job>();
   const failures = new Map<string, number>();
+  // A start assigns an agent for normal retries. A rejected startup undoes only that assignment.
+  const beforeStart = new Map<string, string | undefined>();
   // Picks keep the order the user gave them; the rest keep the order they were added in.
   const picks: Job[] = [];
   const others: Job[] = [];
@@ -169,6 +171,7 @@ export function replay(events: Event[]): Job[] {
       picks.splice(before ? picks.indexOf(before) : picks.length, 0, job);
     }
     if (event.type === "start") {
+      if (!job.open) beforeStart.set(job.id, job.agent);
       job.state = "running";
       job.blocked = undefined;
       job.open = true;
@@ -215,6 +218,8 @@ export function replay(events: Event[]): Job[] {
     if (event.type === "attempt") {
       job.attempts.push(event.attempt);
       job.open = false;
+      if (event.startupRejected) job.agent = beforeStart.get(job.id);
+      beforeStart.delete(job.id);
       const { outcome } = event.attempt;
       const number = job.attempts.length;
       const said = job.notes.filter((note) => note.attempt === number);

@@ -34,8 +34,11 @@ type Record_ = {
   session_id?: string;
   is_error?: boolean;
   result?: string;
+  usage?: Usage;
+  rate_limit_info?: { status?: string };
   message?: {
     id?: string;
+    model?: string;
     role?: string;
     content?: Block[] | string;
     usage?: Usage;
@@ -51,18 +54,55 @@ type Record_ = {
 /** Folds lines of either runner's stream into facts; lines that aren't JSON (stderr) are skipped. */
 export function readStream(text: string, facts: Facts = noFacts()): Facts {
   const seen = new Set<string>();
-  for (const line of text.split("\n")) {
-    if (!line.startsWith("{")) continue;
-    let record: Record_;
-    try {
-      record = JSON.parse(line);
-    } catch {
-      // A line still being written.
+  for (const record of records(text)) fold(record, facts, seen);
+  return facts;
+}
+
+/** Claude can emit a local, synthetic assistant error instead of ever starting a model turn. */
+export function claudeStartupRejected(text: string, error: string): boolean {
+  const zero = (usage?: Usage) =>
+    usage?.input_tokens === 0 &&
+    usage.output_tokens === 0 &&
+    usage.cache_read_input_tokens === 0 &&
+    usage.cache_creation_input_tokens === 0;
+  let rejected = false;
+  let synthetic = false;
+  let ended = false;
+  for (const { type, subtype, message, rate_limit_info, is_error, result, usage } of records(
+    text,
+  )) {
+    if (ended) return false;
+    if (type === "system" && subtype === "init") continue;
+    if (type === "rate_limit_event") {
+      rejected ||= rate_limit_info?.status === "rejected";
       continue;
     }
-    fold(record, facts, seen);
+    if (type === "assistant" && message?.model === "<synthetic>" && zero(message.usage)) {
+      const content = blocks(message.content);
+      if (content.length !== 1 || content[0].type !== "text" || content[0].text !== error)
+        return false;
+      synthetic = true;
+      continue;
+    }
+    if (type === "result" && is_error && result === error && (!usage || zero(usage))) {
+      ended = true;
+      continue;
+    }
+    // A real assistant message, tool result, or any unrecognized event may be progress.
+    return false;
   }
-  return facts;
+  return rejected && synthetic && ended;
+}
+
+function* records(text: string): Generator<Record_> {
+  for (const line of text.split("\n")) {
+    if (!line.startsWith("{")) continue;
+    try {
+      yield JSON.parse(line);
+    } catch {
+      // A line still being written.
+    }
+  }
 }
 
 function fold(record: Record_, facts: Facts, seen: Set<string>): void {
