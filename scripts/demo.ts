@@ -101,7 +101,7 @@ function demoGoal(at: string, run: string): Job[] {
     {
       ...BLANK,
       id: "goal",
-      item: { ...item("goal/export", "Export to every format"), blueprint: "goal" },
+      item: item("goal/export", "Export to every format"),
       source: "goal",
       added: at,
       state: "blocked",
