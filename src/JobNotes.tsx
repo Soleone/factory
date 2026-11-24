@@ -98,7 +98,7 @@ export function Reply({
   const [sending, setSending] = useState(false);
   return (
     <form
-      className="flex max-w-prose items-center gap-1.5 rounded-xl border p-0.5 pl-3.5 transition-colors focus-within:border-warning/60"
+      className="flex max-w-prose items-center gap-1.5 rounded-xl border p-1 pl-3.5 transition-colors focus-within:border-warning/60"
       onSubmit={async (event) => {
         event.preventDefault();
         setSending(true);
