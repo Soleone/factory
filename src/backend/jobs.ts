@@ -2,10 +2,11 @@ import { randomBytes } from "node:crypto";
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { workworkBranch } from "./review.ts";
-import { LEVELS, output } from "./state.ts";
+import { ATTENTION, output } from "./state.ts";
 import {
   chains,
   itemKey,
+  openAssumptions,
   prUrl,
   PLANNING,
   TIERS,
@@ -14,8 +15,11 @@ import {
   type Item,
   type Job,
   type Note,
+  type Pin,
   type Settings,
   type Tier,
+  reviewTier,
+  upgradeItem,
 } from "./types.ts";
 
 /**
@@ -29,11 +33,13 @@ export type Event = { at: string } & (
   | { type: "start"; id: string; agent: string; preset?: string }
   | { type: "attempt"; id: string; attempt: Attempt }
   | { type: "note"; id: string; note: NoteBody }
-  /** The open attempt waits: for the user's answer, or for its pool's limit to reset. */
-  | { type: "pause"; id: string; reason: "asked" | "limited" }
+  /** The open attempt waits: for the user's answer, its pool's limit to reset, or to run alone. */
+  | { type: "pause"; id: string; reason: "asked" | "limited" | "alone" }
   | { type: "block"; id: string; reason: Blocked; why?: string }
   /** A replan's change to a job that hasn't started. */
   | { type: "update"; id: string; change: Change }
+  /** What a waiting job runs on now, replacing its old pin. */
+  | { type: "pin"; id: string; pin: Pin }
   /** The user checked a need it couldn't verify; no need: all of them. */
   | { type: "verify"; id: string; need?: string }
 );
@@ -54,6 +60,7 @@ export type NewJob = Pick<Job, "id" | "item" | "source"> &
       | "gates"
       | "touches"
       | "needs"
+      | "machine"
       | "goal"
       | "key"
       | "checkpoint"
@@ -75,6 +82,7 @@ export type Change = Partial<
     | "gates"
     | "touches"
     | "needs"
+    | "machine"
     | "checkpoint"
     | "review"
     | "goal"
@@ -100,6 +108,7 @@ type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K>
 
 const fresh = (job: NewJob, at: string): Job => ({
   ...job,
+  item: upgradeItem(job.item),
   after: typeof job.after === "string" ? [job.after] : (job.after ?? []),
   gates: job.gates ?? [],
   needs: job.needs ?? [],
@@ -117,12 +126,15 @@ const fresh = (job: NewJob, at: string): Job => ({
  * goal and longest remaining chain, then auto.
  */
 export function readJobs(state: string): Job[] {
+  return replay(readEvents(state));
+}
+
+export function readEvents(state: string): Event[] {
   if (!existsSync(path(state))) return [];
-  const events: Event[] = readFileSync(path(state), "utf8")
+  return readFileSync(path(state), "utf8")
     .split("\n")
     .filter(Boolean)
     .map((line) => JSON.parse(line));
-  return replay(events);
 }
 
 export function replay(events: Event[]): Job[] {
@@ -176,7 +188,16 @@ export function replay(events: Event[]): Job[] {
       job.blocked = undefined;
       job.why = undefined;
     }
-    if (event.type === "update") Object.assign(job, event.change);
+    if (event.type === "pin") {
+      for (const key of PIN_KEYS) delete job[key];
+      Object.assign(job, event.pin);
+    }
+    if (event.type === "update")
+      Object.assign(
+        job,
+        event.change,
+        event.change.item && { item: upgradeItem(event.change.item) },
+      );
     if (event.type === "verify")
       job.unverified = event.need ? job.unverified.filter((need) => need !== event.need) : [];
     if (event.type === "note") {
@@ -185,6 +206,7 @@ export function replay(events: Event[]): Job[] {
       // attempt (old logs) belong to the last one.
       const attempt = job.attempts.length + (job.open ? 1 : 0);
       job.notes.push({ ...event.note, at: event.at, attempt });
+      if (kind === "alone") job.machine = true;
       if (kind === "answer" && event.note.re === undefined && job.state === "blocked") {
         job.state = "queued";
         job.blocked = undefined;
@@ -205,7 +227,7 @@ export function replay(events: Event[]): Job[] {
       )?.unverified;
       const lacking = [...(unverified ?? []), ...(event.attempt.missing ?? [])];
       // A plan has nothing to check by hand; what its writer was unsure of stays in its result.
-      const planning = (PLANNING as readonly string[]).includes(job.item.play);
+      const planning = (PLANNING as readonly string[]).includes(job.item.blueprint);
       if (outcome === "done" && lacking.length && !planning)
         job.unverified = [...new Set([...job.unverified, ...lacking])];
       if (asked) {
@@ -313,10 +335,23 @@ function ordered(others: Job[], jobs: Map<string, Job>): Job[] {
 }
 
 /**
- * Whether a job may start now, whoever takes it: queued, not a goal or a group, everything it comes
- * after done, no goal or group above it waiting, and no running job that may touch the same files.
+ * Whether a job may start now, whoever takes it: it's due, and starting it shares the machine
+ * safely. A machine job runs alone; while one is due, nothing else starts, so it gets its turn.
  */
 export function ready(job: Job, jobs: Job[]): boolean {
+  if (!due(job, jobs)) return false;
+  const running = jobs.filter((other) => other.state === "running");
+  if (running.some((other) => other.machine)) return false;
+  if (job.machine) return running.length === 0;
+  if (jobs.some((other) => other.machine && other.id !== job.id && due(other, jobs))) return false;
+  return !running.some((other) => other.item.repo === job.item.repo && overlap(job, other));
+}
+
+/**
+ * Whether a job's turn has come, setting aside what else runs: queued, not a goal or a group,
+ * everything it comes after done, and no goal or group above it waiting.
+ */
+function due(job: Job, jobs: Job[]): boolean {
   if (job.state !== "queued" || job.goal) return false;
   const byId = new Map(jobs.map((each) => [each.id, each]));
   if (jobs.some((each) => each.parent === job.id && each.state !== "removed")) return false;
@@ -331,10 +366,7 @@ export function ready(job: Job, jobs: Job[]): boolean {
     if (!above.goal && !above.after.every((id) => byId.get(id)?.state === "done")) return false;
     up = above.parent ?? (above.goal ? undefined : above.of);
   }
-  return !jobs.some(
-    (other) =>
-      other.state === "running" && other.item.repo === job.item.repo && overlap(job, other),
-  );
+  return true;
 }
 
 /**
@@ -358,7 +390,7 @@ export function nextJob(jobs: Job[], agent: string): Job | undefined {
 }
 
 const ACTIVE: Job["state"][] = ["queued", "running", "blocked"];
-const sameWork = (item: Item) => `${itemKey(item)} ${item.play} ${item.title}`;
+const sameWork = (item: Item) => `${itemKey(item)} ${item.blueprint} ${item.title}`;
 
 /** Queues the items, skipping those already in the queue; returns the jobs it added. */
 export function addJobs(
@@ -389,7 +421,14 @@ export function addJob(state: string, job: NewJob, at = new Date().toISOString()
 /** A job of the user's own, from a prompt for a tier, without workwork. */
 export function addOwnJob(
   state: string,
-  own: { repo: string; prompt: string; tier: Tier; title?: string; after?: string[] },
+  own: {
+    repo: string;
+    prompt: string;
+    tier: Tier;
+    title?: string;
+    after?: string[];
+    machine?: boolean;
+  },
 ): Job {
   if (!TIERS.includes(own.tier)) throw new Error(`a tier is ${TIERS.join(", ")}, not ${own.tier}`);
   const first = own.prompt.split("\n").find((line) => line.trim());
@@ -401,14 +440,15 @@ export function addOwnJob(
       repo: own.repo,
       label: basename(own.repo),
       id: `own-${Date.now()}`,
-      play: "own",
-      level: "decide",
+      blueprint: "own",
+      attention: "decide",
       title,
     },
     source: "pick",
     tier: own.tier,
     prompt: own.prompt,
     after: own.after,
+    machine: own.machine,
   });
 }
 
@@ -418,7 +458,11 @@ export function addOwnJob(
  */
 export function queueConflicts(state: string, id: string, url: string, files: string[]): void {
   const job = readJobs(state).find((job) => job.id === id)!;
-  const item = { ...job.item, play: "conflicts", title: `Resolve conflicts: ${job.item.title}` };
+  const item = {
+    ...job.item,
+    blueprint: "conflicts",
+    title: `Resolve conflicts: ${job.item.title}`,
+  };
   addJobs(state, [item], "pick", { prompt: conflictsPrompt(url, files) });
 }
 
@@ -439,17 +483,19 @@ End your reply with the pull request's URL.
 `;
 
 /**
- * Queues a review of the job's PR by another agent, once the job is done. Like a conflicts job it
- * keeps the job's workwork id, so it finds and links the same PR.
+ * Queues a review of the job's PR once the job is done, by another role than the author's, or by
+ * the agent given. Like a conflicts job it keeps the job's workwork id, so it finds and links the
+ * same PR. What it finds becomes a fix on that PR (queueReviewFix).
  */
-export function queueReview(state: string, id: string, agent: string): Job | undefined {
+export function queueReview(state: string, id: string, agent?: string): Job | undefined {
   const job = find(state, id, ...ACTIVE, "done");
-  if (job.agent === agent)
+  if (agent && job.agent === agent)
     throw new Error(`job ${id} is ${agent}'s own; pick another agent to review it`);
   const branch = workworkBranch(job.item);
-  const item = { ...job.item, play: "review", title: `Review: ${job.item.title}` };
+  const item = { ...job.item, blueprint: "review", title: `Review: ${job.item.title}` };
+  const by = agent ? { agent } : { tier: reviewTier(job) };
   const prompt = reviewPrompt(branch, job.agent);
-  return addJobs(state, [item], "pick", { agent, prompt, after: [id] })[0];
+  return addJobs(state, [item], "pick", { ...by, prompt, after: [id], branchOf: id })[0];
 }
 
 const reviewPrompt = (
@@ -460,11 +506,42 @@ const reviewPrompt = (
 1. Check it out with \`gh pr checkout ${branch}\`, run the repo's checks and tests, and read the change against what its description says it does.
 2. Look for bugs, missed cases and changes nobody asked for. Skip style the linters already cover.
 3. Post what you found as one comment with \`gh pr comment ${branch} --body-file -\`: each finding with file, line and why it matters, or that you found nothing. Don't push, approve or merge.
+4. Report with \`factory result "<summary>"\`, adding \`--followup "<finding: file, line, why it matters>"\` for each finding worth fixing; factory queues a fix for them on the same branch. No findings: no --followup.
 
 If there's no such pull request, say so and end.
 
 End your reply with the pull request's URL.
 `;
+
+/**
+ * Queues the fix for what a done review of a job's PR found, on the same PR, by the author's role.
+ * A review that found nothing queues nothing.
+ */
+export function queueReviewFix(state: string, id: string): Job | undefined {
+  const jobs = readJobs(state);
+  const review = jobs.find((job) => job.id === id)!;
+  const reviewed = jobs.find((job) => job.id === review.branchOf);
+  if (review.of || review.item.blueprint !== "review" || !reviewed) return undefined;
+  const findings = review.notes.findLast((note) => note.kind === "result")?.followups ?? [];
+  if (review.state !== "done" || findings.length === 0) return undefined;
+  const item = {
+    ...reviewed.item,
+    blueprint: "fix",
+    title: `Fix review findings: ${reviewed.item.title}`,
+  };
+  const url = prUrl(review) ?? prUrl(reviewed);
+  const prompt = `A review of pull request ${url ?? `from branch \`${workworkBranch(reviewed.item)}\``} found:
+
+${findings.map((each) => `- ${each}`).join("\n")}
+
+1. Check out its branch with \`gh pr checkout ${url ?? workworkBranch(reviewed.item)}\`.
+2. Fix each finding, or leave one that's wrong and say why. Run the repo's checks and tests, and push to the same branch. Don't open a new pull request.
+3. Reply on the pull request with what changed.
+
+End your reply with the pull request's URL.
+`;
+  return addJobs(state, [item], "pick", { tier: reviewed.tier, prompt, branchOf: reviewed.id })[0];
+}
 
 /**
  * Queues a task an agent reported as a follow-up of its job. Its own id, so the PR of the job it
@@ -474,7 +551,7 @@ export function queueFollowup(state: string, id: string, task: string): Job | un
   const job = find(state, id, ...ACTIVE, "done", "failed");
   if (!job.notes.some((note) => note.followups?.includes(task)))
     throw new Error(`job ${id} reported no follow-up "${task}"`);
-  const item = { ...job.item, id: `${job.item.id}+followup`, play: "followup", title: task };
+  const item = { ...job.item, id: `${job.item.id}+followup`, blueprint: "followup", title: task };
   const url = prUrl(job);
   const prompt = `${task}
 
@@ -485,9 +562,24 @@ This came up while an agent worked on "${job.item.title}"${url ? ` (${url})` : "
 
 function find(state: string, id: string, ...states: Job["state"][]): Job {
   const job = readJobs(state).find((job) => job.id === id);
-  if (!job) throw new Error(`no job ${id}`);
-  if (!states.includes(job.state)) throw new Error(`job ${id} is ${job.state}`);
+  if (!job) throw new Error(`Job ${id} was not found. Check the job ID and try again.`);
+  if (!states.includes(job.state))
+    throw new Error(
+      `Job ${id} is ${job.state}. Try again with a job in an allowed state: ${states.join(", ")}.`,
+    );
   return job;
+}
+
+const PIN_KEYS = ["agent", "model", "effort", "preset", "tier"] as const;
+
+/** The user changes what a waiting job runs on: a tier, a worker, or neither for any free worker. */
+export function pinJob(state: string, id: string, pin: Pin): void {
+  const job = find(state, id, "queued");
+  if (job.open || job.of) throw new Error(`job ${id} has started or belongs to a goal`);
+  if (pin.tier && !TIERS.includes(pin.tier))
+    throw new Error(`a tier is ${TIERS.join(", ")}, not ${pin.tier}`);
+  const kept = Object.fromEntries(PIN_KEYS.flatMap((key) => (pin[key] ? [[key, pin[key]]] : [])));
+  append(state, { at: new Date().toISOString(), type: "pin", id, pin: kept });
 }
 
 /** Takes a job out of the queue or the results, and deletes the branches its attempts kept. */
@@ -518,7 +610,7 @@ export function moveJob(state: string, id: string, index: number): void {
 }
 
 /** What agents say while they work; the rest come from the user, the merge train and factory. */
-const AGENT_KINDS: Note["kind"][] = ["note", "ask", "assume", "result", "step"];
+const AGENT_KINDS: Note["kind"][] = ["note", "ask", "assume", "result", "step", "alone"];
 
 /** An agent's note on the job it works, what the merge train did with its PR, or factory's own. */
 export function addNote(state: string, id: string, note: NoteBody): void {
@@ -528,25 +620,17 @@ export function addNote(state: string, id: string, note: NoteBody): void {
   append(state, { at: new Date().toISOString(), type: "note", id, note });
 }
 
-/** Assumptions the user hasn't answered yet. */
-export const openAssumptions = (job: Job) =>
-  job.notes.flatMap((note, index) =>
-    note.kind === "assume" &&
-    !job.notes.some((other) => other.kind === "answer" && other.re === index)
-      ? [{ ...note, index }]
-      : [],
-  );
-
 const FINE = /^\s*(fine|ok|okay|yes|good|agreed)[.!]?\s*$/i;
 
 /**
- * The user's answer: to the question a blocked job asked, which queues it again, or else to its
- * oldest open assumption. An answer to an assumption that isn't "fine" queues a job after it, in its
- * tier, to change what was assumed; returns that job.
+ * The user's answer: to the assumption at index `re` among the job's notes, or else to the question
+ * a blocked job asked, which queues it again, or else to its oldest open assumption. An answer to an
+ * assumption that isn't "fine" queues a job after it, in its tier, to change what was assumed;
+ * returns that job.
  */
-export function answer(state: string, id: string, text: string): Job | undefined {
+export function answer(state: string, id: string, text: string, re?: number): Job | undefined {
   const job = find(state, id, "queued", "running", "blocked", "done", "failed");
-  if (job.state === "blocked" && job.blocked === "asked") {
+  if (re === undefined && job.state === "blocked" && job.blocked === "asked") {
     append(state, {
       at: new Date().toISOString(),
       type: "note",
@@ -555,8 +639,13 @@ export function answer(state: string, id: string, text: string): Job | undefined
     });
     return undefined;
   }
-  const assumption = openAssumptions(job)[0];
-  if (!assumption) throw new Error(`job ${id} has no question or assumption to answer`);
+  const assumption = openAssumptions(job).find((note) => re === undefined || note.index === re);
+  if (!assumption)
+    throw new Error(
+      re === undefined
+        ? `job ${id} has no question or assumption to answer`
+        : `job ${id} has no open assumption ${re}`,
+    );
   append(state, {
     at: new Date().toISOString(),
     type: "note",
@@ -577,7 +666,7 @@ Change the work to follow the answer. ${prUrl(job) ? `Its pull request is ${prUr
     item: {
       ...job.item,
       id: `${job.item.id}+answer`,
-      play: "answer",
+      blueprint: "answer",
       title: `Follow the answer: ${job.item.title}`,
     },
     source: job.of ? "goal" : "pick",
@@ -601,11 +690,11 @@ export function endJob(state: string, id: string, attempt: Attempt): void {
   append(state, { at: new Date().toISOString(), type: "attempt", id, attempt });
 }
 
-/** Cheapest attention first, and within a level one item per repo in turn so no repo takes the night. */
-export function order(items: Item[], levels: string[]): Item[] {
-  return LEVELS.filter((level) => levels.includes(level)).flatMap((level) => {
+/** Cheapest attention first, and within each one item per repo in turn so no repo takes the night. */
+export function order(items: Item[], wanted: string[]): Item[] {
+  return ATTENTION.filter((attention) => wanted.includes(attention)).flatMap((attention) => {
     const byRepo = new Map<string, Item[]>();
-    for (const item of items.filter((item) => item.level === level))
+    for (const item of items.filter((item) => item.attention === attention))
       byRepo.set(item.repo, [...(byRepo.get(item.repo) ?? []), item]);
     const queues = [...byRepo.values()];
     const turns: Item[] = [];
@@ -626,8 +715,8 @@ export function autoPicks(
   const wanted = candidates.filter(
     (item) =>
       !seen.has(itemKey(item)) &&
-      (auto.plays.length === 0 || auto.plays.includes(item.play)) &&
+      (auto.blueprints.length === 0 || auto.blueprints.includes(item.blueprint)) &&
       (auto.repos.length === 0 || auto.repos.includes(item.repo)),
   );
-  return order(wanted, auto.levels).slice(0, count);
+  return order(wanted, auto.attention).slice(0, count);
 }

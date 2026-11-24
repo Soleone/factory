@@ -36,6 +36,8 @@
   --color-primary-foreground: var(--primary-foreground);
   --color-primary: var(--primary);
   --color-warning: var(--warning);
+  /* Claude's brand orange, the same in both themes, as on its usage ring. */
+  --color-claude: #d97757;
   --color-popover-foreground: var(--popover-foreground);
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
@@ -49,11 +51,6 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
-}
-
-/* App roles on top of the theme's semantic tokens. */
-:root {
-  --warning: var(--om-yellow);
 }
 
 @layer base {
@@ -71,6 +68,10 @@
   button:not(:disabled),
   [role="button"]:not(:disabled) {
     cursor: pointer;
+  }
+  /* Keep the scrollbar's room even when the page doesn't scroll, so switching views doesn't shift the layout sideways. */
+  html {
+    scrollbar-gutter: stable;
   }
 }
 
@@ -113,21 +114,6 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .logo-working .logo-window {
-    animation: none;
-  }
-}
-
-/* Half a turn looks the same as none on the refresh arrows, so the icon can snap back after it. */
-.refresh-turn {
-  animation: refresh-turn 0.7s cubic-bezier(0.34, 1.8, 0.64, 1);
-}
-@keyframes refresh-turn {
-  to {
-    rotate: 180deg;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .refresh-turn {
     animation: none;
   }
 }

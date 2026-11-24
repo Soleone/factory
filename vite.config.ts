@@ -21,6 +21,13 @@ const noBaseUi = {
   message:
     "Use a local high-level component from @/components/ui instead of importing Base UI primitives directly.",
 };
+/** Centered dialogs jump when their content changes height; the variant keeps the top edge still. */
+const noCenteredDialog = {
+  name: "@/components/ui/dialog",
+  importNames: ["DialogContent"],
+  message:
+    "Use AnchoredDialogContent from @/components/variants/dialog, so the dialog's top stays put.",
+};
 const noCva = {
   group: ["class-variance-authority"],
   message:
@@ -77,7 +84,10 @@ export default defineConfig(({ mode }) => ({
       "shadcn/no-arbitrary-values": ["error", { allow: ["layout"] }],
       "shadcn/no-inline-styles": "error",
       "shadcn/no-unknown-classes": "error",
-      "no-restricted-imports": ["error", { patterns: [noBaseUi, noCva] }],
+      "no-restricted-imports": [
+        "error",
+        { paths: [noCenteredDialog], patterns: [noBaseUi, noCva] },
+      ],
     },
     overrides: [
       {

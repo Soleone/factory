@@ -1,31 +1,31 @@
 import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
-import { RotateCcw } from "lucide-react";
 import { AgentDialog } from "@/AgentDialog";
 import { api } from "@/api";
-import { AgentPanel } from "@/components/soleone/agent";
-import { Button } from "@/components/ui/button";
+import type { ChatEntry } from "@/backend/chat.ts";
+import type { Snapshot } from "@/backend/types.ts";
+import { AgentPanel, AgentSessionSwitcher } from "@/components/soleone/agent";
 import { agentName } from "@/format";
 import { agentMessages, applyRecord, emptyTranscript } from "@/pi";
+import { ChatAgentFields } from "@/RunFields";
 
-/** A chat about what to queue; the agent adds jobs through the factory CLI once you agree. */
-export function PlanView({
-  agent,
-  prompt,
-  onPromptChange,
-}: {
-  agent: string;
-  prompt: string;
-  onPromptChange: Dispatch<SetStateAction<string>>;
-}) {
+/** The Live Agent's chats and the current one's transcript, as serve streams them. */
+export function useChat() {
   const [transcript, setTranscript] = useState(emptyTranscript);
+  const [chats, setChats] = useState<ChatEntry[]>([]);
+  const [current, setCurrent] = useState<string | null>(null);
   const [error, setError] = useState<string>();
 
   useEffect(() => {
     const events = new EventSource("/api/chat");
-    // On every (re)connect the server replays the conversation so far.
+    // On every (re)connect the server replays the list and the current chat so far.
     events.onopen = () => setTranscript(emptyTranscript);
-    events.onmessage = (event) =>
-      setTranscript((current) => applyRecord(current, JSON.parse(event.data)));
+    events.onmessage = (event) => {
+      const record = JSON.parse(event.data);
+      if (record.type === "chats") {
+        setChats(record.chats);
+        setCurrent(record.current ?? null);
+      } else setTranscript((transcript) => applyRecord(transcript, record));
+    };
     return () => events.close();
   }, []);
 
@@ -40,23 +40,52 @@ export function PlanView({
     }
   }
 
+  return { transcript, chats, current, error, run };
+}
+
+export type Chat = ReturnType<typeof useChat>;
+
+/** The title switcher in the agent's header. Opening another chat ends a reply still running. */
+export function ChatSwitcher({ chat }: { chat: Chat }) {
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3">
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-sm text-muted-foreground">
-          {agentName(agent)} looks through the candidates and queues jobs once you agree. It never
-          turns the factory on.
-        </p>
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={transcript.messages.length === 0}
-          onClick={() => void run(api.resetChat)}
-        >
-          <RotateCcw />
-          New chat
-        </Button>
-      </div>
+    <AgentSessionSwitcher
+      sessions={chat.chats.map((entry) => ({
+        id: entry.id,
+        title: entry.title,
+        detail: agentName(entry.agent),
+        lastActive: entry.lastActive,
+        busy: entry.id === chat.current && chat.transcript.busy,
+      }))}
+      current={chat.current}
+      onSelect={(id) => void chat.run(() => api.openChat(id))}
+      onNew={() => void chat.run(api.newChat)}
+    />
+  );
+}
+
+const suggestions = [
+  "Pick five auto jobs for tonight that won't conflict",
+  "What failed overnight, and is any of it worth retrying?",
+  "Review the open PRs and say which you'd merge",
+];
+
+/** A chat about what to queue; the agent adds jobs through the factory CLI once you agree. */
+export function PlanView({
+  chat,
+  settings,
+  prompt,
+  onPromptChange,
+}: {
+  chat: Chat;
+  settings: Snapshot["settings"];
+  prompt: string;
+  onPromptChange: Dispatch<SetStateAction<string>>;
+}) {
+  const { transcript, run } = chat;
+  const agent = chat.chats.find((entry) => entry.id === chat.current)?.agent ?? settings.chat.agent;
+
+  return (
+    <>
       {transcript.dialogs[0] && (
         <AgentDialog
           key={transcript.dialogs[0].id}
@@ -72,13 +101,25 @@ export function PlanView({
         onPromptChange={onPromptChange}
         busy={transcript.busy}
         model={transcript.model}
-        error={error ?? transcript.error}
+        modelPicker={
+          <>
+            <ChatAgentFields
+              value={settings.chat}
+              onChange={(next) => void run(() => api.saveSettings({ ...settings, chat: next }))}
+            />
+            <p className="text-xs text-muted-foreground">
+              Applies from the next message. Another agent starts a new chat.
+            </p>
+          </>
+        }
+        error={chat.error ?? transcript.error}
         placeholder="What should the factory work on next?"
         emptyTitle="Plan the queue"
-        emptyDescription="For example: pick five auto jobs for tonight that won't conflict."
+        emptyDescription={`${agentName(agent)} looks through the candidates and queues jobs once you agree. It never turns the factory on.`}
+        suggestions={suggestions}
         onSend={(text) => run(() => api.chat(text))}
         onStop={() => void run(api.abortChat)}
       />
-    </div>
+    </>
   );
 }

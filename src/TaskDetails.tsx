@@ -3,6 +3,7 @@ import {
   CircleDashedIcon,
   CircleHelpIcon,
   CircleIcon,
+  CircleMinusIcon,
   CircleXIcon,
   GitMergeIcon,
   GitPullRequestClosedIcon,
@@ -12,35 +13,31 @@ import {
 import Markdown from "markdown-to-jsx/react";
 import { useEffect, useState, type ReactNode } from "react";
 import { api, type Act } from "@/api";
-import { dayOf, jobEntries, StepNumber } from "@/ActivityView";
 import { prUrl, type Item, type Job, type Snapshot } from "@/backend/types.ts";
 import {
   Dialog,
-  DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { AnchoredDialogContent, TabbedDialogContent } from "@/components/variants/dialog";
 import { Spinner } from "@/components/ui/spinner";
-import { clock, minutesSince, repoName } from "@/format";
-import { AttemptFile } from "@/AttemptFile";
-import { Answer, Outcome } from "@/JobNotes";
+import { repoName } from "@/format";
+import { JobDetails } from "@/JobDetails";
+import { Reply } from "@/JobNotes";
 import { MARKDOWN } from "@/PrReview";
-import { PrLine, TrainLine } from "@/ResultsView";
 
 /** From `workwork --help`. */
-const LEVELS: Record<string, string> = {
-  auto: "a check defines correct, so a digest is enough",
+export const ATTENTION: Record<string, string> = {
+  none: "a check defines correct, so a digest is enough",
   skim: "same behavior and a small diff, to skim and accept",
   decide: "changes behavior or needs your product judgment",
 };
 
 /** Where a task is in its life, from a workwork candidate to a merged PR. */
-export type TaskState = Job["state"] | "candidate" | "review" | "merged" | "closed";
+export type TaskState = Job["state"] | "candidate" | "review" | "merged" | "closed" | "unchanged";
 
 const STATES = {
   candidate: {
@@ -63,8 +60,14 @@ const STATES = {
     icon: "text-warning",
     pill: "bg-warning text-background",
   },
-  review: { Icon: GitPullRequestIcon, icon: "text-primary", pill: "bg-primary/15 text-primary" },
+  // Neutral, so yellow stays for what blocks work: a question waiting for you.
+  review: { Icon: GitPullRequestIcon, icon: "text-foreground", pill: "bg-muted text-foreground" },
   done: { Icon: CircleCheckIcon, icon: "text-success", pill: "bg-success/15 text-success" },
+  unchanged: {
+    Icon: CircleMinusIcon,
+    icon: "text-muted-foreground",
+    pill: "bg-muted text-muted-foreground",
+  },
   merged: { Icon: GitMergeIcon, icon: "text-success", pill: "bg-success/15 text-success" },
   failed: {
     Icon: CircleXIcon,
@@ -86,6 +89,7 @@ const STATES = {
 const LABELS: Partial<Record<TaskState, string>> = {
   blocked: "waiting for you",
   review: "needs review",
+  unchanged: "no change",
 };
 
 /** The same mark for a task's state on every tab. */
@@ -105,11 +109,15 @@ export function StatePill({ state, label }: { state: TaskState; label?: string }
   );
 }
 
-/** A PR not fetched yet counts as open, so a finished job reads as waiting for review. */
+/**
+ * A PR not fetched yet counts as open, so a finished job reads as waiting for review. A done job
+ * with no PR and no kept branch changed nothing; goals and their nodes merge without one, so they stay done.
+ */
 export function taskState(job: Job | undefined, prs: Snapshot["prs"]): TaskState {
   if (!job) return "candidate";
+  if (job.state !== "done") return job.state;
   const url = prUrl(job);
-  if (!url || job.state !== "done") return job.state;
+  if (!url) return job.goal || job.of || job.attempts.at(-1)?.branch ? "done" : "unchanged";
   const pr = prs[url]?.state;
   return pr === "MERGED" ? "merged" : pr === "CLOSED" ? "closed" : "review";
 }
@@ -131,7 +139,7 @@ function TaskTitle({ item, bare }: { item: Item; bare?: boolean }) {
 export function TaskDetails({
   item,
   job,
-  play,
+  blueprint,
   snapshot,
   act,
   actions,
@@ -141,13 +149,12 @@ export function TaskDetails({
   job?: Job;
   /** Without the repo, as inside a goal, where every node shares it. */
   bare?: boolean;
-  /** What the item's play does, once workwork has said. */
-  play?: string;
+  /** What the item's blueprint does, once workwork has said. */
+  blueprint?: string;
   snapshot: Snapshot;
   act: Act;
   actions?: ReactNode;
 }) {
-  const state = taskState(job, snapshot.prs);
   return (
     <Dialog>
       <DialogTrigger
@@ -160,50 +167,67 @@ export function TaskDetails({
       >
         <TaskTitle item={item} bare={bare} />
       </DialogTrigger>
-      <DialogContent className={job ? "sm:max-w-5xl" : "sm:max-w-3xl"}>
-        <DialogHeader className="mr-8">
-          <div className="flex items-start gap-3">
-            <span className="mt-0.5">
-              <StateIcon state={state} />
-            </span>
-            <div className="flex min-w-0 flex-col gap-2">
-              <DialogTitle>
-                <TaskTitle item={item} />
-              </DialogTitle>
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground">
-                <StatePill state={state} />
-                <DialogDescription>
-                  {item.label} · {item.play} · {item.level}
-                </DialogDescription>
-              </div>
-            </div>
-          </div>
-        </DialogHeader>
-        {job ? (
-          <div className="-mx-4 -mb-4 grid border-t md:max-h-[65dvh] md:grid-cols-[3fr_2fr]">
-            <div className="flex min-w-0 flex-col gap-3 overflow-auto p-4">
-              <Label>The task</Label>
-              <Task item={item} jobId={job.id} />
-              <About item={item} play={play} />
-            </div>
-            <div className="flex min-w-0 flex-col gap-3 overflow-auto bg-muted/30 p-4 md:border-l">
-              <Story job={job} snapshot={snapshot} act={act} />
-            </div>
-          </div>
-        ) : (
+      {job ? (
+        // A fixed height, so switching tabs doesn't make the dialog jump.
+        <TabbedDialogContent className="h-[min(48rem,calc(100dvh-8rem))] sm:max-w-5xl">
+          <JobDetails
+            item={item}
+            job={job}
+            blueprint={blueprint}
+            snapshot={snapshot}
+            act={act}
+            actions={actions}
+          />
+        </TabbedDialogContent>
+      ) : (
+        <AnchoredDialogContent className="sm:max-w-3xl">
+          <TaskHeader item={item} state="candidate" />
           <div className="flex max-h-[65dvh] flex-col gap-3 overflow-auto">
             <Task item={item} />
-            <About item={item} play={play} />
+            <About item={item} blueprint={blueprint} />
           </div>
-        )}
-        {actions && <DialogFooter>{actions}</DialogFooter>}
-      </DialogContent>
+          {actions && <DialogFooter>{actions}</DialogFooter>}
+        </AnchoredDialogContent>
+      )}
     </Dialog>
   );
 }
 
+/** The state, title and what kind of task it is; `children` go at the end of the facts line. */
+export function TaskHeader({
+  item,
+  state,
+  children,
+}: {
+  item: Item;
+  state: TaskState;
+  children?: ReactNode;
+}) {
+  return (
+    <DialogHeader className="mr-8">
+      <div className="flex items-start gap-3">
+        <span className="mt-0.5">
+          <StateIcon state={state} />
+        </span>
+        <div className="flex min-w-0 flex-1 flex-col gap-2">
+          <DialogTitle>
+            <TaskTitle item={item} />
+          </DialogTitle>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground">
+            <StatePill state={state} />
+            <DialogDescription>
+              {item.label} · {item.blueprint} · {item.attention}
+            </DialogDescription>
+            {children}
+          </div>
+        </div>
+      </div>
+    </DialogHeader>
+  );
+}
+
 /** The job's prompt, or the one workwork writes for the candidate. */
-function Task({ item, jobId }: { item: Item; jobId?: string }) {
+export function Task({ item, jobId }: { item: Item; jobId?: string }) {
   const [prompt, setPrompt] = useState<string>();
   const [error, setError] = useState<string>();
 
@@ -241,195 +265,29 @@ function Task({ item, jobId }: { item: Item; jobId?: string }) {
   );
 }
 
-/** What needs attention now, if anything, over everything that happened, newest first. */
-function Story({ job, snapshot, act }: { job: Job; snapshot: Snapshot; act: Act }) {
-  const { status, prs, train } = snapshot;
-  const last = job.attempts.at(-1);
-  const queued = new Set(
-    snapshot.jobs
-      .filter((each) => each.state !== "removed" && each.item.play === "followup")
-      .map((each) => each.item.title),
-  );
-  const worker = status?.workers.find((each) => each.job === job.id);
-  const step = job.notes.findLast(
-    (note) => note.kind === "step" && note.attempt === job.attempts.length + 1,
-  );
-  const question =
-    job.state === "blocked" ? job.notes.findLast((note) => note.kind === "ask") : undefined;
-  const url = prUrl(job);
-  const entries = jobEntries(job).sort((a, b) => b.at.localeCompare(a.at));
-  const days = new Map<string, typeof entries>();
-  for (const entry of entries) {
-    const day = dayOf(entry.at);
-    days.set(day, [...(days.get(day) ?? []), entry]);
-  }
-
+/** Answers the assumption at index among the job's notes. */
+export function AssumeAnswer({ job, index, act }: { job: Job; index: number; act: Act }) {
   return (
-    <>
-      {worker && status && (
-        <Now className="border-primary/40">
-          <span className="flex items-center gap-2 font-medium">
-            <StateIcon state="running" />
-            {worker.id} working, {minutesSince(worker.since)} min
-          </span>
-          {step && (
-            <span>
-              {step.text}
-              {step.of ? ` (${step.done ?? 0}/${step.of})` : ""}
-            </span>
-          )}
-          <span className="text-muted-foreground">
-            {[worker.activity, worker.context && `${Math.round(worker.context / 1000)}k context`]
-              .filter(Boolean)
-              .join(" · ")}
-          </span>
-        </Now>
-      )}
-      <Facts job={job} act={act} />
-      {question && <Answer job={job} question={question} act={act} />}
-      {last?.error && (
-        <Now className="border-destructive/40 text-destructive">{last.error.split("\n")[0]}</Now>
-      )}
-      {url && (
-        <Now className={prs[url]?.state === "MERGED" ? "border-success/40" : ""}>
-          <PrLine jobId={job.id} url={url} pr={prs[url]} />
-          <TrainLine car={train[job.id]} />
-        </Now>
-      )}
-      <Outcome job={job} act={act} queued={queued} />
-      <Label>Log</Label>
-      <div className="flex flex-col gap-3 text-sm">
-        {[...days].map(([day, dayEntries]) => (
-          <section key={day} className="flex flex-col gap-1.5">
-            <h4 className="text-xs text-muted-foreground">{day}</h4>
-            <ol className="flex flex-col">
-              {dayEntries.map((entry) => (
-                <li
-                  key={`${entry.at} ${entry.text}`}
-                  className="group grid grid-cols-[4.5rem_0.75rem_1fr] gap-x-2"
-                >
-                  <time
-                    dateTime={entry.at}
-                    className="text-right whitespace-nowrap text-muted-foreground tabular-nums"
-                  >
-                    {clock(entry.at)}
-                  </time>
-                  {/* The rail runs from the first dot of the day to the last. */}
-                  <span
-                    aria-hidden
-                    className={`relative flex justify-center before:absolute before:inset-y-0 before:w-px before:bg-border group-first:before:top-2 group-last:before:bottom-auto group-last:before:h-2 ${entry.tone ?? "text-muted-foreground"}`}
-                  >
-                    <span className="relative mt-1.5 size-2 rounded-full border-2 border-current bg-popover" />
-                  </span>
-                  <span className={`pb-3 wrap-anywhere ${entry.tone ?? ""}`}>
-                    {entry.step && <StepNumber step={entry.step} />}
-                    {entry.text}{" "}
-                    {entry.ended && (
-                      <AttemptFile log={entry.ended.log} agent={entry.ended.agent} kind="log" />
-                    )}
-                  </span>
-                </li>
-              ))}
-            </ol>
-          </section>
-        ))}
-      </div>
-    </>
+    <Reply
+      placeholder="Answer, or keep the assumption"
+      send={(text) => act(() => api.answer(job.id, text, index))}
+    />
   );
 }
 
-/** What the job is held to and what's left for the user to check, for jobs that have any. */
-function Facts({ job, act }: { job: Job; act: Act }) {
-  const assumed = job.notes.flatMap((note, index) =>
-    note.kind === "assume" &&
-    !job.notes.some((other) => other.kind === "answer" && other.re === index)
-      ? [note]
-      : [],
-  );
-  const facts = [
-    job.tier && `tier ${job.tier}${job.escalations ? `, moved up ${job.escalations}×` : ""}`,
-    job.gates.length > 0 && `gates ${job.gates.map((gate) => `\`${gate}\``).join(", ")}`,
-    job.touches && `touches ${job.touches.length ? job.touches.join(", ") : "anything"}`,
-    job.needs.length > 0 && `needs ${job.needs.join(", ")}`,
-  ].filter(Boolean);
-  if (facts.length === 0 && job.unverified.length === 0 && assumed.length === 0) return null;
-  return (
-    <div className="flex flex-col gap-2 text-sm">
-      {facts.length > 0 && <p className="text-xs text-muted-foreground">{facts.join(" · ")}</p>}
-      {job.unverified.map((need) => (
-        <Now key={need} className="border-warning/40">
-          <span className="flex flex-wrap items-center gap-2">
-            <span className="flex-1">Not verified: {need}</span>
-            <Button size="sm" variant="outline" onClick={() => act(() => api.verify(job.id, need))}>
-              Checked
-            </Button>
-          </span>
-        </Now>
-      ))}
-      {assumed.map((note) => (
-        <Now key={note.at} className="border-warning/40">
-          <span>
-            Assumed <strong>{note.assumed}</strong>, asked: {note.text}
-          </span>
-          <span className="flex gap-2">
-            <Button size="sm" onClick={() => act(() => api.answer(job.id, "fine"))}>
-              Fine
-            </Button>
-            <span className="text-xs text-muted-foreground">or answer below to queue a change</span>
-          </span>
-          <AssumeAnswer job={job} act={act} />
-        </Now>
-      ))}
-    </div>
-  );
-}
-
-function AssumeAnswer({ job, act }: { job: Job; act: Act }) {
-  const [text, setText] = useState("");
-  return (
-    <form
-      className="flex gap-2"
-      onSubmit={(event) => {
-        event.preventDefault();
-        void act(() => api.answer(job.id, text));
-      }}
-    >
-      <Input
-        value={text}
-        onChange={(event) => setText(event.target.value)}
-        placeholder="Your answer"
-      />
-      <Button type="submit" size="sm" variant="outline" disabled={!text.trim()}>
-        Answer
-      </Button>
-    </form>
-  );
-}
-
-function Now({ className, children }: { className: string; children: ReactNode }) {
-  return (
-    <div className={`flex flex-col gap-2 rounded-md border bg-popover p-2 text-sm ${className}`}>
-      {children}
-    </div>
-  );
-}
-
-function Label({ children }: { children: ReactNode }) {
-  return <h3 className="text-xs font-medium text-muted-foreground">{children}</h3>;
-}
-
-/** What the play and the review level mean, for whoever decides on the result. */
-function About({ item, play }: { item: Item; play?: string }) {
+/** What the blueprint and the review attention mean, for whoever decides on the result. */
+export function About({ item, blueprint }: { item: Item; blueprint?: string }) {
   return (
     <p className="text-xs text-muted-foreground">
-      {play && (
+      {blueprint && (
         <>
-          <span className="font-medium text-foreground">{item.play}</span>: {play}{" "}
+          <span className="font-medium text-foreground">{item.blueprint}</span>: {blueprint}{" "}
         </>
       )}
-      {LEVELS[item.level] && (
+      {ATTENTION[item.attention] && (
         <>
-          <span className="font-medium text-foreground">{item.level}</span>: {LEVELS[item.level]}.
+          <span className="font-medium text-foreground">{item.attention}</span>:{" "}
+          {ATTENTION[item.attention]}.
         </>
       )}
     </p>

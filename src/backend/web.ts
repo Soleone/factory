@@ -1,5 +1,7 @@
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
 import { dirname, extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AGENT_NAMES } from "./agents.ts";
@@ -14,6 +16,7 @@ import {
   moveJob,
   queueConflicts,
   queueFollowup,
+  pinJob,
   queueReview,
   readJobs,
   record,
@@ -25,6 +28,8 @@ import { closePr, mergePr, prCache, readPrDetails, rebasePr } from "./review.ts"
 import {
   approveGoal,
   cancelGoal,
+  dropNode,
+  retierNode,
   findGoal,
   importPlanText,
   newGoal,
@@ -32,8 +37,10 @@ import {
   queueReplan,
   resumeGoal,
 } from "./goals.ts";
+import { exportGoal } from "./goalExport.ts";
 import { mirrorTasks } from "./tasksStore.ts";
 import { mergeTrain } from "./train.ts";
+import { piProvider, usageCache } from "./usage.ts";
 import {
   checkSettings,
   output,
@@ -50,12 +57,19 @@ import {
   itemKey,
   prUrl,
   type Model,
-  type Play,
+  type Blueprint,
+  type Item,
+  type Pin,
   type Preset,
+  poolOf,
+  workersOf,
+  presetId,
+  type RunRequest,
   type Settings,
   type Snapshot,
   type Status,
   type Tier,
+  USAGE_POOLS,
 } from "./types.ts";
 
 /** The built page; under pn dev, Vite serves it instead and proxies /api and /runs here. */
@@ -70,14 +84,23 @@ const TYPES: Record<string, string> = {
 };
 
 /** The page and the API it uses: the same state and commands as the CLI, nothing more. */
-export function serve(state: string, port: number, host: string): Server {
+// Tests pass their own usage, so they never read the real accounts.
+export function serve(
+  state: string,
+  port: number,
+  host: string,
+  usage = usageCache(join(state, "usage.json")),
+): Server {
   const prs = prCache();
   const train = mergeTrain(
     prs,
     (id, url, files) => queueConflicts(state, id, url, files),
     (id, text) => addNote(state, id, { kind: "train", text }),
   );
-  const planner = chat(state);
+  const planner = chat(state, () => {
+    const { port } = server.address() as AddressInfo;
+    return `http://${host}:${port}`;
+  });
   let stopMirror = mirrorTasks(state, readSettings(state), console.log);
   // Listing takes a second or two per agent, and the lists rarely change while serve runs.
   const models = new Map<string, Promise<Model[]>>();
@@ -93,6 +116,11 @@ export function serve(state: string, port: number, host: string): Server {
         }),
       );
     return models.get(name)!;
+  }
+  function refresh() {
+    void refreshCandidates(state, "workwork").catch((error: Error) =>
+      console.error(`factory: workwork failed: ${error.message}`),
+    );
   }
   /** Only cached candidates, so the page can't queue or run workwork for anything it names. */
   function candidates(wanted: { repo: string; id: string }[]) {
@@ -126,8 +154,25 @@ export function serve(state: string, port: number, host: string): Server {
     if (pr.state !== "OPEN") throw new Error(`${url} is already ${pr.state.toLowerCase()}`);
     return { url, pr };
   }
+  /** The goal's export as a zip download. */
+  async function sendExport(response: ServerResponse, id: string) {
+    const goal = findGoal(state, id);
+    const dir = mkdtempSync(join(tmpdir(), "factory-download-"));
+    try {
+      const file = join(dir, "export.zip");
+      await exportGoal(state, goal, file);
+      response
+        .writeHead(200, {
+          "content-type": "application/zip",
+          "content-disposition": `attachment; filename="factory-goal-${goal.goal!.slug}.zip"`,
+        })
+        .end(readFileSync(file));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
   const routes: Record<string, (body: never, id: string) => unknown> = {
-    "GET /api/state": () => snapshot(state, (urls) => prs.get(urls), train.cars()),
+    "GET /api/state": () => snapshot(state, (urls) => prs.get(urls), train.cars(), usage),
     "GET /api/candidates": () => {
       const cached = readCandidates(state);
       const items = cached?.items ?? [];
@@ -135,16 +180,12 @@ export function serve(state: string, port: number, host: string): Server {
       return { at: cached?.at ?? null, items, repos, root: sourceRoot() };
     },
     "POST /api/candidates/refresh": () => {
-      void refreshCandidates(state, "workwork").catch((error: Error) =>
-        console.error(`factory: workwork failed: ${error.message}`),
-      );
+      refresh();
     },
     "GET /api/repos": () => clonableRepos(),
     "POST /api/repos/clone": async (body: { name: string }) => {
       await cloneRepo(body.name);
-      void refreshCandidates(state, "workwork").catch((error: Error) =>
-        console.error(`factory: workwork failed: ${error.message}`),
-      );
+      refresh();
     },
     /** A goal from a brief, in a repo under $SRC or, with `project`, a new one. */
     "POST /api/goals": async (body: {
@@ -158,24 +199,57 @@ export function serve(state: string, port: number, host: string): Server {
       return newGoal(state, body.title.trim(), repo, body.brief ?? "");
     },
     "POST /api/goals/import": (body: { plan: string }) => importPlanText(state, body.plan),
-    // Read fresh each time: it's quick, and the user may have just edited a play of their own.
-    "GET /api/plays": async (): Promise<Play[]> =>
-      JSON.parse(await output("workwork", ["plays", "--json"], process.cwd())),
+    // Read fresh each time: it's quick, and the user may have just edited a blueprint of their own.
+    "GET /api/blueprints": async (): Promise<Blueprint[]> =>
+      JSON.parse(await output("workwork", ["blueprints", "--json"], process.cwd())),
+    // Saving or deleting one changes what every repo's candidates are.
+    "PUT /api/blueprints": async (body: Omit<Blueprint, "custom">) => {
+      await output("workwork", ["blueprints", "save"], process.cwd(), JSON.stringify(body));
+      refresh();
+    },
+    "POST /api/blueprints/delete": async (body: { name: string }) => {
+      await output("workwork", ["blueprints", "delete", body.name], process.cwd());
+      refresh();
+    },
+    "POST /api/blueprints/run": async (body: { name: string; repo: string }) => {
+      const found: Item[] = JSON.parse(
+        await output("workwork", ["--blueprint", body.name, "--json"], body.repo),
+      );
+      if (found.length === 0) throw new Error(`${body.name} finds nothing to do in ${body.repo}`);
+      return addJobs(state, found, "pick");
+    },
     "POST /api/candidates/prompt": (body: { repo: string; id: string }) => {
       const [item] = candidates([body]);
       return output("workwork", ["prompt", item.id], item.repo);
     },
-    "POST /api/jobs": (body: { items: { repo: string; id: string }[]; pin?: Preset }) =>
-      addJobs(state, candidates(body.items), "pick", body.pin),
-    "POST /api/jobs/own": (body: { repo: string; prompt: string; tier: Tier; title?: string }) =>
-      addOwnJob(state, body),
+    "POST /api/jobs": ({
+      items,
+      pin = {},
+    }: {
+      items: { repo: string; id: string }[];
+      pin?: Pin;
+    }) => {
+      const { agent, model, effort, preset, tier } = pin;
+      return addJobs(state, candidates(items), "pick", { agent, model, effort, preset, tier });
+    },
+    "POST /api/jobs/own": (body: {
+      repo: string;
+      prompt: string;
+      tier: Tier;
+      title?: string;
+      machine?: boolean;
+    }) => addOwnJob(state, body),
     "POST /api/jobs/remove": (_, id) => removeJob(state, id),
     "POST /api/jobs/retry": (_, id) => retryJob(state, id),
-    "POST /api/jobs/answer": (body: { text: string }, id) => answer(state, id, body.text),
+    "POST /api/jobs/answer": (body: { text: string; re?: number }, id) =>
+      answer(state, id, body.text, body.re),
     "POST /api/jobs/approve": (_, id) => approveGoal(state, id),
     "POST /api/jobs/pause": (_, id) => pauseGoal(state, id),
     "POST /api/jobs/resume": (_, id) => resumeGoal(state, id),
     "POST /api/jobs/cancel": (_, id) => cancelGoal(state, id),
+    "POST /api/jobs/tier": (body: { tier: Tier }, id) => retierNode(state, id, body.tier),
+    "POST /api/jobs/pin": (body: Pin, id) => pinJob(state, id, body),
+    "POST /api/jobs/drop": (_, id) => dropNode(state, id),
     "POST /api/jobs/replan": (body: { why: string }, id) => {
       if (!body.why?.trim()) throw new Error("a replan wants a reason");
       queueReplan(state, findGoal(state, id), body.why);
@@ -183,7 +257,7 @@ export function serve(state: string, port: number, host: string): Server {
     "POST /api/jobs/verify": (body: { need?: string }, id) =>
       record(state, { type: "verify", id, need: body.need }),
     "POST /api/jobs/followup": (body: { task: string }, id) => queueFollowup(state, id, body.task),
-    "POST /api/jobs/review": (body: { agent: string }, id) => queueReview(state, id, body.agent),
+    "POST /api/jobs/review": (body: { agent?: string }, id) => queueReview(state, id, body.agent),
     "POST /api/jobs/move": (body: { index: number }, id) => moveJob(state, id, body.index),
     "GET /api/jobs/pr": (_, id) => readPrDetails(jobPr(id)),
     "GET /api/jobs/prompt": (_, id) => jobPrompt(id),
@@ -204,7 +278,8 @@ export function serve(state: string, port: number, host: string): Server {
     "POST /api/chat": (body: { message: string }) => planner.prompt(body.message),
     "POST /api/chat/abort": () => planner.abort(),
     "POST /api/chat/answer": (body: { id: string }) => planner.answer(body),
-    "POST /api/chat/reset": () => planner.reset(),
+    "POST /api/chat/new": () => planner.fresh(),
+    "POST /api/chat/open": (body: { id: string }) => planner.open(body.id),
     "POST /api/jobs/close": async (_, id) => {
       const { url } = await openPr(id);
       await closePr(url);
@@ -217,18 +292,23 @@ export function serve(state: string, port: number, host: string): Server {
     "PUT /api/settings": (body: Settings) => {
       const before = JSON.stringify(readSettings(state).chat);
       writeSettings(state, checkSettings(body));
-      if (JSON.stringify(body.chat) !== before) planner.reset();
+      if (JSON.stringify(body.chat) !== before) planner.retune();
       stopMirror();
       stopMirror = mirrorTasks(state, readSettings(state), console.log);
     },
-    "POST /api/on": (body: Pick<Settings, "agents" | "limit" | "until">) => {
-      checkSettings({ ...readSettings(state), ...body });
+    "POST /api/on": (body: RunRequest) => {
+      const settings = readSettings(state);
+      const counted = settings.presets.map((preset) => ({
+        ...preset,
+        workers: body.workers[presetId(preset)] ?? preset.workers,
+      }));
+      checkSettings({ ...settings, presets: counted, limit: body.limit, until: body.until });
       return turnOn(state, runArgs(body));
     },
     "POST /api/off": () => turnOff(state),
   };
 
-  return createServer(async (request, response) => {
+  const server = createServer(async (request, response) => {
     // Job ids and run folders are [\w.-] only, so the path needs no decoding.
     const path = new URL(request.url ?? "/", "http://factory").pathname;
     // /api/jobs/<id>/<action> is routed as /api/jobs/<action> with the id.
@@ -236,6 +316,7 @@ export function serve(state: string, port: number, host: string): Server {
     const route = routes[`${request.method} ${jobId ? `/api/jobs/${action}` : path}`];
     try {
       if (`${request.method} ${path}` === "GET /api/chat") return planner.listen(response);
+      if (request.method === "GET" && action === "export") return await sendExport(response, jobId);
       if (route) {
         // Each route says what body it takes; JSON from the page is trusted to match it, the commands check the rest.
         const result = await route((await body(request)) as never, jobId);
@@ -275,14 +356,17 @@ export function serve(state: string, port: number, host: string): Server {
       if (host !== "127.0.0.1" && host !== "localhost")
         console.log("factory: anyone who reaches this address can run agents on this machine");
     });
+  return server;
 }
 
 function snapshot(
   state: string,
   prs: (urls: string[]) => Snapshot["prs"],
   train: Snapshot["train"],
+  usage: (pools: string[]) => Snapshot["usage"],
 ): Snapshot {
   const statusPath = join(state, "status.json");
+  const settings = readSettings(state);
   const candidates = readCandidates(state);
   const jobs = readJobs(state);
   return {
@@ -290,7 +374,7 @@ function snapshot(
     status: existsSync(statusPath)
       ? (JSON.parse(readFileSync(statusPath, "utf8")) as Status)
       : null,
-    settings: readSettings(state),
+    settings,
     // Paths under runs/ are where this server serves them.
     jobs: jobs.map((job) => ({
       ...job,
@@ -303,17 +387,26 @@ function snapshot(
     },
     prs: prs(jobs.flatMap((job) => (job.state === "removed" ? [] : (prUrl(job) ?? [])))),
     train,
+    usage: usage(usagePools(settings)),
   };
 }
 
+/** The pools a run on these settings works on, of those whose usage factory can read. */
+function usagePools(settings: Settings): string[] {
+  const presets = settings.presets.filter((preset) => workersOf(preset) > 0);
+  // A bare pi works on pi's default provider, which poolOf can't see.
+  const pool = (preset: Preset) =>
+    preset.agent === "pi" && !preset.model && !preset.pool ? piProvider() : poolOf(preset);
+  return [...new Set(presets.map(pool))].filter((pool) =>
+    (USAGE_POOLS as readonly string[]).includes(pool),
+  );
+}
+
 /** A run asked for from the page, as the flags `factory run` takes. */
-function runArgs({ agents, limit, until }: Pick<Settings, "agents" | "limit" | "until">): string[] {
-  const args = ["--agents", Object.keys(agents).join(","), "--limit", String(limit ?? "none")];
+function runArgs({ workers, limit, until }: RunRequest): string[] {
+  const args = ["--limit", String(limit ?? "none")];
   if (until) args.push("--until", until);
-  for (const [name, { model, effort }] of Object.entries(agents)) {
-    if (model) args.push("--model", `${name}=${model}`);
-    if (effort) args.push("--effort", `${name}=${effort}`);
-  }
+  for (const [id, count] of Object.entries(workers)) args.push("--workers", `${id}=${count}`);
   return args;
 }
 

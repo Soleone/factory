@@ -1,22 +1,8 @@
-import { ExternalLinkIcon } from "lucide-react";
 import Markdown, { type MarkdownToJSX } from "markdown-to-jsx/react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "@/api";
-import type { Pr } from "@/backend/types.ts";
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
+import { diffRows } from "@/diff";
 import { Spinner } from "@/components/ui/spinner";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-
-const SCROLL =
-  "max-h-[60dvh] overflow-auto rounded-md border bg-muted/50 p-3 font-mono text-xs leading-relaxed";
 
 /** GitHub-flavored PR bodies, styled with the theme since the page has no prose styles. */
 export const MARKDOWN: MarkdownToJSX.Options = {
@@ -40,90 +26,121 @@ export const MARKDOWN: MarkdownToJSX.Options = {
   },
 };
 
-/** The PR's description and diff in a popup, so a review doesn't need a trip to GitHub. */
-export function PrReview({ jobId, url, pr }: { jobId: string; url: string; pr: Pr }) {
-  return (
-    <Dialog>
-      <DialogTrigger render={<Button variant="link" size="xs" />}>Review</DialogTrigger>
-      <DialogContent className="sm:max-w-4xl">
-        <DialogHeader className="mr-8">
-          <DialogTitle>{pr.title}</DialogTitle>
-          <DialogDescription>
-            <a
-              href={url}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-1"
-            >
-              {url.replace("https://github.com/", "")} <ExternalLinkIcon className="size-3" />
-            </a>
-          </DialogDescription>
-        </DialogHeader>
-        <Details jobId={jobId} pr={pr} />
-      </DialogContent>
-    </Dialog>
-  );
-}
+export type PrDetails = { body?: string; diff?: string; error?: string };
 
-function Details({ jobId, pr }: { jobId: string; pr: Pr }) {
-  const [details, setDetails] = useState<{ body: string; diff: string }>();
-  const [error, setError] = useState<string>();
+/** The PR's body and diff from GitHub, asked for once `wanted`, so a look at the summary costs no call. */
+export function usePrDetails(jobId: string, wanted: boolean): PrDetails {
+  const [details, setDetails] = useState<PrDetails>({});
+  const asked = details.body !== undefined || details.error !== undefined;
 
   useEffect(() => {
+    if (!wanted || asked) return;
     let current = true;
     api.prDetails(jobId).then(
       (loaded) => current && setDetails(loaded),
-      (failure: Error) => current && setError(failure.message),
+      (failure: Error) => current && setDetails({ error: failure.message }),
     );
     return () => {
       current = false;
     };
-  }, [jobId]);
+  }, [jobId, wanted, asked]);
 
-  if (error)
-    return (
-      <p role="status" className="text-destructive">
-        Could not load the PR: {error}
-      </p>
-    );
-  if (!details)
-    return (
-      <p role="status" className="flex items-center gap-2 text-muted-foreground">
-        <Spinner /> Asking GitHub…
-      </p>
-    );
+  return details;
+}
+
+function Loading({ error }: { error?: string }) {
+  return error ? (
+    <p role="status" className="text-destructive">
+      Could not load the PR: {error}
+    </p>
+  ) : (
+    <p role="status" className="flex items-center gap-2 text-muted-foreground">
+      <Spinner /> Asking GitHub…
+    </p>
+  );
+}
+
+export function PrBody({ details }: { details: PrDetails }) {
+  if (details.body === undefined) return <Loading error={details.error} />;
   return (
-    <Tabs defaultValue="description" className="min-w-0">
-      <TabsList>
-        <TabsTrigger value="description">Description</TabsTrigger>
-        <TabsTrigger value="diff">
-          Diff
-          <span className="text-success">+{pr.additions}</span>
-          <span className="text-destructive">−{pr.deletions}</span>
-        </TabsTrigger>
-      </TabsList>
-      <TabsContent value="description">
-        <div
-          tabIndex={0}
-          className={`${SCROLL} flex flex-col gap-2 font-sans text-sm wrap-anywhere`}
-        >
-          {details.body.trim() ? (
-            <Markdown options={MARKDOWN}>{details.body}</Markdown>
-          ) : (
-            "This PR has no description."
-          )}
-        </div>
-      </TabsContent>
-      <TabsContent value="diff">
-        <pre tabIndex={0} className={SCROLL}>
-          {details.diff.split("\n").map((line, index) => (
-            <span key={index} className={`block ${diffLineClass(line)}`}>
-              {line || " "}
+    <div className="flex max-w-prose flex-col gap-2 text-sm leading-relaxed wrap-anywhere">
+      {details.body.trim() ? (
+        <Markdown options={MARKDOWN}>{details.body}</Markdown>
+      ) : (
+        <p className="text-muted-foreground">This PR has no description.</p>
+      )}
+    </div>
+  );
+}
+
+/** The diff beside its changed files, each with its own count, to jump to. */
+export function PrDiff({ details }: { details: PrDetails }) {
+  const scroller = useRef<HTMLPreElement>(null);
+  const headers = useRef(new Map<string, HTMLElement>());
+  const [current, setCurrent] = useState<string>();
+  if (details.diff === undefined) return <Loading error={details.error} />;
+
+  const rows = diffRows(details.diff);
+  const files: { name: string; added: number; removed: number }[] = [];
+  for (const row of rows) {
+    if (row.file) files.push({ name: row.file, added: 0, removed: 0 });
+    else if (row.new !== undefined && row.old === undefined) files.at(-1)!.added++;
+    else if (row.old !== undefined && row.new === undefined) files.at(-1)!.removed++;
+  }
+
+  return (
+    <div className="grid h-full min-h-0 gap-3 md:grid-cols-[14rem_1fr]">
+      <nav
+        aria-label="Changed files"
+        className="flex gap-0.5 overflow-auto max-md:pb-1 md:flex-col"
+      >
+        {files.map((file) => (
+          <button
+            key={file.name}
+            type="button"
+            aria-current={file.name === current}
+            onClick={() => {
+              setCurrent(file.name);
+              const header = headers.current.get(file.name);
+              if (header && scroller.current) scroller.current.scrollTop = header.offsetTop;
+            }}
+            className="flex shrink-0 items-center gap-2 rounded-md px-2 py-1 text-left text-xs hover:bg-muted aria-[current=true]:bg-muted"
+          >
+            {/* Right to left, so a long path loses its start and keeps the file name. */}
+            <span className="min-w-0 flex-1 truncate [direction:rtl] max-md:max-w-48">
+              {file.name}
             </span>
-          ))}
-        </pre>
-      </TabsContent>
-    </Tabs>
+            <span className="whitespace-nowrap tabular-nums">
+              <span className="text-success">+{file.added}</span>{" "}
+              <span className="text-destructive">−{file.removed}</span>
+            </span>
+          </button>
+        ))}
+      </nav>
+      <pre
+        ref={scroller}
+        tabIndex={0}
+        className="relative min-h-0 overflow-auto rounded-md border bg-muted/50 p-3 font-mono text-xs leading-relaxed"
+      >
+        {rows.map((row, index) => (
+          <span
+            key={index}
+            ref={(element) => {
+              if (row.file && element) headers.current.set(row.file, element);
+            }}
+            className={`flex ${diffLineClass(row.text)}`}
+          >
+            <span className="w-[5ch] shrink-0 pr-2 text-right text-muted-foreground/60 select-none">
+              {row.old}
+            </span>
+            <span className="w-[5ch] shrink-0 pr-2 text-right text-muted-foreground/60 select-none">
+              {row.new}
+            </span>
+            <span>{row.text || " "}</span>
+          </span>
+        ))}
+      </pre>
+    </div>
   );
 }
 

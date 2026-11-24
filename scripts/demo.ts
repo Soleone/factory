@@ -1,15 +1,19 @@
 import { randomUUID } from "node:crypto";
+import type { ServerResponse } from "node:http";
 import type { Plugin } from "vite-plus";
 import {
   canMerge,
   canRebase,
+  presetWorkers,
   prUrl,
   type Item,
   type Job,
-  type Preset,
+  type Pin,
+  type RunRequest,
   type Settings,
   type Snapshot,
 } from "../src/backend/types.ts";
+import type { PiRecord } from "../src/pi.ts";
 
 const DEMO_NOTES: Record<number, Omit<Job["notes"][number], "at" | "attempt">[]> = {
   0: [
@@ -28,6 +32,13 @@ const DEMO_NOTES: Record<number, Omit<Job["notes"][number], "at" | "attempt">[]>
       text: "Drop the request-id field from logs (simpler, but dashboards use it) or keep it? I'd keep it.",
     },
   ],
+  4: [
+    {
+      kind: "result",
+      text: "The webhook docs already match the retry code: 5 tries, doubling from 1 second. Nothing to change.",
+      confidence: "high",
+    },
+  ],
 };
 
 /** What a fresh job has besides its item. */
@@ -40,8 +51,8 @@ function demoGoal(at: string, run: string): Job[] {
     repo,
     label: "atlas",
     id,
-    play: "goal",
-    level: "decide",
+    blueprint: "goal",
+    attention: "decide",
     title,
   });
   const attempt = (
@@ -87,7 +98,7 @@ function demoGoal(at: string, run: string): Job[] {
     {
       ...BLANK,
       id: "goal",
-      item: { ...item("goal/export", "Export to every format"), play: "goal" },
+      item: { ...item("goal/export", "Export to every format"), blueprint: "goal" },
       source: "goal",
       added: at,
       state: "blocked",
@@ -111,6 +122,8 @@ function demoGoal(at: string, run: string): Job[] {
       goal: {
         repo,
         slug: "export",
+        brief:
+          "Let people export a report as CSV, JSON or XLSX from its menu.\n\nOne writer shared by every format, so a new format is one file. Done when each export opens cleanly in its usual app.",
         summary: "Exports to CSV, JSON and XLSX with one shared writer.",
         gates: ["pnpm test"],
         budget: { attempts: 30 },
@@ -118,7 +131,7 @@ function demoGoal(at: string, run: string): Job[] {
       },
     },
     node("plan", "Decompose: Export to every format", {
-      item: { ...item("plan", "Decompose: Export to every format"), play: "decompose" },
+      item: { ...item("plan", "Decompose: Export to every format"), blueprint: "decompose" },
       tier: "communicator",
       front: true,
       state: "done",
@@ -172,7 +185,11 @@ function demoGoal(at: string, run: string): Job[] {
     }),
     node("xlsx", "XLSX format", { parent: "formats", tier: "builder", needs: ["display"] }),
     node("menu", "Export menu and copy", { parent: "finish", tier: "communicator" }),
-    node("docs", "Document the formats", { parent: "finish", tier: "grunt", after: ["menu"] }),
+    node("docs", "Document the formats", {
+      parent: "finish",
+      tier: "communicator",
+      after: ["menu"],
+    }),
   ];
 }
 
@@ -190,9 +207,10 @@ function seed(): Snapshot {
       notes: [],
       ...BLANK,
     })),
-    ...items.slice(3, 7).map((item, index): Job => {
+    ...items.slice(3, 8).map((item, index): Job => {
       const id = `result${index + 1}`;
       const failed = index === 2;
+      // The last one, without a PR or branch, found nothing to change.
       return {
         ...BLANK,
         id,
@@ -201,6 +219,7 @@ function seed(): Snapshot {
         agent: "pi",
         added: at,
         state: failed ? "failed" : index === 3 ? "blocked" : "done",
+        blocked: index === 3 ? "asked" : undefined,
         attempts: [
           {
             run,
@@ -223,20 +242,22 @@ function seed(): Snapshot {
     status: null,
     jobs,
     settings: {
-      agents: { claude: {}, pi: {} },
       chat: { agent: "pi" },
       presets: [
-        { agent: "claude", model: "opus", effort: "high", id: "opus" },
+        { agent: "claude", model: "opus", effort: "medium" },
+        { agent: "claude", model: "opus", effort: "high", id: "opus", workers: 0 },
         { agent: "pi", model: "openai/gpt-6.2-sol", effort: "high", id: "sol", workers: 2 },
         { agent: "pi", model: "openai-codex/gpt-6-luna", effort: "max", id: "luna", workers: 3 },
       ],
       limit: 2,
+      reserves: {},
       idle: 10,
       tiers: { communicator: ["opus"], builder: ["sol", "opus"], grunt: ["luna"] },
       store: "local",
       capabilities: [],
       env: {},
-      auto: { on: true, levels: ["auto"], plays: [], repos: [] },
+      auto: { on: true, attention: ["none"], blueprints: [], repos: [] },
+      triggers: { ci: true, label: "factory", reviews: true },
     },
     candidates: { at, count: items.length, refreshing: false },
     prs: Object.fromEntries(
@@ -261,26 +282,38 @@ function seed(): Snapshot {
         ];
       }),
     ),
-    train: {},
+    train: { result2: { step: "rebasing" } },
+    usage: {
+      claude: {
+        fiveHour: { used: 58, resets: Date.now() + 112 * 60_000 },
+        sevenDay: { used: 71, resets: Date.now() + 52 * 3_600_000 },
+        at: Date.now(),
+      },
+      "openai-codex": {
+        fiveHour: { used: 84, resets: Date.now() + 38 * 60_000 },
+        sevenDay: { used: 49, resets: Date.now() + 131 * 3_600_000 },
+        at: Date.now(),
+      },
+    },
   };
 }
 
 const items: Item[] = [
   ["atlas", "tests", "skim", "Cover empty search results"],
-  ["atlas", "docs", "auto", "Document the export format"],
-  ["relay", "cleanup", "auto", "Remove unused retry settings"],
+  ["atlas", "docs", "none", "Document the export format"],
+  ["relay", "cleanup", "none", "Remove unused retry settings"],
   ["atlas", "tests", "skim", "Add CSV export tests"],
-  ["relay", "cleanup", "decide", "Simplify request logging"],
+  ["atlas", "docs", "skim", "Check the quickstart links"],
   ["relay", "tests", "skim", "Test reconnect after timeout"],
-  ["atlas", "docs", "auto", "Check the quickstart links"],
-  ["relay", "docs", "auto", "Document webhook retries"],
+  ["relay", "cleanup", "decide", "Simplify request logging"],
+  ["relay", "docs", "none", "Document webhook retries"],
   ["atlas", "cleanup", "decide", "Split the import parser"],
-].map(([repo, play, level, title], index) => ({
+].map(([repo, blueprint, attention, title], index) => ({
   repo: `/demo/${repo}`,
   label: repo,
   id: `demo-${index + 1}`,
-  play,
-  level,
+  blueprint,
+  attention,
   title,
 }));
 
@@ -305,6 +338,169 @@ diff --git a/tests/index.test.ts b/tests/index.test.ts
 +test("quotes commas", () => expect(toCsv([["a,b"]])).toBe('"a,b"'));
 `,
 };
+
+type ChatMessage = PiRecord["message"];
+
+const tool = (id: string, name: string, args: Record<string, unknown>, output: string) => ({
+  call: { type: "toolCall" as const, id, name, arguments: args },
+  result: {
+    role: "toolResult" as const,
+    toolCallId: id,
+    content: [{ type: "text" as const, text: output }],
+    isError: false,
+  },
+});
+
+/** A finished review by the Live Agent, so its tool steps show without an agent. */
+function demoTranscript(): ChatMessage[] {
+  const steps = [
+    tool(
+      "t1",
+      "bash",
+      {
+        command:
+          "factory report --json | jq '.jobs[] | select(.state == \"done\") | {id, title: .item.title, pr: .attempts[-1].url}'",
+      },
+      '{ "id": "result1", "title": "Add CSV export tests", "pr": "https://example.com/demo/pull/1" }\n{ "id": "result2", "title": "Check the quickstart links", "pr": "https://example.com/demo/pull/2" }',
+    ),
+    tool(
+      "t2",
+      "bash",
+      {
+        command:
+          "gh pr view https://example.com/demo/pull/1 --json title,mergeable,statusCheckRollup,files --jq '{title, mergeable, checks: [.statusCheckRollup[].conclusion]}'",
+      },
+      '{ "title": "Add CSV export tests", "mergeable": "MERGEABLE", "checks": ["SUCCESS", "SUCCESS"] }',
+    ),
+    tool(
+      "t3",
+      "read",
+      { path: "/demo/atlas/src/export/csv.ts" },
+      "export function toCsv(rows: string[][]) { ... }",
+    ),
+    tool(
+      "t4",
+      "web_search",
+      { queries: ["RFC 4180 line endings", "Excel CSV quoted newline import"] },
+      "RFC 4180 https://www.rfc-editor.org/rfc/rfc4180\nExcel import notes https://support.microsoft.com/",
+    ),
+  ];
+  return [
+    { role: "user", content: "Review today's results and merge what's ready." },
+    { role: "assistant", content: steps.map((step) => step.call) },
+    ...steps.map((step) => step.result),
+    {
+      role: "assistant",
+      content: [
+        {
+          type: "text",
+          text: "Two results have PRs:\n\n- **Add CSV export tests** passes its checks and quotes values the way RFC 4180 asks. I'd merge it.\n- **Check the quickstart links** has conflicts, so the merge train is rebasing it first.\n\nShould I put the CSV tests on the merge train?",
+        },
+      ],
+    },
+  ];
+}
+
+/** The Live Agent's chats, the current one replayed to every page that listens; new messages get a canned reply. */
+function demoChat() {
+  const hour = 3_600_000;
+  const exchange = (question: string, answer: string): ChatMessage[] => [
+    { role: "user", content: question },
+    { role: "assistant", content: [{ type: "text", text: answer }] },
+  ];
+  const chats = [
+    {
+      id: "tonight",
+      agent: "pi",
+      title: "Pick jobs for tonight",
+      lastActive: Date.now() - 0.1 * hour,
+      messages: demoTranscript(),
+    },
+    {
+      id: "tasks",
+      agent: "claude",
+      title: "Why did the tasks sync job fail twice?",
+      lastActive: Date.now() - 2 * hour,
+      messages: exchange(
+        "Why did the tasks sync job fail twice?",
+        "Both runs hit an expired token halfway through. A retry with a fresh token fixes it.",
+      ),
+    },
+    {
+      id: "split",
+      agent: "pi",
+      title: "Split the jobs.ts refactor into smaller jobs",
+      lastActive: Date.now() - 50 * hour,
+      messages: exchange(
+        "The jobs.ts refactor is too big for one run. Split it?",
+        "Three jobs: move limit parsing out, then the runner, then rename the session types.",
+      ),
+    },
+  ];
+  let current: string | undefined = "tonight";
+  const pages = new Set<ServerResponse>();
+  const send = (page: ServerResponse, record: PiRecord) =>
+    page.write(`data: ${JSON.stringify(record)}\n\n`);
+  const model = {
+    type: "response",
+    success: true,
+    command: "get_state",
+    data: { model: { name: "GPT-6.2 Sol" }, thinkingLevel: "high" },
+  };
+  const listing = () => ({
+    type: "chats",
+    current,
+    chats: chats.map(({ id, agent, title, lastActive }) => ({ id, agent, title, lastActive })),
+  });
+  const messagesOf = () => chats.find((each) => each.id === current)?.messages ?? [];
+  const replay = (page: ServerResponse) => {
+    send(page, listing());
+    send(page, model);
+    for (const message of messagesOf()) send(page, { type: "message_start", message });
+  };
+  const show = (id: string | undefined) => {
+    current = id;
+    for (const page of pages) {
+      send(page, { type: "reset" });
+      replay(page);
+    }
+    return null;
+  };
+  return {
+    listen(page: ServerResponse) {
+      page.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store" });
+      page.write(": connected\n\n");
+      replay(page);
+      pages.add(page);
+      page.on("close", () => pages.delete(page));
+    },
+    say(text: string) {
+      if (!current) {
+        current = randomUUID();
+        chats.unshift({
+          id: current,
+          agent: "pi",
+          title: text.split("\n")[0].slice(0, 60),
+          lastActive: 0,
+          messages: [],
+        });
+      }
+      const chat = chats.find((each) => each.id === current)!;
+      chat.lastActive = Date.now();
+      chat.messages.push(
+        ...exchange(
+          text,
+          "This is the demo, so no agent runs here. In the real factory I'd look into it, and run `factory merge` once you agree.",
+        ),
+      );
+      return show(current);
+    },
+    open: (id: string) => show(id),
+    fresh: () => show(undefined),
+  };
+}
+
+const chat = demoChat();
 
 export function demoApi(): Plugin {
   return {
@@ -333,6 +529,7 @@ export function demoApi(): Plugin {
           );
         }
         if (!path.startsWith("/api/")) return next();
+        if (`${request.method} ${path}` === "GET /api/chat") return chat.listen(response);
         try {
           let text = "";
           for await (const chunk of request) text += chunk;
@@ -377,19 +574,28 @@ function dispatch(snapshot: Snapshot, route: string, body: unknown): unknown {
     case "POST /api/candidates/refresh":
       snapshot.candidates.at = new Date().toISOString();
       return null;
-    case "GET /api/plays":
+    case "GET /api/blueprints":
       return [
-        { name: "tests", description: "Adds a behavior test for something no test covers yet." },
-        { name: "docs", description: "Fixes docs that disagree with what the code does." },
-        { name: "cleanup", description: "Cuts dead paths and needless layers from one file." },
-      ];
+        ["tests", "Adds a behavior test for something no test covers yet.", false],
+        ["docs", "Fixes docs that disagree with what the code does.", false],
+        ["cleanup", "Cuts dead paths and needless layers from a batch of files.", true],
+      ].map(([name, description, custom]) => ({
+        name,
+        description,
+        custom,
+        attention: "skim",
+        finder: "scan",
+        done: "checks pass",
+        onRequest: false,
+        prompt: `Demo blueprint: ${description}`,
+      }));
     case "POST /api/candidates/prompt": {
       const { id } = body as Pick<Item, "id">;
       const item = items.find((each) => each.id === id);
-      return `# workwork: ${id}\n\nPlay: ${item?.play}\nLevel: ${item?.level}\n\n## Task\n\nDemo task: ${item?.title?.toLowerCase()}. Keep the change small and covered by a test.\n\n## Done when\n\n- \`pnpm test\` passes.\n\n## Deliver\n\n- One commit, pushed as a PR labeled \`workwork\`.\n\n## Standard\n\nNot shown in the page.\n`;
+      return `# workwork: ${id}\n\nBlueprint: ${item?.blueprint}\nAttention: ${item?.attention}\n\n## Task\n\nDemo task: ${item?.title?.toLowerCase()}. Keep the change small and covered by a test.\n\n## Done when\n\n- \`pnpm test\` passes.\n\n## Deliver\n\n- One commit, pushed as a PR labeled \`workwork\`.\n\n## Standard\n\nNot shown in the page.\n`;
     }
     case "POST /api/jobs": {
-      const selection = body as { items: Pick<Item, "repo" | "id">[]; pin?: Preset };
+      const selection = body as { items: Pick<Item, "repo" | "id">[]; pin?: Pin };
       for (const wanted of selection.items) {
         const item = items.find(({ repo, id }) => repo === wanted.repo && id === wanted.id);
         if (!item || jobs.some((job) => job.item === item && job.state !== "removed")) continue;
@@ -448,8 +654,23 @@ function dispatch(snapshot: Snapshot, route: string, body: unknown): unknown {
       snapshot.settings = body as Settings;
       return null;
     case "POST /api/on": {
-      const { agents, until, limit } = body as Pick<Settings, "agents" | "until" | "limit">;
+      const { workers, until, limit } = body as RunRequest;
       const since = new Date().toISOString();
+      const slots = presetWorkers(snapshot.settings.presets, workers).map((worker) => ({
+        ...worker,
+        reason: "Demo mode: no agents are launched",
+      }));
+      // The goal's CSV step shows as running on the first worker of its tier.
+      const busy = slots.find((worker) => worker.preset === "luna");
+      if (busy)
+        Object.assign(busy, {
+          state: "working",
+          job: "csv",
+          since: new Date(Date.now() - 7 * 60_000).toISOString(),
+          activity: "Running pnpm test src/csv",
+          context: 48_000,
+          reason: undefined,
+        });
       snapshot.on = true;
       snapshot.status = {
         pid: 0,
@@ -457,22 +678,25 @@ function dispatch(snapshot: Snapshot, route: string, body: unknown): unknown {
         until,
         limit,
         idle: snapshot.settings.idle,
-        pools: Object.keys(agents).map((name) => ({ name, limits: 0 })),
-        workers: Object.entries(agents).map(([agent, tuning]) => ({
-          id: `${agent}#1`,
-          agent,
-          preset: agent,
-          pool: agent,
-          ...tuning,
-          state: "idle",
-          since,
-          reason: "Demo mode: no agents are launched",
-        })),
+        pools: [...new Set(slots.map((slot) => slot.pool))].map((name) => ({ name, limits: 0 })),
+        workers: slots,
       };
       return null;
     }
     case "POST /api/off":
       snapshot.on = false;
+      return null;
+    case "POST /api/train":
+      for (const id of (body as { ids: string[] }).ids) snapshot.train[id] = { step: "queued" };
+      return null;
+    case "POST /api/chat":
+      return chat.say((body as { message: string }).message);
+    case "POST /api/chat/new":
+      return chat.fresh();
+    case "POST /api/chat/open":
+      return chat.open((body as { id: string }).id);
+    case "POST /api/chat/abort":
+    case "POST /api/chat/answer":
       return null;
   }
   if (/^GET \/api\/jobs\/\w+\/pr$/.test(route)) return DEMO_PR;
@@ -485,7 +709,7 @@ function dispatch(snapshot: Snapshot, route: string, body: unknown): unknown {
     );
   }
   const match =
-    /^POST \/api\/jobs\/(\w+)\/(remove|retry|move|merge|rebase|close|answer|approve|pause|resume|cancel|replan|verify)$/.exec(
+    /^POST \/api\/jobs\/(\w+)\/(remove|retry|move|merge|rebase|close|answer|approve|pause|resume|cancel|replan|verify|pin)$/.exec(
       route,
     );
   if (!match) return undefined;
@@ -495,6 +719,10 @@ function dispatch(snapshot: Snapshot, route: string, body: unknown): unknown {
   switch (action) {
     case "remove":
       job.state = "removed";
+      break;
+    case "pin":
+      for (const key of ["agent", "model", "effort", "preset", "tier"] as const) delete job[key];
+      Object.assign(job, body as Pin);
       break;
     case "retry":
     case "resume":

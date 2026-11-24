@@ -73,8 +73,8 @@ export function agent(name: string, { model, effort }: Tuning = {}, session?: Se
 
 /**
  * How the Plan chat starts an agent: Pi in RPC mode, Claude Code streaming JSON both ways (chat.ts
- * reads each). Only tools for looking and running commands; it changes the queue through the
- * factory CLI. Claude Code's are bypassed like a run's, since nobody is there to answer a prompt.
+ * reads each). Tools for looking, writing prompt files and running commands; it changes the queue
+ * through the factory CLI. Claude Code's are bypassed like a run's, since nobody is there to answer a prompt.
  * Each keeps the chat as session `id`, continued once `resume`; Pi's session files go in `folder`.
  */
 export function chatAgent(
@@ -101,7 +101,7 @@ export function chatAgent(
         "--permission-mode",
         "bypassPermissions",
         "--tools",
-        "Read,Bash,Grep,Glob",
+        "Read,Write,Bash,Grep,Glob",
         "--append-system-prompt",
         context,
         ...pick,
@@ -119,7 +119,7 @@ export function chatAgent(
         "--session-dir",
         session.folder,
         "--tools",
-        "read,bash,grep,find,ls",
+        "read,write,bash,grep,find,ls",
         "--append-system-prompt",
         context,
         ...pick,

@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 /** Sets one value in the page's query string, without a reload or a history entry; empty removes it. */
-function setQueryParam(name: string, value: string): void {
+export function setQueryParam(name: string, value: string): void {
   const params = new URLSearchParams(location.search);
   if (value) params.set(name, value);
   else params.delete(name);

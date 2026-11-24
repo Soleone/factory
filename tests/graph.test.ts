@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vite-plus/test";
-import { checkPlan, showGoal } from "../src/backend/goals.ts";
+import { builtinCheck, checkPlan, showGoal } from "../src/backend/goals.ts";
 import {
   addJob,
   addNote,
@@ -25,8 +25,8 @@ const item = (id: string, repo = "/r"): Item => ({
   repo,
   label: "r",
   id,
-  play: "p",
-  level: "skim",
+  blueprint: "p",
+  attention: "skim",
   title: id,
 });
 const attempt = (outcome: Attempt["outcome"]): Attempt => ({
@@ -128,7 +128,7 @@ describe("the graph", () => {
 
   test("what a plan writer couldn't check stays in its result; a node's goes on the checklist", () => {
     const { state, add, byId } = graph();
-    add("plan", { item: { ...item("plan"), play: "replan" }, front: true });
+    add("plan", { item: { ...item("plan"), blueprint: "replan" }, front: true });
     add("node");
     for (const id of ["plan", "node"]) {
       startJob(state, id, "claude");
@@ -217,6 +217,36 @@ describe("the graph", () => {
     startJob(state, "a", "claude");
     expect([isReady("b"), isReady("c")]).toEqual([false, true]);
   });
+
+  test("a machine job runs alone, and while it waits nothing else starts", () => {
+    const { state, add, isReady } = graph();
+    add("a");
+    add("m", { machine: true });
+    add("b");
+    startJob(state, "a", "claude");
+    // m waits for a to finish, and b waits behind m so m gets its turn.
+    expect([isReady("m"), isReady("b")]).toEqual([false, false]);
+    record(state, { type: "merged", id: "a" });
+    expect(isReady("m")).toBe(true);
+    startJob(state, "m", "claude");
+    expect(isReady("b")).toBe(false);
+    record(state, { type: "merged", id: "m" });
+    expect(isReady("b")).toBe(true);
+  });
+
+  test("`factory alone` marks the job, and its paused attempt waits to run alone", () => {
+    const { state, add, byId, isReady } = graph();
+    add("x");
+    add("y");
+    startJob(state, "x", "claude");
+    startJob(state, "y", "claude");
+    addNote(state, "x", { kind: "alone", text: "installs a global tool" });
+    record(state, { type: "pause", id: "x", reason: "alone" });
+    expect(byId("x")).toMatchObject({ state: "queued", open: true, machine: true });
+    expect(isReady("x")).toBe(false);
+    record(state, { type: "merged", id: "y" });
+    expect(isReady("x")).toBe(true);
+  });
 });
 
 describe("assumptions", () => {
@@ -244,6 +274,19 @@ describe("assumptions", () => {
         .filter((job) => job.of)
         .map((job) => job.id),
     ).toContain(change.id);
+  });
+  test("an answer that names an assumption goes to it, even while the job waits on a question", () => {
+    const { state, add, byId } = graph();
+    add("x");
+    startJob(state, "x", "claude");
+    addNote(state, "x", { kind: "assume", text: "tabs or spaces?", assumed: "spaces" });
+    addNote(state, "x", { kind: "assume", text: "dark mode too?", assumed: "no" });
+    addNote(state, "x", { kind: "ask", text: "which API?" });
+    record(state, { type: "pause", id: "x", reason: "asked" });
+    expect(answer(state, "x", "fine", 1)).toBeUndefined();
+    expect(byId("x")).toMatchObject({ state: "blocked", blocked: "asked" });
+    expect(byId("x").notes.at(-1)).toMatchObject({ kind: "answer", re: 1 });
+    expect(() => answer(state, "x", "fine", 1)).toThrow("no open assumption 1");
   });
 });
 
@@ -281,6 +324,25 @@ test("goal show: layers by dependency depth, tiers, the critical path, and what 
   );
   expect(text).toContain("estimate: 1 communicator, 1 builder, 2 grunt attempts to go");
   expect(text).toContain("port: assumed yes, asked keep the old API?");
+});
+
+test.each([
+  ["decompose", "plan"],
+  ["replan", "replan"],
+])("%s gets validation feedback for a null plan node", (blueprint, file) => {
+  const { state: worktree, add, jobs } = graph();
+  const job = add("plan-writer", { item: { ...item("plan-writer"), blueprint } });
+  mkdirSync(join(worktree, ".factory"));
+  mkdirSync(join(worktree, ".git"));
+  writeFileSync(
+    join(worktree, ".factory", `g.${file}.json`),
+    JSON.stringify({
+      format: "factory-plan/1",
+      goal: { title: "t", repo: worktree, summary: "s", gates: [] },
+      nodes: [null],
+    }),
+  );
+  expect(builtinCheck(job, jobs(), worktree)).toContain("- nodes[0]: key must be");
 });
 
 test("a plan can't make a node wait for the milestone that contains it", () => {

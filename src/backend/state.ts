@@ -7,10 +7,13 @@ import { AGENT_NAMES } from "./agents.ts";
 import {
   presetId,
   TIERS,
+  USAGE_POOLS,
   type Candidates,
   type Item,
   type Preset,
   type Settings,
+  type Tuning,
+  upgradeItem,
 } from "./types.ts";
 
 export const STATE = process.env.DATA
@@ -35,19 +38,20 @@ export function alive(pid: number): boolean {
   }
 }
 
-export const LEVELS = ["auto", "skim", "decide"];
+export const ATTENTION = ["none", "skim", "decide"];
 
 const DEFAULTS: Settings = {
-  agents: { claude: {}, pi: {} },
   chat: { agent: "pi" },
-  presets: [],
+  presets: [{ agent: "claude" }, { agent: "pi" }],
   limit: 1,
+  reserves: {},
   idle: 10,
   tiers: { communicator: [], builder: [], grunt: [] },
   store: "local",
   capabilities: [],
   env: {},
-  auto: { on: false, levels: LEVELS, plays: [], repos: [] },
+  auto: { on: false, attention: ATTENTION, blueprints: [], repos: [] },
+  triggers: { ci: true, label: "factory", reviews: true },
 };
 
 const settingsPath = (state: string) => join(state, "settings.json");
@@ -62,27 +66,37 @@ export function writeSettings(state: string, settings: Settings): void {
 }
 
 /** Settings come from a file people edit and from the page, so they are checked on the way in. */
-export function checkSettings(raw: Partial<Settings> & { timeout?: number }): Settings {
+export function checkSettings(
+  raw: Partial<Settings> & { timeout?: number; agents?: Record<string, Tuning> },
+): Settings {
   // timeout was a wall clock and has no match in idle minutes, so an old file's is dropped.
-  const { timeout: _, ...rest } = raw;
+  const { timeout: _, agents, ...rest } = raw;
   const settings = {
     ...DEFAULTS,
     ...rest,
+    ...(agents && { presets: upgradeAgents(agents, rest) }),
     tiers: { ...DEFAULTS.tiers, ...rest.tiers },
-    auto: { ...DEFAULTS.auto, ...rest.auto },
+    auto: { ...DEFAULTS.auto, ...upgradeAuto(rest.auto) },
+    triggers: { ...DEFAULTS.triggers, ...rest.triggers },
   };
-  for (const name of Object.keys(settings.agents))
-    if (!AGENT_NAMES.includes(name))
-      throw new Error(`unknown agent ${name} (known: ${AGENT_NAMES.join(", ")})`);
   if (!AGENT_NAMES.includes(settings.chat.agent))
     throw new Error(`unknown chat agent ${settings.chat.agent} (known: ${AGENT_NAMES.join(", ")})`);
-  for (const preset of settings.presets)
+  for (const preset of settings.presets) {
     if (!AGENT_NAMES.includes(preset.agent))
       throw new Error(`unknown preset agent ${preset.agent} (known: ${AGENT_NAMES.join(", ")})`);
-  if (Object.keys(settings.agents).length === 0)
-    throw new Error("settings need at least one agent");
+    if (preset.workers !== undefined && !(Number.isInteger(preset.workers) && preset.workers >= 0))
+      throw new Error(`workers wants a whole number from 0, got ${preset.workers}`);
+  }
   if (settings.limit !== null && !(Number.isInteger(settings.limit) && settings.limit > 0))
     throw new Error(`limit wants a whole number above 0 or null, got ${settings.limit}`);
+  for (const [pool, reserve] of Object.entries(settings.reserves)) {
+    if (!(USAGE_POOLS as readonly string[]).includes(pool))
+      throw new Error(
+        `can't read ${pool}'s usage to keep a reserve (can: ${USAGE_POOLS.join(", ")})`,
+      );
+    if (!(Number.isInteger(reserve) && reserve >= 0 && reserve < 100))
+      throw new Error(`reserve for ${pool} wants a whole percent from 0 to 99, got ${reserve}`);
+  }
   if (settings.until !== undefined && !/^\d{1,2}:\d{2}$/.test(settings.until))
     throw new Error(`until wants HH:MM, got ${settings.until}`);
   if (!(Number.isInteger(settings.idle) && settings.idle > 0))
@@ -100,9 +114,46 @@ export function checkSettings(raw: Partial<Settings> & { timeout?: number }): Se
     throw new Error(`store wants local or tasks, got ${String(settings.store)}`);
   if (settings.store === "tasks" && !settings.tasks?.home)
     throw new Error("store tasks wants tasks.home, the Tasks home to mirror goals into");
-  for (const level of settings.auto.levels)
-    if (!LEVELS.includes(level)) throw new Error(`unknown level ${level}`);
+  for (const attention of settings.auto.attention)
+    if (!ATTENTION.includes(attention)) throw new Error(`unknown attention ${attention}`);
   return settings;
+}
+
+/**
+ * Before 0.6 each run agent got a hidden worker for untiered jobs, and a preset got one only once a
+ * tier listed it. The agents become the first workers, merged into a preset with the same tuning.
+ */
+function upgradeAgents(
+  agents: Record<string, Tuning>,
+  { presets = [], tiers = DEFAULTS.tiers }: Partial<Settings>,
+): Preset[] {
+  const listed = new Set(Object.values(tiers).flat());
+  const rest = presets.map((preset) => ({
+    ...preset,
+    workers: preset.workers ?? (listed.has(presetId(preset)) ? 1 : 0),
+  }));
+  const first = Object.entries(agents).map(([agent, tuning]) => {
+    const same = rest.findIndex(
+      (preset) =>
+        preset.agent === agent && preset.model === tuning.model && preset.effort === tuning.effort,
+    );
+    if (same === -1) return { agent, ...tuning, workers: 1 };
+    const [preset] = rest.splice(same, 1);
+    return { ...preset, workers: Math.max(preset.workers, 1) };
+  });
+  return [...first, ...rest];
+}
+
+type LegacyAuto = Partial<Settings["auto"]> & { levels?: string[]; plays?: string[] };
+
+/** Before workwork 0.3 auto mode filtered on levels and plays, with auto for none. */
+function upgradeAuto(auto: LegacyAuto = {}): Partial<Settings["auto"]> {
+  const { levels, plays, ...rest } = auto;
+  return {
+    ...rest,
+    ...(levels && { attention: levels.map((level) => (level === "auto" ? "none" : level)) }),
+    ...(plays && { blueprints: plays }),
+  };
 }
 
 const candidatesPath = (state: string) => join(state, "candidates.json");
@@ -110,7 +161,8 @@ const refreshLock = (state: string) => join(state, "candidates.lock");
 
 export function readCandidates(state: string): Candidates | undefined {
   if (!existsSync(candidatesPath(state))) return undefined;
-  return JSON.parse(readFileSync(candidatesPath(state), "utf8"));
+  const { at, items } = JSON.parse(readFileSync(candidatesPath(state), "utf8"));
+  return { at, items: items.map(upgradeItem) };
 }
 
 export function refreshingCandidates(state: string): boolean {
@@ -139,25 +191,20 @@ export async function refreshCandidates(state: string, workwork: string): Promis
   }
 }
 
-export async function output(command: string, args: string[], cwd: string): Promise<string> {
-  const { stdout, stderr } = await promisify(execFile)(command, args, {
-    cwd,
-    maxBuffer: 64 * 1024 * 1024,
-  });
+export async function output(
+  command: string,
+  args: string[],
+  cwd: string,
+  input?: string,
+): Promise<string> {
+  const run = promisify(execFile)(command, args, { cwd, maxBuffer: 64 * 1024 * 1024 });
+  run.child.stdin!.end(input);
+  const { stdout, stderr } = await run;
   // workwork reports failed finders here; they belong in the factory log.
   process.stderr.write(stderr);
   return stdout;
 }
 
-/** The account a preset's usage counts against: claude's, or pi's provider. */
-export const poolOf = (preset: Preset) =>
-  preset.pool ?? (preset.agent === "pi" ? (preset.model?.split("/")[0] ?? "pi") : preset.agent);
-
 /** Haiku 5.5 costs more above 100k, the others above 272k, so each compacts below its step. */
 export const compactAt = (preset: Preset) =>
   preset.compactAt ?? (/haiku/i.test(preset.model ?? "") ? 90_000 : 200_000);
-
-/** A preset gets a worker by default once a tier lists it. */
-export const workersOf = (preset: Preset, settings: Settings) =>
-  preset.workers ??
-  (Object.values(settings.tiers).some((list) => list.includes(presetId(preset))) ? 1 : 0);

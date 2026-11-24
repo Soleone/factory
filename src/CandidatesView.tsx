@@ -1,17 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, type Act } from "@/api";
 import { ChevronDownIcon, RefreshCwIcon } from "lucide-react";
-import { AGENT_NAMES } from "@/backend/agents.ts";
-import type { Item, Job, Preset, Snapshot } from "@/backend/types.ts";
+import type { Item, Job, Pin, Settings, Snapshot } from "@/backend/types.ts";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -22,7 +17,6 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
-import { ItemGroup } from "@/components/ui/item";
 import {
   Select,
   SelectContent,
@@ -36,8 +30,11 @@ import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/tooltip/tooltip";
 import { CloneDialog } from "@/CloneDialog";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { ago, itemTitle, pinName, repoName } from "@/format";
+import { ago, itemTitle, repoName } from "@/format";
+import { PinMenuItems } from "@/PinMenu";
 import { Row, Section } from "@/Row";
+import { NeutralCheckbox } from "@/components/variants/checkbox";
+import { RowGroup } from "@/components/variants/item";
 import { StateIcon, StatePill, TaskDetails, taskState } from "@/TaskDetails";
 
 const ALL = "";
@@ -45,7 +42,7 @@ const CLONE = { value: "clone-project", label: "Clone project..." };
 const PAGE = 100;
 const key = (item: { repo: string; id: string }) => `${item.repo} ${item.id}`;
 
-/** Everything workwork found, by play, to pick from. */
+/** Everything workwork found, by blueprint, to pick from. */
 export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act }) {
   const [cloneOpen, setCloneOpen] = useState(false);
   const [cloneCount, setCloneCount] = useState(0);
@@ -53,14 +50,14 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
   const [items, setItems] = useState<Item[]>([]);
   const [repoPaths, setRepoPaths] = useState<string[]>([]);
   const [repo, setRepo] = useState(ALL);
-  const [play, setPlay] = useState(ALL);
-  const [levels, setLevels] = useState(["auto", "skim", "decide"]);
+  const [blueprint, setBlueprint] = useState(ALL);
+  const [attention, setAttention] = useState(["none", "skim", "decide"]);
   const [search, setSearch] = useState("");
   const [shown, setShown] = useState(PAGE);
-  /** What each play does, by name; empty until workwork answers. */
+  /** Kept across filters, so one batch can take candidates from several blueprints. */
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  /** What each blueprint does, by name; empty until workwork answers. */
   const [described, setDescribed] = useState(new Map<string, string>());
-  /** Refresh clicks, each turning the icon once. */
-  const [turns, setTurns] = useState(0);
   const { at, count, refreshing } = snapshot.candidates;
 
   useEffect(() => {
@@ -77,8 +74,10 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
 
   useEffect(() => {
     void api
-      .plays()
-      .then((plays) => setDescribed(new Map(plays.map((each) => [each.name, each.description]))));
+      .blueprints()
+      .then((blueprints) =>
+        setDescribed(new Map(blueprints.map((each) => [each.name, each.description]))),
+      );
   }, [at]);
 
   // The latest job per candidate, so the list says what already happened to it.
@@ -98,21 +97,35 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
   }, [items, repoPaths]);
 
   const inRepo = repo === ALL ? items : items.filter((item) => item.repo === repo);
-  const playCounts = new Map<string, number>();
-  for (const item of inRepo) playCounts.set(item.play, (playCounts.get(item.play) ?? 0) + 1);
-  const plays = [...playCounts].sort((a, b) => a[1] - b[1]);
+  const blueprintCounts = new Map<string, number>();
+  for (const item of inRepo)
+    blueprintCounts.set(item.blueprint, (blueprintCounts.get(item.blueprint) ?? 0) + 1);
+  const blueprints = [...blueprintCounts].sort((a, b) => a[1] - b[1]);
 
   const words = search.toLowerCase().split(/\s+/).filter(Boolean);
   const matches = inRepo.filter(
     (item) =>
-      (play === ALL || item.play === play) &&
-      levels.includes(item.level) &&
+      (blueprint === ALL || item.blueprint === blueprint) &&
+      attention.includes(item.attention) &&
       words.every((word) =>
         `${itemTitle(item)} ${item.id} ${item.label}`.toLowerCase().includes(word),
       ),
   );
-  const queue = (wanted: Item[], pin?: Preset) => act(() => api.queue(wanted, pin));
+  const queue = (wanted: Item[], pin?: Pin) => act(() => api.queue(wanted, pin));
   const open = matches.filter((item) => !jobs.has(key(item)));
+  const selection = items.filter((item) => selected.has(key(item)) && !jobs.has(key(item)));
+  const allOpenSelected = open.length > 0 && open.every((item) => selected.has(key(item)));
+
+  const select = (wanted: Item[], checked: boolean) => {
+    setSelected((current) => {
+      const next = new Set(current);
+      for (const item of wanted) {
+        if (checked) next.add(key(item));
+        else next.delete(key(item));
+      }
+      return next;
+    });
+  };
 
   const empty = (
     <Empty>
@@ -135,7 +148,10 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
   );
 
   return (
-    <div className="flex flex-col gap-4 pt-2">
+    <div className="flex min-h-0 flex-1 flex-col gap-4">
+      <p className="text-sm text-muted-foreground">
+        Tasks that blueprints found in your repos. What you queue here runs before auto mode.
+      </p>
       <div className="flex flex-wrap items-center gap-2">
         <Input
           className="max-w-xs"
@@ -143,10 +159,10 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
           value={search}
           onChange={(event) => setSearch(event.target.value)}
         />
-        <ToggleGroup multiple variant="outline" value={levels} onValueChange={setLevels}>
-          {["auto", "skim", "decide"].map((level) => (
-            <ToggleGroupItem key={level} value={level}>
-              {level}
+        <ToggleGroup multiple variant="outline" value={attention} onValueChange={setAttention}>
+          {["none", "skim", "decide"].map((value) => (
+            <ToggleGroupItem key={value} value={value}>
+              {value}
             </ToggleGroupItem>
           ))}
         </ToggleGroup>
@@ -161,8 +177,12 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
             const next = value ?? ALL;
             setRepo(next);
             setShown(PAGE);
-            if (!items.some((item) => item.play === play && (next === ALL || item.repo === next)))
-              setPlay(ALL);
+            if (
+              !items.some(
+                (item) => item.blueprint === blueprint && (next === ALL || item.repo === next),
+              )
+            )
+              setBlueprint(ALL);
           }}
         >
           <SelectTrigger aria-label="Repo" ref={repoTrigger}>
@@ -200,15 +220,13 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
                   size="icon-sm"
                   aria-label="Refresh candidates"
                   disabled={refreshing}
-                  onClick={() => {
-                    setTurns(turns + 1);
-                    void act(api.refreshCandidates);
-                  }}
+                  onClick={() => void act(api.refreshCandidates)}
                 />
               }
             >
-              {/* A new key replays the turn on every click. */}
-              <RefreshCwIcon key={turns} className={turns ? "refresh-turn" : undefined} />
+              <RefreshCwIcon
+                className={refreshing ? "animate-spin motion-reduce:animate-none" : undefined}
+              />
             </TooltipTrigger>
             <TooltipContent>
               {refreshing ? "Asking workwork, takes a few minutes" : "Ask workwork again"}
@@ -217,26 +235,49 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
         </span>
       </div>
 
+      {selection.length > 0 && (
+        <div
+          role="group"
+          aria-label="Batch actions"
+          className="flex flex-wrap items-center gap-2 rounded-lg border bg-background px-3 py-2"
+        >
+          <span className="text-sm font-medium">{selection.length} selected</span>
+          <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
+            Clear
+          </Button>
+          <span className="sm:ml-auto">
+            <QueueButton
+              label={`Queue ${selection.length}`}
+              settings={snapshot.settings}
+              onQueue={async (pin) => {
+                await queue(selection, pin);
+                setSelected(new Set());
+              }}
+            />
+          </span>
+        </div>
+      )}
+
       {inRepo.length === 0 ? (
         empty
       ) : (
-        <div className="flex flex-col gap-6 md:flex-row">
+        <div className="flex min-h-0 flex-1 flex-col gap-6 md:flex-row">
           <nav className="flex flex-wrap gap-1 md:w-48 md:flex-none md:flex-col">
-            {[[ALL, inRepo.length] as const, ...plays].map(([name, total]) => (
+            {[[ALL, inRepo.length] as const, ...blueprints].map(([name, total]) => (
               <Tooltip key={name} disabled={!described.has(name)}>
                 <TooltipTrigger
                   render={
                     <Button
-                      variant={play === name ? "secondary" : "ghost"}
+                      variant={blueprint === name ? "secondary" : "ghost"}
                       size="sm"
                       onClick={() => {
-                        setPlay(name);
+                        setBlueprint(name);
                         setShown(PAGE);
                       }}
                     />
                   }
                 >
-                  <span className="flex-1 text-left">{name || "All plays"}</span>
+                  <span className="flex-1 text-left">{name || "All blueprints"}</span>
                   <span className="text-muted-foreground">{total}</span>
                 </TooltipTrigger>
                 <TooltipContent side="right">{described.get(name)}</TooltipContent>
@@ -244,42 +285,57 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
             ))}
           </nav>
 
-          <div className="min-w-0 flex-1">
+          {/* The one part that scrolls, so the filters and blueprints stay in view. */}
+          <div className="-m-1 min-w-0 flex-1 overflow-y-auto p-1 [scrollbar-gutter:stable]">
             <Section
               title={
-                <span className="flex items-center gap-2">
-                  <span className="flex-1">
-                    {matches.length} matching, {open.length} not queued yet
-                  </span>
-                  {open.length > 0 && open.length <= 20 && (
-                    <QueueButton
-                      label={`Queue all ${open.length}`}
-                      presets={snapshot.settings.presets}
-                      onQueue={(pin) => queue(open, pin)}
+                <span className="flex min-h-8 items-center gap-3 px-3">
+                  {open.length > 0 && (
+                    <NeutralCheckbox
+                      aria-label={
+                        allOpenSelected
+                          ? `Clear all ${open.length} not queued`
+                          : `Select all ${open.length} not queued`
+                      }
+                      checked={allOpenSelected}
+                      onCheckedChange={(checked) => select(open, checked)}
                     />
                   )}
+                  <span>
+                    {matches.length} matching, {open.length} not queued yet
+                  </span>
                 </span>
               }
             >
-              <ItemGroup>
+              <RowGroup>
                 {matches.slice(0, shown).map((item) => {
                   const job = jobs.get(key(item));
                   const queueButton = (
                     <QueueButton
                       label="Queue"
-                      presets={snapshot.settings.presets}
+                      settings={snapshot.settings}
                       onQueue={(pin) => queue([item], pin)}
                     />
                   );
                   return (
                     <Row
                       key={key(item)}
-                      leading={<StateIcon state={taskState(job, snapshot.prs)} />}
+                      leading={
+                        job ? (
+                          <StateIcon state={taskState(job, snapshot.prs)} />
+                        ) : (
+                          <NeutralCheckbox
+                            aria-label={`Select ${itemTitle(item)}`}
+                            checked={selected.has(key(item))}
+                            onCheckedChange={(checked) => select([item], checked)}
+                          />
+                        )
+                      }
                       title={
                         <TaskDetails
                           item={item}
                           job={job}
-                          play={described.get(item.play)}
+                          blueprint={described.get(item.blueprint)}
                           snapshot={snapshot}
                           act={act}
                           actions={!job && queueButton}
@@ -288,7 +344,7 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
                       meta={
                         <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
                           <StatePill state={taskState(job, snapshot.prs)} />
-                          {[item.play, item.level, item.id].join(" · ")}
+                          {[item.blueprint, item.attention, item.id].join(" · ")}
                         </span>
                       }
                     >
@@ -296,7 +352,7 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
                     </Row>
                   );
                 })}
-              </ItemGroup>
+              </RowGroup>
               {matches.length > shown && (
                 <Button variant="ghost" onClick={() => setShown(shown + PAGE)}>
                   Show {Math.min(PAGE, matches.length - shown)} more
@@ -310,15 +366,15 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
   );
 }
 
-/** Queues for whichever agent is free first, or, from the arrow's menu, for one agent or preset. */
+/** Queues for the first free worker, or, from the arrow's menu, for a role or one worker. */
 function QueueButton({
   label,
-  presets,
+  settings,
   onQueue,
 }: {
   label: string;
-  presets: Preset[];
-  onQueue: (pin?: Preset) => void;
+  settings: Settings;
+  onQueue: (pin?: Pin) => void;
 }) {
   return (
     <ButtonGroup>
@@ -336,29 +392,10 @@ function QueueButton({
           >
             <ChevronDownIcon />
           </TooltipTrigger>
-          <TooltipContent>{label} for a specific agent or preset</TooltipContent>
+          <TooltipContent>{label} for a role or a specific worker</TooltipContent>
         </Tooltip>
         <DropdownMenuContent align="end" className="w-auto">
-          <DropdownMenuGroup>
-            <DropdownMenuLabel>Agent</DropdownMenuLabel>
-            {AGENT_NAMES.map((agent) => (
-              <DropdownMenuItem key={agent} onClick={() => onQueue({ agent })}>
-                {agent}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuGroup>
-          <DropdownMenuSeparator />
-          <DropdownMenuGroup>
-            <DropdownMenuLabel>Preset</DropdownMenuLabel>
-            {presets.length === 0 && (
-              <DropdownMenuItem disabled>Add presets in Settings</DropdownMenuItem>
-            )}
-            {presets.map((preset, index) => (
-              <DropdownMenuItem key={index} onClick={() => onQueue(preset)}>
-                {pinName(preset)}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuGroup>
+          <PinMenuItems settings={settings} onPin={onQueue} />
         </DropdownMenuContent>
       </DropdownMenu>
     </ButtonGroup>

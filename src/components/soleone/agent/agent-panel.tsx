@@ -1,16 +1,16 @@
-"use client"
-
 import { memo, useId, useState, type Dispatch, type SetStateAction, type ReactNode } from "react"
 import ReactMarkdown from "react-markdown"
 import { ArrowUp, Brain, Globe, Square, TextQuote, Wrench } from "lucide-react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Bubble, BubbleContent } from "@/components/ui/bubble"
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
+import { Button } from "@/components/ui/button"
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import {
   InputGroup, InputGroupAddon, InputGroupButton, InputGroupTextarea,
 } from "@/components/ui/input-group"
 import { Message, MessageContent } from "@/components/ui/message"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/tooltip/tooltip"
 import {
   MessageScroller, MessageScrollerButton, MessageScrollerContent,
@@ -27,6 +27,8 @@ export type AgentTool = {
   /** The step's title for its current status: "Searching the web", "Searched the web", "Failed to search the web". */
   label: string
   status: "running" | "complete" | "error"
+  /** The full call, like the whole command, shown when the step opens since the title may cut it short. */
+  input?: string
   output?: string
   /** Web pages the step searched or read, shown as site chips under its title. */
   sources?: AgentSource[]
@@ -61,11 +63,15 @@ type AgentPanelProps = {
   placeholder?: string
   emptyTitle?: string
   emptyDescription?: string
+  /** Prompts offered while the conversation is empty; picking one fills the composer. */
+  suggestions?: string[]
   onSend: (text: string) => Promise<boolean>
   onStop: () => void
   renderTool?: (tool: AgentTool) => ReactNode
   /** The model and thinking level the conversation runs with, shown under the composer. */
   model?: { name: string; thinking: string }
+  /** Opens from the model badge, for example AgentModelFields. */
+  modelPicker?: ReactNode
 }
 
 type AgentTurn = { id: string; role: AgentMessage["role"]; messages: AgentMessage[] }
@@ -157,11 +163,16 @@ function ToolStep({ tool }: { tool: AgentTool }) {
       <TraceTitle>{tool.label}</TraceTitle>
     </TraceLine>
   )
-  const step = tool.output ? (
+  const step = tool.input || tool.output ? (
     <TraceCollapsible>
       <TraceCollapsibleTrigger>{line}</TraceCollapsibleTrigger>
-      <TraceCollapsibleContent>
-        <pre className="max-h-48 overflow-auto whitespace-pre-wrap text-xs">{tool.output}</pre>
+      <TraceCollapsibleContent className="flex flex-col gap-2">
+        {tool.input && (
+          <pre className="max-h-48 overflow-auto rounded-md bg-muted px-2 py-1.5 font-mono text-xs whitespace-pre-wrap wrap-anywhere text-foreground">{tool.input}</pre>
+        )}
+        {tool.output && (
+          <pre className="max-h-48 overflow-auto font-mono text-xs whitespace-pre-wrap wrap-anywhere">{tool.output}</pre>
+        )}
       </TraceCollapsibleContent>
     </TraceCollapsible>
   ) : line
@@ -217,7 +228,7 @@ const AssistantText = memo(function AssistantText({ text }: { text: string }) {
 
 /** Controlled UI only. The host owns transport, credentials, tools, and approval policy. */
 export function AgentPanel({
-  messages, prompt, onPromptChange, busy, disabled = false, error, onSend, onStop, renderTool, model,
+  messages, prompt, onPromptChange, busy, disabled = false, error, onSend, onStop, renderTool, model, modelPicker, suggestions,
   placeholder = "Ask the agent…",
   emptyTitle = "What would you like to do?",
   emptyDescription = "Ask a question or describe a change. You stay in control of what gets applied.",
@@ -256,6 +267,21 @@ export function AgentPanel({
                         <EmptyTitle>{emptyTitle}</EmptyTitle>
                         <EmptyDescription>{emptyDescription}</EmptyDescription>
                       </EmptyHeader>
+                      {suggestions && suggestions.length > 0 && (
+                        <EmptyContent className="items-stretch">
+                          {suggestions.map((suggestion) => (
+                            <Button
+                              key={suggestion}
+                              variant="outline"
+                              className="h-auto justify-start py-2 text-left whitespace-normal"
+                              disabled={disabled}
+                              onClick={() => onPromptChange(suggestion)}
+                            >
+                              {suggestion}
+                            </Button>
+                          ))}
+                        </EmptyContent>
+                      )}
                     </Empty>
                   </MessageScrollerItem>
                 ) : turnsOf(messages).map((turn) => (
@@ -334,7 +360,14 @@ export function AgentPanel({
         <p role="status" className="truncate text-xs text-muted-foreground">
           {working ? "Agent working. You can stop it at any time." : "Enter to send. Shift+Enter for a new line."}
         </p>
-        {model && (
+        {modelPicker ? (
+          <Popover>
+            <PopoverTrigger render={<Button variant="secondary" size="xs" aria-label="Change model" />}>
+              <Brain data-icon="inline-start" />{model ? `${model.name} · ${model.thinking}` : "Model"}
+            </PopoverTrigger>
+            <PopoverContent side="top" align="end" className="w-80">{modelPicker}</PopoverContent>
+          </Popover>
+        ) : model && (
           <Tooltip>
             <TooltipTrigger render={<Badge variant="secondary" />}>
               <Brain />{model.name} · {model.thinking}

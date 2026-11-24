@@ -1,8 +1,16 @@
-import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { execFile, execFileSync } from "node:child_process";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { once } from "node:events";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
+import { promisify } from "node:util";
 import { dirname, join } from "node:path";
 import { afterEach, beforeAll, describe, expect, test } from "vite-plus/test";
 import { agent, classify, resetTime } from "../src/backend/agents.ts";
@@ -16,25 +24,30 @@ import {
   nextJob,
   queueFollowup,
   queueReview,
+  queueReviewFix,
   order,
   readJobs,
   record,
   removeJob,
   retryJob,
+  pinJob,
   startJob,
 } from "../src/backend/jobs.ts";
 import {
   approveGoal,
   cancelGoal,
+  dropNode,
   importPlan,
   importPlanText,
   newGoal,
+  retierNode,
   type Plan,
 } from "../src/backend/goals.ts";
+import { exportGoal } from "../src/backend/goalExport.ts";
 import { stringify as toYaml } from "yaml";
 import { makeSlots, piSettingsWarnings, run, type RunOptions } from "../src/backend/loop.ts";
 import { agentModels } from "../src/backend/models.ts";
-import { readSettings, writeSettings } from "../src/backend/state.ts";
+import { checkSettings, readSettings, writeSettings } from "../src/backend/state.ts";
 import {
   onTrain,
   type Item,
@@ -129,27 +142,27 @@ describe("limit messages", () => {
   });
 });
 
-const item = (repo: string, id: string, level = "skim", play = "fake"): Item => ({
+const item = (repo: string, id: string, attention = "skim", blueprint = "fake"): Item => ({
   repo,
   label: repo,
   id,
-  play,
-  level,
+  blueprint,
+  attention,
   title: `fix ${id}`,
 });
 
 describe("queue", () => {
-  test("cheapest attention first, taking turns between repos, only the wanted levels", () => {
+  test("cheapest attention first, taking turns between repos, only the wanted attention", () => {
     const items = [
       item("a", "a1"),
       item("a", "a2"),
       item("a", "a3"),
       item("b", "b1"),
-      item("a", "a4", "auto"),
+      item("a", "a4", "none"),
       item("b", "b2", "decide"),
       item("c", "c1"),
     ];
-    expect(order(items, ["auto", "skim", "decide"]).map((item) => item.id)).toEqual([
+    expect(order(items, ["none", "skim", "decide"]).map((item) => item.id)).toEqual([
       "a4",
       "a1",
       "b1",
@@ -158,16 +171,43 @@ describe("queue", () => {
       "a3",
       "b2",
     ]);
-    expect(order(items, ["auto"]).map((item) => item.id)).toEqual(["a4"]);
+    expect(order(items, ["none"]).map((item) => item.id)).toEqual(["a4"]);
   });
 
-  test("auto mode takes only the chosen repos and plays, none chosen meaning all", () => {
+  test("auto mode takes only the chosen repos and blueprints, none chosen meaning all", () => {
     const items = [item("a", "a1"), item("b", "b1", "skim", "simplify"), item("c", "c1")];
-    const ids = (auto: { plays: string[]; repos: string[] }) =>
-      autoPicks(items, [], { levels: ["skim"], ...auto }, 5).map((item) => item.id);
-    expect(ids({ plays: [], repos: [] })).toEqual(["a1", "b1", "c1"]);
-    expect(ids({ plays: [], repos: ["a", "b"] })).toEqual(["a1", "b1"]);
-    expect(ids({ plays: ["simplify"], repos: ["a", "b"] })).toEqual(["b1"]);
+    const ids = (auto: { blueprints: string[]; repos: string[] }) =>
+      autoPicks(items, [], { attention: ["skim"], ...auto }, 5).map((item) => item.id);
+    expect(ids({ blueprints: [], repos: [] })).toEqual(["a1", "b1", "c1"]);
+    expect(ids({ blueprints: [], repos: ["a", "b"] })).toEqual(["a1", "b1"]);
+    expect(ids({ blueprints: ["simplify"], repos: ["a", "b"] })).toEqual(["b1"]);
+  });
+
+  test("jobs and settings saved before blueprints still read, with auto as none", () => {
+    const state = mkdtempSync(join(scratch, "state-"));
+    const old = { repo: "r", label: "r", id: "todo/a", play: "todo", level: "auto", title: "a" };
+    writeFileSync(
+      join(state, "jobs.jsonl"),
+      `${JSON.stringify({ at: "2026-11-01T00:00:00Z", type: "add", job: { id: "j", item: old, source: "pick" } })}\n`,
+    );
+    writeFileSync(
+      join(state, "settings.json"),
+      JSON.stringify({ auto: { on: true, levels: ["auto", "skim"], plays: ["todo"], repos: [] } }),
+    );
+    expect(readJobs(state)[0].item).toEqual({
+      repo: "r",
+      label: "r",
+      id: "todo/a",
+      blueprint: "todo",
+      attention: "none",
+      title: "a",
+    });
+    expect(readSettings(state).auto).toEqual({
+      on: true,
+      attention: ["none", "skim"],
+      blueprints: ["todo"],
+      repos: [],
+    });
   });
 
   test("picks come before auto jobs, in the order the user gives them", async () => {
@@ -182,12 +222,14 @@ describe("queue", () => {
     moveJob(state, c.id, 1);
     expect(ids(readJobs(state))).toEqual(["a", "c", "auto1"]);
     await expect(removeJob(state, b.id)).rejects.toThrow("is removed");
-    expect(() => retryJob(state, a.id)).toThrow("is queued");
+    expect(() => retryJob(state, a.id)).toThrow(
+      `Job ${a.id} is queued. Try again with a job in an allowed state: failed.`,
+    );
   });
 });
 
 describe("jobs that wait on others", () => {
-  test("a job waits for the one it comes after; the same play is queued once", () => {
+  test("a job waits for the one it comes after; the same blueprint is queued once", () => {
     const state = mkdtempSync(join(scratch, "state-"));
     const [fix] = addJobs(state, [item("r", "a")], "pick", { agent: "claude" });
     expect(addJobs(state, [item("r", "a")], "pick")).toEqual([]);
@@ -196,7 +238,7 @@ describe("jobs that wait on others", () => {
     expect(review).toMatchObject({
       after: [fix.id],
       agent: "pi",
-      item: { id: "a", play: "review" },
+      item: { id: "a", blueprint: "review" },
     });
     expect(review.prompt).toContain("gh pr diff workwork/a");
     expect(queueReview(state, fix.id, "pi")).toBeUndefined();
@@ -211,6 +253,18 @@ describe("jobs that wait on others", () => {
       log: "",
     });
     expect(nextJob(readJobs(state), "pi")?.id).toBe(review.id);
+  });
+
+  test("a waiting job's pin can change until a worker takes it", () => {
+    const state = mkdtempSync(join(scratch, "state-"));
+    const [job] = addJobs(state, [item("r", "a")], "pick", { agent: "pi", model: "p/luna" });
+    pinJob(state, job.id, { tier: "grunt" });
+    expect(readJobs(state)[0]).toMatchObject({ tier: "grunt" });
+    expect(readJobs(state)[0]).not.toHaveProperty("agent");
+    pinJob(state, job.id, {});
+    expect(readJobs(state)[0]).not.toHaveProperty("tier");
+    startJob(state, job.id, "claude");
+    expect(() => pinJob(state, job.id, { tier: "grunt" })).toThrow("is running");
   });
 
   test("a job waiting on one that failed is held, and goes on after a retry", () => {
@@ -236,6 +290,35 @@ describe("jobs that wait on others", () => {
     expect(states()).toEqual(["queued", "queued", "queued"]);
   });
 
+  test("a review goes to another role, and its findings become a fix on the same PR", () => {
+    const state = mkdtempSync(join(scratch, "state-"));
+    const finish = (id: string, agent: string, followups: string[] = []) => {
+      startJob(state, id, agent);
+      addNote(state, id, { kind: "result", text: "done", followups });
+      endJob(state, id, { run: "r", agent, start: "", end: "", outcome: "done", log: "" });
+    };
+    const [job] = addJobs(state, [item("r", "a")], "pick", { tier: "builder" });
+    const review = queueReview(state, job.id)!;
+    expect(review).toMatchObject({ tier: "communicator", branchOf: job.id });
+    expect(review.prompt).toContain("--followup");
+    finish(job.id, "claude");
+    finish(review.id, "pi", ["a.ts:3 off by one"]);
+    const fix = queueReviewFix(state, review.id)!;
+    expect(fix).toMatchObject({
+      tier: "builder",
+      branchOf: job.id,
+      item: { id: "a", blueprint: "fix" },
+    });
+    expect(fix.prompt).toContain("- a.ts:3 off by one");
+    expect(queueReviewFix(state, review.id)).toBeUndefined();
+
+    const [clean] = addJobs(state, [item("r", "b")], "pick");
+    const second = queueReview(state, clean.id)!;
+    expect(second.tier).toBe("builder");
+    finish(second.id, "pi");
+    expect(queueReviewFix(state, second.id)).toBeUndefined();
+  });
+
   test("a follow-up an agent reported becomes its own job, once", () => {
     const state = mkdtempSync(join(scratch, "state-"));
     const [job] = addJobs(state, [item("r", "a")], "pick");
@@ -243,7 +326,11 @@ describe("jobs that wait on others", () => {
     addNote(state, job.id, { kind: "result", text: "done", followups: ["also b"] });
     expect(() => queueFollowup(state, job.id, "not reported")).toThrow("no follow-up");
     const followup = queueFollowup(state, job.id, "also b")!;
-    expect(followup.item).toMatchObject({ id: "a+followup", play: "followup", title: "also b" });
+    expect(followup.item).toMatchObject({
+      id: "a+followup",
+      blueprint: "followup",
+      title: "also b",
+    });
     expect(followup.prompt).toMatch(/^also b\n/);
     expect(queueFollowup(state, job.id, "also b")).toBeUndefined();
   });
@@ -318,8 +405,15 @@ describe("the factory", () => {
 
   const options = (
     base: { state: string; workwork: string },
-    agents: RunOptions["agents"] = { claude: {} },
-  ): RunOptions => ({ ...base, agents, limit: 2, idleMs: 60_000, pollMs: 20 });
+    workers: RunOptions["workers"] = { pi: 0 },
+  ): RunOptions => ({
+    ...base,
+    workers,
+    limit: 2,
+    idleMs: 60_000,
+    pollMs: 20,
+    watch: async () => [],
+  });
 
   const busy = (jobs: Job[]) =>
     jobs.some((job) => job.state === "queued" || job.state === "running");
@@ -367,7 +461,7 @@ describe("the factory", () => {
     base.pick("b");
     writeSettings(base.state, {
       ...readSettings(base.state),
-      auto: { on: true, levels: ["skim"], plays: [], repos: [] },
+      auto: { on: true, attention: ["skim"], blueprints: [], repos: [] },
     });
     const jobs = await work(
       options(base),
@@ -430,8 +524,8 @@ describe("the factory", () => {
   });
 
   /** A shell line that reports on the job the way `factory note|ask|result` does. */
-  const report = (state: string, note: Record<string, unknown>) =>
-    `echo '{"at":"2026-11-16T04:00:00Z","type":"note","id":"'$FACTORY_JOB'","note":${JSON.stringify(note)}}' >> ${state}/jobs.jsonl`;
+  const report = (state: string, note: Record<string, unknown>, at = "$(date -u +%FT%TZ)") =>
+    `echo '{"at":"'${at}'","type":"note","id":"'$FACTORY_JOB'","note":${JSON.stringify(note)}}' >> ${state}/jobs.jsonl`;
 
   test("a question pauses the attempt until answered; the same session goes on in the same worktree", async () => {
     const base = setup(["a"]);
@@ -461,6 +555,45 @@ ${report(base.state, { kind: "ask", text: "A or B?" })}`,
     const turn = readFileSync(join(dirname(done.attempts[0].log), "turn-2.md"), "utf8");
     expect(turn).toContain("The user answered your question: A");
     expect(readFileSync(done.attempts[0].log, "utf8")).toBe("");
+  });
+
+  test("a question nobody answers holds the job only so long, then the agent goes with its recommendation", async () => {
+    const base = setup(["a"]);
+    agents({
+      claude: `case "$prompt" in *"Nobody answered"*) ${RESULT}; exit 0 ;; esac
+${report(base.state, { kind: "ask", text: "A or B? A, I think" }, "2026-11-16T04:00:00Z")}`,
+    });
+    base.pick("a");
+    const [job] = await work(options(base));
+    expect(job.state).toBe("done");
+    expect(job.attempts).toMatchObject([{ outcome: "done", turns: 2 }]);
+    expect(job.notes.map((note) => note.kind)).toEqual(["ask", "answer", "result"]);
+    const turn = readFileSync(join(dirname(job.attempts[0].log), "turn-2.md"), "utf8");
+    expect(turn).toContain("Go with your recommendation");
+  });
+
+  test("a session that was never saved starts over from the prompt instead of failing the job", async () => {
+    const base = setup(["a"]);
+    // Like claude when the session to resume doesn't exist: an error result, exit 0.
+    const lost = JSON.stringify({
+      type: "result",
+      is_error: true,
+      errors: ["No conversation found with session ID: x"],
+    });
+    agents({
+      claude: `echo "args: $*"
+case "$*" in *--resume*) echo 'No conversation found with session ID: x'; echo '${lost}'; exit 0 ;; esac
+case "$prompt" in *"do a"*"You stopped without finishing"*) ${RESULT} ;; esac`,
+    });
+    base.pick("a");
+    const [job] = await work(options(base));
+    expect(job.state).toBe("done");
+    expect(job.attempts).toMatchObject([{ outcome: "done", turns: 3, followups: 1 }]);
+    const log = readFileSync(job.attempts[0].log, "utf8");
+    const sessions = [...log.matchAll(/--session-id (\S+)/g)].map((match) => match[1]);
+    expect(sessions).toHaveLength(2);
+    expect(sessions[0]).not.toBe(sessions[1]);
+    expect(job.attempts[0].session).toBe(sessions[1]);
   });
 
   test("an unfinished exit or a failed gate gets a follow-up in the same session", async () => {
@@ -585,7 +718,7 @@ ${lines
     const base = setup(["a"]);
     agents({ claude: "echo broken; exit 1", pi: OK });
     const job = base.pick("a");
-    const [failed] = await work(options(base, { claude: {}, pi: {} }));
+    const [failed] = await work(options(base, {}));
     expect(failed.attempts.map((attempt) => [attempt.agent, attempt.outcome])).toEqual([
       ["claude", "failed"],
       ["claude", "failed"],
@@ -593,7 +726,7 @@ ${lines
     expect(failed.state).toBe("failed");
     retryJob(base.state, job.id);
     agents({ claude: OK, pi: OK });
-    const [done] = await work(options(base, { claude: {}, pi: {} }));
+    const [done] = await work(options(base, {}));
     expect(done.attempts.map((attempt) => attempt.agent)).toEqual(["claude", "claude", "claude"]);
     expect(done.state).toBe("done");
   });
@@ -607,11 +740,12 @@ ${lines
     expect(jobs.map((job) => job.state)).toEqual(["queued", "done"]);
   });
 
-  test("the run's model and effort per agent, unless the job has its own", async () => {
+  test("the worker's model and effort, unless the job has its own", async () => {
     const base = setup(["a"]);
     agents({ claude: `echo "args: $*"; ${RESULT}` });
+    tiered(base.state, { presets: [{ agent: "claude", model: "opus", effort: "high" }] });
     base.pick("a", { effort: "low" });
-    const [job] = await work(options(base, { claude: { model: "opus", effort: "high" } }));
+    const [job] = await work(options(base, {}));
     expect(job.attempts[0]).toMatchObject({ model: "opus", effort: "low", outcome: "done" });
     expect(readFileSync(job.attempts[0].log, "utf8")).toContain("--model opus --effort low");
   });
@@ -655,6 +789,42 @@ ${lines
     expect(wakes).toHaveLength(1);
     expect(Math.abs(wakes[0] - (reset * 1000 + 2 * MINUTE))).toBeLessThan(100);
     expect(status(base.state).workers[0]).toMatchObject({ reason: "limit 2 of 2" });
+  });
+
+  test("a pool into its reserve starts nothing until its 5-hour window resets", async () => {
+    const base = setup(["a"]);
+    agents({ claude: OK });
+    base.pick("a");
+    writeSettings(base.state, { ...readSettings(base.state), reserves: { claude: 5 } });
+    const resets = Date.now() + 3_600_000;
+    const wakes: number[] = [];
+    const [job] = await work({
+      ...options(base),
+      usage: async () => ({ used: 96, resets }),
+      sleep: async (ms) => void wakes.push(Date.now() + ms),
+    });
+    expect(wakes).toHaveLength(1);
+    expect(Math.abs(wakes[0] - (resets + 2 * MINUTE))).toBeLessThan(100);
+    expect(job.state).toBe("done");
+    expect(status(base.state).pools).toEqual([{ name: "claude", limits: 0, used: 96 }]);
+  });
+
+  test("a pool below its reserve works on, and a failed usage read holds nothing", async () => {
+    const base = setup(["a", "b"]);
+    agents({ claude: OK });
+    base.pick("a");
+    base.pick("b");
+    writeSettings(base.state, { ...readSettings(base.state), reserves: { claude: 5 } });
+    const wakes: number[] = [];
+    const jobs = await work({
+      ...options(base),
+      usage: async () => {
+        throw new Error("401");
+      },
+      sleep: async (ms) => void wakes.push(ms),
+    });
+    expect(jobs.map((job) => job.state)).toEqual(["done", "done"]);
+    expect(wakes).toHaveLength(0);
   });
 
   test("without a limit it waits for every reset", async () => {
@@ -792,6 +962,35 @@ ${lines
     expect(sh(base.repo, "git", "worktree", "list").trim().split("\n")).toHaveLength(3);
   });
 
+  test("untiered jobs go to the first free worker in settings order, tiers' presets included", async () => {
+    const base = setup(["a"]);
+    agents({ pi: RESULT, claude: RESULT });
+    tiered(base.state, {
+      presets: [
+        { agent: "pi", model: "openai-codex/luna", id: "luna" },
+        { agent: "claude", id: "c" },
+      ],
+      tiers: { communicator: [], builder: [], grunt: ["luna"] },
+    });
+    base.pick("a");
+    const [job] = await work(options(base, {}));
+    expect(job.attempts).toMatchObject([{ outcome: "done", preset: "luna" }]);
+  });
+
+  test("a pin on a worker this run doesn't have runs on a free worker of its agent, with its tuning", async () => {
+    const base = setup(["a"]);
+    agents({ claude: `echo "args: $*"; ${RESULT}` });
+    tiered(base.state, {
+      presets: [
+        { agent: "claude", id: "c" },
+        { agent: "claude", model: "opus", effort: "high", id: "big", workers: 0 },
+      ],
+    });
+    base.pick("a", { preset: "big", agent: "claude", model: "opus", effort: "high" });
+    const [job] = await work(options(base, {}));
+    expect(job.attempts).toMatchObject([{ outcome: "done", preset: "c", model: "opus" }]);
+  });
+
   test("agents and gates get the repo's env, with {worktree} filled in", async () => {
     const base = setup(["a"]);
     agents({ claude: `echo "target=$CARGO_TARGET_DIR"; ${RESULT}` });
@@ -843,23 +1042,42 @@ ${lines
     }
   });
 
-  test("workers: one per run agent, and each preset's, by default one when a tier lists it", () => {
+  test("workers: each preset's, one by default, with the run's counts over the settings'", () => {
     const settings = {
       ...readSettings(mkdtempSync(join(scratch, "state-"))),
       presets: [
         { agent: "pi", model: "p/a", id: "a" },
-        { agent: "pi", model: "p/b", id: "b" },
+        { agent: "pi", model: "p/b", id: "b", workers: 0 },
         { agent: "claude", model: "haiku", id: "h", workers: 2 },
       ],
-      tiers: { communicator: [], builder: ["a"], grunt: [] },
     };
-    expect(
-      makeSlots({ claude: {} }, settings).map((slot) => [slot.worker.id, slot.worker.pool]),
-    ).toEqual([
-      ["claude#1", "claude"],
+    expect(makeSlots(settings).map((slot) => [slot.worker.id, slot.worker.pool])).toEqual([
       ["a#1", "p"],
       ["h#1", "claude"],
       ["h#2", "claude"],
+    ]);
+    expect(makeSlots(settings, { a: 0, b: 1 }).map((slot) => slot.worker.id)).toEqual([
+      "b#1",
+      "h#1",
+      "h#2",
+    ]);
+  });
+
+  test("old settings: the run agents become the first workers, merged into a preset with their tuning", () => {
+    const settings = checkSettings({
+      agents: { claude: { model: "opus" }, pi: {} },
+      presets: [
+        { agent: "pi", model: "p/luna", id: "luna" },
+        { agent: "claude", model: "opus" },
+        { agent: "claude", model: "haiku" },
+      ],
+      tiers: { communicator: [], builder: [], grunt: ["luna"] },
+    });
+    expect(settings.presets).toEqual([
+      { agent: "claude", model: "opus", workers: 1 },
+      { agent: "pi", workers: 1 },
+      { agent: "pi", model: "p/luna", id: "luna", workers: 1 },
+      { agent: "claude", model: "haiku", workers: 0 },
     ]);
   });
 
@@ -903,6 +1121,23 @@ echo "$key" > $key.txt; git add $key.txt; git commit -qm "$key"; git push -q ori
       sh(origin, "git", "ls-tree", "--name-only", "-r", branch).trim().split("\n");
     return { repo, origin, state, github, files, base: { state, workwork: "false" } };
   }
+
+  test("before it starts, a node can move to another tier or be dropped, and what waited on it waits on what it waited on", async () => {
+    const { repo, state } = goalRepo();
+    const goal = await importPlan(
+      state,
+      plan(repo, [{ key: "a" }, { key: "b", after: ["a"] }, { key: "c", after: ["b"] }]),
+    );
+    const id = (key: string) =>
+      readJobs(state).find((job) => job.of === goal.id && job.key === key)!.id;
+    retierNode(state, id("c"), "grunt");
+    dropNode(state, id("b"));
+    const nodes = readJobs(state).filter((job) => job.of === goal.id && job.state !== "removed");
+    expect(nodes.map((node) => [node.key, node.tier, node.after])).toEqual([
+      ["a", "builder", []],
+      ["c", "grunt", [id("a")]],
+    ]);
+  });
 
   test("a goal: waits for approval, merges each node into its integration branch in order, then opens the final PR", async () => {
     const { repo, state, github, files, base } = goalRepo();
@@ -984,7 +1219,10 @@ echo "$key" > $key.txt; git add $key.txt; git commit -qm "$key"; git push -q ori
       await running;
     }
     expect(readJobs(state).find((job) => job.id === goal.id)?.state).toBe("removed");
-    expect(readJobs(state).find((job) => job.key === "a")?.state).toBe("removed");
+    expect(readJobs(state).find((job) => job.key === "a")).toMatchObject({
+      state: "removed",
+      attempts: [expect.objectContaining({ outcome: "done" })],
+    });
     expect(files("goal/demo")).not.toContain("a.txt");
   });
 
@@ -994,7 +1232,7 @@ echo "$key" > $key.txt; git add $key.txt; git commit -qm "$key"; git push -q ori
     const started = join(gate, "started");
     const released = join(gate, "released");
     agents({
-      claude: `touch ${started}; while [ ! -e ${released} ]; do sleep 0.02; done; echo '{"at":"2026-11-16T04:00:00Z","type":"note","id":"'$FACTORY_JOB'","note":{"kind":"ask","text":"which?"}}' >> ../../../jobs.jsonl`,
+      claude: `touch ${started}; while [ ! -e ${released} ]; do sleep 0.02; done; echo '{"at":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'","type":"note","id":"'$FACTORY_JOB'","note":{"kind":"ask","text":"which?"}}' >> ../../../jobs.jsonl`,
     });
     const goal = await importPlan(state, plan(repo, [{ key: "a" }]));
     approveGoal(state, goal.id);
@@ -1014,7 +1252,49 @@ echo "$key" > $key.txt; git add $key.txt; git commit -qm "$key"; git push -q ori
       await running;
     }
     expect(readJobs(state).find((job) => job.id === goal.id)?.state).toBe("removed");
-    expect(readJobs(state).find((job) => job.key === "a")?.state).toBe("removed");
+    expect(readJobs(state).find((job) => job.key === "a")).toMatchObject({
+      state: "removed",
+      notes: expect.arrayContaining([expect.objectContaining({ kind: "ask", text: "which?" })]),
+    });
+  });
+
+  test("a goal's export zips its jobs, events, attempt folders, memory, plan and PRs", async () => {
+    const { repo, state, base } = goalRepo();
+    agents({ claude: NODE });
+    const goal = await importPlan(state, plan(repo, [{ key: "a" }]));
+    approveGoal(state, goal.id);
+    const jobs = await work(
+      options(base),
+      (jobs) => jobs.find((job) => job.id === goal.id)!.state === "done",
+    );
+    const node = jobs.find((job) => job.key === "a")!;
+    const out = join(mkdtempSync(join(scratch, "export-")), "goal.zip");
+    await exportGoal(
+      state,
+      readJobs(state).find((job) => job.id === goal.id)!,
+      out,
+    );
+    const entries = sh(scratch, "unzip", "-Z1", out).trim().split("\n");
+    expect(entries).toEqual(
+      expect.arrayContaining([
+        "REVIEW.md",
+        "summary.txt",
+        "goal.json",
+        "jobs.json",
+        "events.jsonl",
+        "settings.json",
+        `attempts/${node.id}-1/prompt.md`,
+        `attempts/${node.id}-1/agent.log`,
+        "repo/memory.md",
+        "repo/plan.json",
+        "repo/git-log.txt",
+        "prs/101.json",
+        "prs/101.diff",
+      ]),
+    );
+    const unzip = (path: string) => sh(scratch, "unzip", "-p", out, path);
+    expect(JSON.parse(unzip("jobs.json")).map((job: Job) => job.key)).toEqual(["a"]);
+    expect(unzip("events.jsonl").trim().split("\n")[0]).toContain(`"id":"${goal.id}"`);
   });
 
   test("a node that no longer rebases gets a conflicts job on its branch, then merges", async () => {
@@ -1034,10 +1314,10 @@ esac; ${RESULT}`;
     );
     approveGoal(state, goal.id);
     const jobs = await work(
-      options(base, { claude: {}, pi: {} }),
+      options(base, {}),
       (jobs) => jobs.find((job) => job.id === goal.id)!.state === "done",
     );
-    const conflicts = jobs.filter((job) => job.item.play === "conflicts");
+    const conflicts = jobs.filter((job) => job.item.blueprint === "conflicts");
     expect(conflicts).toHaveLength(1);
     expect(conflicts[0]).toMatchObject({ state: "done", front: true });
     expect(sh(repo, "git", "show", "origin/goal/demo:same.txt")).toBe("both\n");
@@ -1066,7 +1346,7 @@ esac; git push -q origin HEAD:$b; ${RESULT}`,
     expect(goalJob.notes.map((note) => note.text)).toContain(
       "goal/demo fails `test ! -e bad.txt` after merging a",
     );
-    expect(jobs.filter((job) => job.item.play === "red").map((job) => job.state)).toEqual([
+    expect(jobs.filter((job) => job.item.blueprint === "red").map((job) => job.state)).toEqual([
       "done",
       "done",
     ]);
@@ -1089,7 +1369,7 @@ esac`,
       options(base),
       (jobs) => jobs.find((job) => job.id === goal.id)!.state === "done",
     );
-    expect(jobs.filter((job) => job.of).map((job) => [job.item.play, job.state])).toEqual([
+    expect(jobs.filter((job) => job.of).map((job) => [job.item.blueprint, job.state])).toEqual([
       ["review", "done"],
       ["fix", "done"],
       ["goal", "done"],
@@ -1123,7 +1403,7 @@ if [ $n = 1 ]; then echo '{"format":"factory-plan/1","nodes":[]}' > .factory/dem
     // Nothing to approve until the plan is in.
     expect(readJobs(state).find((job) => job.id === goal.id)?.blocked).toBeUndefined();
     const jobs = await work(options(base), (jobs) => jobs.some((job) => job.key === "b"));
-    const decompose = jobs.find((job) => job.item.play === "decompose")!;
+    const decompose = jobs.find((job) => job.item.blueprint === "decompose")!;
     expect(decompose).toMatchObject({ state: "done", tier: "communicator" });
     expect(decompose.notes.find((note) => note.kind === "factory")?.text).toContain(
       "has problems; fix them all:",
@@ -1157,7 +1437,7 @@ esac`,
     );
     approveGoal(state, goal.id);
     const jobs = await work(options(base), (jobs) =>
-      jobs.some((job) => job.item.play === "replan" && job.state === "done"),
+      jobs.some((job) => job.item.blueprint === "replan" && job.state === "done"),
     );
     const nodes = jobs.filter((job) => job.key).sort((x, y) => x.key!.localeCompare(y.key!));
     expect(nodes.map((job) => [job.key, job.state])).toEqual([
@@ -1171,6 +1451,32 @@ esac`,
       state: "blocked",
       blocked: "checkpoint",
     });
+  });
+
+  test("a goal whose replan is the last job to finish still opens its final PR", async () => {
+    const { repo, state, github, base } = goalRepo();
+    const nodes = [
+      { key: "m" },
+      { key: "a", parent: "m", touches: ["a/**"] },
+      { key: "b", touches: ["b/**"] },
+    ];
+    // m is done once a merges, which queues a replan; b merges meanwhile, so the replan ends last.
+    const replanned = plan(repo, nodes);
+    const script = `case "$prompt" in
+  *"Replan the goal"*) sleep 0.5; mkdir -p .factory; echo '${JSON.stringify(replanned)}' > .factory/demo.replan.json; ${RESULT} ;;
+  *) ${NODE} ;;
+esac`;
+    agents({ claude: script, pi: script });
+    const goal = await importPlan(state, plan(repo, nodes));
+    approveGoal(state, goal.id);
+    const jobs = await work(
+      options(base, {}),
+      (jobs) => jobs.find((job) => job.id === goal.id)!.state === "done",
+    );
+    expect(jobs.filter((job) => job.item.blueprint === "replan").map((job) => job.state)).toEqual([
+      "done",
+    ]);
+    expect(github.calls()).toContain("pr create --base main --head goal/demo --title Demo goal");
   });
 
   test("a goal at its attempt budget waits; approving gives it the budget again", async () => {
@@ -1204,7 +1510,7 @@ esac`,
     process.env.PATH = `${bin}:${process.env.PATH}`;
     const previousSource = process.env.SRC;
     process.env.SRC = source;
-    const server = serve(state, 0, "127.0.0.1");
+    const server = serve(state, 0, "127.0.0.1", () => ({}));
     await once(server, "listening");
     const { port } = server.address() as AddressInfo;
     const url = `http://127.0.0.1:${port}/api`;
@@ -1238,7 +1544,7 @@ esac`,
     process.env.PATH = `${bin}:${process.env.PATH}`;
     const previousSource = process.env.SRC;
     process.env.SRC = source;
-    const server = serve(state, 0, "127.0.0.1");
+    const server = serve(state, 0, "127.0.0.1", () => ({}));
     await once(server, "listening");
     const { port } = server.address() as AddressInfo;
     const post = (body: object) =>
@@ -1259,7 +1565,7 @@ esac`,
 
   test("serve queues a job of your own for a tier, titled by its prompt unless given one", async () => {
     const base = setup([]);
-    const server = serve(base.state, 0, "127.0.0.1");
+    const server = serve(base.state, 0, "127.0.0.1", () => ({}));
     await once(server, "listening");
     const { port } = server.address() as AddressInfo;
     const post = (body: object) =>
@@ -1288,7 +1594,7 @@ esac`,
       join(base.state, "candidates.json"),
       JSON.stringify({ at: new Date().toISOString(), items: base.items }),
     );
-    const server = serve(base.state, 0, "127.0.0.1");
+    const server = serve(base.state, 0, "127.0.0.1", () => ({}));
     await once(server, "listening");
     const { port } = server.address() as AddressInfo;
     const url = (path: string) => `http://127.0.0.1:${port}${path}`;
@@ -1315,7 +1621,7 @@ esac`,
     agents({ claude: OK });
     const job = base.pick("a");
     await work(options(base));
-    const server = serve(base.state, 0, "127.0.0.1");
+    const server = serve(base.state, 0, "127.0.0.1", () => ({}));
     await once(server, "listening");
     const { port } = server.address() as AddressInfo;
     const url = (path: string) => `http://127.0.0.1:${port}${path}`;
@@ -1328,7 +1634,7 @@ esac`,
         await new Promise((resolve) => setTimeout(resolve, 20));
       }
       expect(prs[pr]).toMatchObject({
-        level: "skim",
+        attention: "skim",
         checks: "pending",
         files: ["a.ts"],
         conflicts: false,
@@ -1362,16 +1668,18 @@ esac`,
     });
     const jobs = [base.pick("a"), base.pick("b")];
     await work(options(base));
-    const server = serve(base.state, 0, "127.0.0.1");
+    const server = serve(base.state, 0, "127.0.0.1", () => ({}));
     await once(server, "listening");
     const { port } = server.address() as AddressInfo;
     const url = (path: string) => `http://127.0.0.1:${port}${path}`;
     try {
-      const start = await fetch(url("/api/train"), {
-        method: "POST",
-        body: JSON.stringify({ ids: jobs.map((job) => job.id) }),
-      });
-      expect(start.status, await start.text()).toBe(200);
+      // Through the CLI, as the Live Agent does.
+      const { stdout } = await promisify(execFile)(
+        process.execPath,
+        ["src/backend/cli.ts", "merge", ...jobs.map((job) => job.id)],
+        { env: { ...process.env, DATA: scratch, FACTORY_URL: url("") } },
+      );
+      expect(stdout).toMatch(/^on the merge train/);
       let train: Snapshot["train"] = {};
       while (Object.keys(train).length < 2 || Object.values(train).some(onTrain)) {
         train = ((await (await fetch(url("/api/state"))).json()) as Snapshot).train;
@@ -1380,16 +1688,42 @@ esac`,
       // The fake gh answers the same for every PR, so the first merge closes the second.
       expect(train).toEqual({
         [jobs[0].id]: { step: "merged" },
-        [jobs[1].id]: { step: "skipped", reason: "already merged" },
+        [jobs[1].id]: {
+          step: "skipped",
+          reason: "This pull request is already merged; no action needed",
+        },
       });
       expect(github.calls().match(/pr merge/g)).toHaveLength(1);
       const said = readJobs(base.state).map((job) =>
         job.notes.filter((note) => note.kind === "train").map((note) => note.text),
       );
-      expect(said).toEqual([["merged"], ["skipped: already merged"]]);
+      expect(said).toEqual([
+        ["merged"],
+        ["skipped: This pull request is already merged; no action needed"],
+      ]);
     } finally {
       server.close();
     }
+  });
+
+  test("the CLI reorders and pins the queue, as the Live Agent does", async () => {
+    const data = mkdtempSync(join(scratch, "data-"));
+    const base = setup(["a", "b"]);
+    const state = join(data, "apps", "factory");
+    mkdirSync(state, { recursive: true });
+    const [a, b] = base.items.map((each) => addJobs(state, [each], "pick")[0]);
+    const cli = (...args: string[]) =>
+      promisify(execFile)(process.execPath, ["src/backend/cli.ts", ...args], {
+        env: { ...process.env, DATA: data },
+      });
+    await cli("move", b.id, "1");
+    await cli("pin", a.id, "--tier", "grunt");
+    const queued = readJobs(state).filter((job) => job.state === "queued");
+    expect(queued.map((job) => [job.id, job.tier])).toEqual([
+      [b.id, undefined],
+      [a.id, "grunt"],
+    ]);
+    await expect(cli("pin", a.id, "--tier", "boss")).rejects.toThrow(/--tier wants/);
   });
 
   /** Starts serve with a fake agent on PATH; `page` opens the Plan chat's event stream. */
@@ -1403,7 +1737,7 @@ esac`,
     const bin = mkdtempSync(join(scratch, `${name}-`));
     script(bin, name, fake);
     process.env.PATH = `${bin}:${process.env.PATH}`;
-    const server = serve(state, 0, "127.0.0.1");
+    const server = serve(state, 0, "127.0.0.1", () => ({}));
     await once(server, "listening");
     const { port } = server.address() as AddressInfo;
     const url = `http://127.0.0.1:${port}/api/chat`;
@@ -1413,7 +1747,10 @@ esac`,
       let text = "";
       return async (type: string) => {
         for (;;) {
-          const records = [...text.matchAll(/^data: (.*)$/gm)].map(([, json]) => JSON.parse(json));
+          // The list of chats comes along with every change; only a test that waits for it sees it.
+          const records = [...text.matchAll(/^data: (.*)$/gm)]
+            .map(([, json]) => JSON.parse(json))
+            .filter((record) => type === "chats" || record.type !== "chats");
           const end = records.findIndex((record) => record.type === type);
           if (end >= 0) return records.slice(0, end + 1);
           text += (await reader.read()).value;
@@ -1449,7 +1786,7 @@ esac; done`,
       const replay = await later("agent_settled");
       expect(replay.map((record) => record.type)).toEqual(types);
       expect(replay[1].message.content[0].text).toBe("Queue a");
-      await fetch(`${chat.url}/reset`, { method: "POST" });
+      await fetch(`${chat.url}/new`, { method: "POST" });
       expect((await first("reset")).at(-1).type).toBe("reset");
       expect(readFileSync(args, "utf8")).toMatch(/--model openai\/gpt-6.2-sol --thinking low/);
     } finally {
@@ -1489,10 +1826,43 @@ esac; done`;
       const launches = readFileSync(args, "utf8");
       const id = /--session-id (\S+)/.exec(launches)![1];
       expect(launches).toContain(`--resume ${id}`);
-      await fetch(`${second.url}/reset`, { method: "POST" });
-      expect(existsSync(join(first.state, "chat.jsonl"))).toBe(false);
     } finally {
       second.close();
+    }
+  });
+
+  test("the Plan chat keeps earlier chats: a new one starts fresh, opening the first replays it and resumes its session", async () => {
+    const args = join(scratch, "claude-switch-args");
+    const fake = `echo "$@" >> ${args}; while read -r line; do case "$line" in
+*'"user"'*) echo '{"type":"result","is_error":false}' ;;
+esac; done`;
+    const chat = await chatServer("claude", fake, { agent: "claude" });
+    try {
+      const page = await chat.page();
+      await chat.prompt("Pick five jobs\nfor tonight");
+      await page("agent_settled");
+      const [{ id: first }] = JSON.parse(
+        readFileSync(join(chat.state, "chats.json"), "utf8"),
+      ).chats;
+      await fetch(`${chat.url}/new`, { method: "POST" });
+      await chat.prompt("why did tasks fail?");
+      const later = await chat.page();
+      const listed = (await later("chats"))[0];
+      expect(listed.chats.map((entry: { title: string }) => entry.title)).toEqual([
+        "why did tasks fail?",
+        "Pick five jobs",
+      ]);
+      expect(listed.current).not.toBe(first);
+      await fetch(`${chat.url}/open`, { method: "POST", body: JSON.stringify({ id: first }) });
+      const replay = await later("exit");
+      expect(replay.some((record) => record.type === "reset")).toBe(true);
+      await chat.prompt("and one more");
+      await (
+        await chat.page()
+      )("agent_settled");
+      expect(readFileSync(args, "utf8")).toContain(`--resume ${first}`);
+    } finally {
+      chat.close();
     }
   });
 
@@ -1716,7 +2086,7 @@ esac; done`,
         "post-receive",
         `printf '%s\\n' '${JSON.stringify(OPEN_PR)}' > ${github.viewPath}`,
       );
-      const server = serve(base.state, 0, "127.0.0.1");
+      const server = serve(base.state, 0, "127.0.0.1", () => ({}));
       await once(server, "listening");
       const { port } = server.address() as AddressInfo;
       const url = `http://127.0.0.1:${port}`;
@@ -1747,7 +2117,9 @@ esac; done`,
               reason: "conflicts in shared.txt; a job to resolve them is queued",
             });
           }
-          const fixes = readJobs(base.state).filter((other) => other.item.play === "conflicts");
+          const fixes = readJobs(base.state).filter(
+            (other) => other.item.blueprint === "conflicts",
+          );
           expect(fixes.map((fix) => [fix.state, fix.item.title])).toEqual([
             ["queued", "Resolve conflicts: fix a"],
           ]);
@@ -1773,4 +2145,107 @@ esac; done`,
       }
     },
   );
+
+  describe("factory add", () => {
+    /**
+     * A repo, factory's state listing `listed` in it, and a workwork on PATH that logs each call and
+     * fails the way listing a repo does without a git identity, unless `offers` says what it finds.
+     */
+    function setupAdd(listed: string[], offers?: string[]) {
+      const repo = mkdtempSync(join(scratch, "repo-"));
+      sh(repo, "git", "init", "-q");
+      const data = mkdtempSync(join(scratch, "data-"));
+      const state = join(data, "apps", "factory");
+      execFileSync("mkdir", ["-p", state]);
+      const items = (ids: string[]) => ids.map((id) => ({ ...item(repo, id), label: "repo" }));
+      writeFileSync(
+        join(state, "candidates.json"),
+        JSON.stringify({ at: "2026-11-23T00:00:00Z", items: items(listed) }),
+      );
+      const bin = mkdtempSync(join(scratch, "bin-"));
+      script(
+        bin,
+        "workwork",
+        `echo "$*" >> ${bin}/calls\n` +
+          (offers
+            ? `echo '${JSON.stringify(items(offers))}'`
+            : `echo "Author identity unknown\n\n*** Please tell me who you are." >&2; exit 128`),
+      );
+      // A shell without a git author, as in the session this came from.
+      const noIdentity = join(scratch, "no-identity");
+      writeFileSync(noIdentity, "");
+      const env = {
+        ...process.env,
+        DATA: data,
+        PATH: `${bin}:${process.env.PATH}`,
+        GIT_CONFIG_GLOBAL: noIdentity,
+      };
+      const add = (...args: string[]) =>
+        promisify(execFile)(process.execPath, ["src/backend/cli.ts", "add", ...args], { env });
+      const calls = () =>
+        existsSync(join(bin, "calls")) ? readFileSync(join(bin, "calls"), "utf8") : "";
+      return { repo, state, add, calls };
+    }
+
+    test("queues candidates factory lists without asking workwork, with no git identity", async () => {
+      const { repo, state, add, calls } = setupAdd(["a", "b"]);
+      const [first] = addJobs(state, [item("other", "x")], "pick");
+      const { stdout } = await add(
+        "a",
+        "b",
+        "a",
+        "--repo",
+        repo,
+        "--after",
+        first.id,
+        "--tier",
+        "builder",
+        "--machine",
+      );
+      expect(stdout).toMatch(/^queued \w+: repo a\nqueued \w+: repo b\n$/);
+      expect(calls()).toBe("");
+      const jobs = readJobs(state).filter((job) => job.item.repo === repo);
+      expect(jobs.map((job) => [job.item.id, job.after, job.tier, job.machine])).toEqual([
+        ["a", [first.id], "builder", true],
+        ["b", [first.id], "builder", true],
+      ]);
+      // From a folder inside the repo, and again: already queued, still without workwork.
+      execFileSync("mkdir", [join(repo, "sub")]);
+      expect((await add("a", "--repo", join(repo, "sub"))).stdout).toBe("already queued: repo a\n");
+      expect(calls()).toBe("");
+    });
+
+    test("asks workwork for an id factory doesn't list, and queues it", async () => {
+      const { repo, state, add, calls } = setupAdd(["a"], ["a", "new"]);
+      await add("a", "new", "--repo", repo);
+      expect(calls()).toBe("--json\n");
+      expect(readJobs(state).map((job) => job.item.id)).toEqual(["a", "new"]);
+    });
+
+    test("queues none of the ids when one is missing, and says what to do", async () => {
+      const { repo, state, add } = setupAdd(["a"], ["a"]);
+      await expect(add("a", "gone", "--repo", repo)).rejects.toThrow(
+        /workwork has no candidate gone in .*; nothing queued\. .*--all-history/,
+      );
+      expect(readJobs(state)).toEqual([]);
+    });
+
+    test("queues none when workwork can't list the repo, and says why", async () => {
+      const { repo, state, add } = setupAdd(["a"]);
+      await expect(add("a", "new", "--repo", repo)).rejects.toThrow(
+        /factory lists no new in .*, and asking workwork failed; nothing queued:[^]*Author identity unknown[^]*set user\.name and user\.email/,
+      );
+      expect(readJobs(state)).toEqual([]);
+    });
+
+    test("checks pins and --after before looking up candidates", async () => {
+      const { repo, state, add, calls } = setupAdd(["a"]);
+      await expect(add("new", "--repo", repo, "--tier", "nope")).rejects.toThrow("--tier wants");
+      await expect(add("new", "--repo", repo, "--after", "nope")).rejects.toThrow(
+        "--after names no job nope",
+      );
+      expect(readJobs(state)).toEqual([]);
+      expect(calls()).toBe("");
+    });
+  });
 });

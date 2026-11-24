@@ -1,11 +1,22 @@
-import { useState } from "react";
-import { Activity, Inbox, ListOrdered, PackageCheck, Workflow } from "lucide-react";
+import { useEffect, useEffectEvent, useState, type ReactNode } from "react";
+import { PlusIcon } from "lucide-react";
 import { ActivityView } from "@/ActivityView";
+import { BlueprintsView } from "@/BlueprintsView";
 import { useFactory, type Act } from "@/api";
-import type { Snapshot } from "@/backend/types.ts";
+import type { Snapshot, UsageWindow as Used } from "@/backend/types.ts";
 import { AgentSidebar } from "@/components/soleone/agent";
+import { isInteractiveTarget } from "@/components/soleone/theme";
+import { useRowKeys } from "@/rowKeys";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/tooltip/tooltip";
 import { ThemePicker } from "@/components/soleone/theme-picker";
+import { UsageRing, type UsageWindow } from "@/components/soleone/usage-ring/usage-ring";
 import { Badge } from "@/components/ui/badge";
+import { AccentBadge } from "@/components/variants/badge";
+import { Kbd, KbdGroup } from "@/components/ui/kbd";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ScrollingTabsContent, TabbedDialogContent } from "@/components/variants/dialog";
+
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useSidebar } from "@/components/ui/sidebar";
@@ -13,17 +24,32 @@ import { CandidatesView } from "@/CandidatesView";
 import { Controls } from "@/Controls";
 import { GoalsView } from "@/GoalsView";
 import { Logo } from "@/Logo";
-import { PlanView } from "@/PlanView";
-import { QueueView } from "@/QueueView";
+import { ChatSwitcher, PlanView, useChat } from "@/PlanView";
+import { QueueView, queued } from "@/QueueView";
 import { ResultsView } from "@/ResultsView";
 import { SettingsDialog } from "@/SettingsDialog";
 import { clock, runStart } from "@/format";
-import { useQueryParam } from "@/hooks/use-query-param";
+import { setQueryParam, useQueryParam } from "@/hooks/use-query-param";
+import { inbox } from "@/inbox";
+import { NewGoalForm } from "@/NewGoalForm";
+import { NewJobForm } from "@/NewJobForm";
+import { InboxView } from "@/InboxView";
+
+// Links from before the tabs were merged still open what they named, before any view reads the query.
+const old = new URLSearchParams(location.search).get("tab");
+if (old === "candidates" || old === "blueprints") {
+  setQueryParam("tab", "queue");
+  setQueryParam("add", old);
+} else if (old === "activity") {
+  setQueryParam("tab", "results");
+  setQueryParam("view", "activity");
+}
 
 export function App() {
   const { snapshot, error, act } = useFactory();
   /** The Live Agent draft, here so the Results tab can fill it with a question. */
   const [plan, setPlan] = useState("");
+  const chat = useChat();
 
   if (!snapshot)
     return (
@@ -40,8 +66,10 @@ export function App() {
     // The agent sits beside every tab, and stays mounted so a reply keeps streaming while it's closed.
     <AgentSidebar
       title="Live Agent"
+      header={<ChatSwitcher chat={chat} />}
+      busy={chat.transcript.busy}
       agent={
-        <PlanView agent={snapshot.settings.chat.agent} prompt={plan} onPromptChange={setPlan} />
+        <PlanView chat={chat} settings={snapshot.settings} prompt={plan} onPromptChange={setPlan} />
       }
     >
       <Factory snapshot={snapshot} error={error} act={act} onAsk={setPlan} />
@@ -60,16 +88,26 @@ function Factory({
   act: Act;
   onAsk: (question: string) => void;
 }) {
-  const [tab, setTab] = useQueryParam("tab", "queue");
+  const { stopped, ready } = inbox(snapshot);
+  // Decided once, so the page doesn't jump to Queue when the last question gets answered.
+  const [landing] = useState(stopped.length > 0 ? "inbox" : "queue");
+  const [tab, setTab] = useQueryParam("tab", landing);
+  const [view, setView] = useQueryParam("view", "results");
+  const [adding, setAdding] = useQueryParam("add", "");
+  useGoKeys(setTab);
+  useRowKeys();
   const { isMobile, setOpen, setOpenMobile } = useSidebar();
+  /** Starts the Live Agent chat with a question about a result. */
+  const ask = (question: string) => {
+    onAsk(question);
+    (isMobile ? setOpenMobile : setOpen)(true);
+  };
   const { on, status } = snapshot;
-  const queued = snapshot.jobs.filter(
-    (job) => job.state === "queued" && !job.of && !job.goal,
-  ).length;
   const goals = snapshot.jobs.filter(
     (job) => job.goal && job.state !== "removed" && job.state !== "done",
-  );
-  const waiting = goals.filter((goal) => goal.blocked === "checkpoint").length;
+  ).length;
+  const lined = Object.values(queued(snapshot.jobs)).flat().length;
+
   const run =
     on && status
       ? [
@@ -96,7 +134,16 @@ function Factory({
             <Logo working={on} />
             Factory
           </h1>
-          <Badge variant={on ? "accent" : "outline"}>{on ? "on" : "off"}</Badge>
+          {on ? <AccentBadge>on</AccentBadge> : <Badge variant="outline">off</Badge>}
+          {Object.entries(snapshot.usage).map(([pool, usage]) => (
+            <UsageRing
+              key={pool}
+              provider={pool === "openai-codex" ? "openai" : "claude"}
+              fiveHour={left(usage.fiveHour)}
+              sevenDay={left(usage.sevenDay)}
+              asOf={staleAt(usage.at)}
+            />
+          ))}
           <span className="text-sm text-muted-foreground">{run}</span>
         </div>
         <Controls snapshot={snapshot} act={act} />
@@ -115,54 +162,146 @@ function Factory({
           {/* The tabs don't fit a phone; they scroll on their own rather than the page. */}
           <div className="min-w-0 overflow-x-auto overflow-y-hidden">
             <TabsList>
-              <TabsTrigger value="queue">
-                <ListOrdered />
-                Queue{queued ? ` (${queued})` : ""}
-              </TabsTrigger>
-              <TabsTrigger value="goals">
-                <Workflow />
-                Goals{goals.length ? ` (${goals.length})` : ""}
-                {waiting > 0 && <Badge variant="accent">{waiting}</Badge>}
-              </TabsTrigger>
-              <TabsTrigger value="candidates">
-                <Inbox />
-                Candidates
-              </TabsTrigger>
-              <TabsTrigger value="results">
-                <PackageCheck />
-                Results
-              </TabsTrigger>
-              <TabsTrigger value="activity">
-                <Activity />
-                Activity
-              </TabsTrigger>
+              <Tab value="inbox">
+                Inbox
+                {stopped.length > 0 ? (
+                  <AccentBadge>{stopped.length + ready.length}</AccentBadge>
+                ) : (
+                  <Count n={ready.length} />
+                )}
+              </Tab>
+              <Tab value="queue">
+                Queue <Count n={lined} />
+              </Tab>
+              <Tab value="goals">
+                Goals <Count n={goals} />
+              </Tab>
+              <Tab value="results">Results</Tab>
             </TabsList>
           </div>
-          <div className="ml-auto" />
+          <Button variant="outline" size="sm" className="ml-auto" onClick={() => setAdding("job")}>
+            <PlusIcon /> Add work
+          </Button>
         </div>
-        <TabsContent value="queue">
-          <QueueView snapshot={snapshot} act={act} onCandidates={() => setTab("candidates")} />
-        </TabsContent>
-        <TabsContent value="goals">
-          <GoalsView snapshot={snapshot} act={act} />
-        </TabsContent>
-        <TabsContent value="candidates">
-          <CandidatesView snapshot={snapshot} act={act} />
-        </TabsContent>
-        <TabsContent value="activity">
-          <ActivityView snapshot={snapshot} act={act} />
-        </TabsContent>
-        <TabsContent value="results">
-          <ResultsView
+        <TabsContent value="inbox">
+          <InboxView
             snapshot={snapshot}
             act={act}
-            onAsk={(question) => {
-              onAsk(question);
-              (isMobile ? setOpenMobile : setOpen)(true);
+            onAsk={ask}
+            onOpenGoal={(id) => {
+              setQueryParam("goal", id);
+              setTab("goals");
             }}
           />
         </TabsContent>
+        <TabsContent value="queue">
+          <QueueView snapshot={snapshot} act={act} onAdd={setAdding} />
+        </TabsContent>
+        <TabsContent value="goals">
+          <GoalsView snapshot={snapshot} act={act} onNew={() => setAdding("goal")} />
+        </TabsContent>
+        <TabsContent value="results">
+          <div className="pt-2">
+            <Tabs value={view} onValueChange={setView}>
+              <TabsList variant="line">
+                <TabsTrigger value="results">Results</TabsTrigger>
+                <TabsTrigger value="activity">Activity</TabsTrigger>
+              </TabsList>
+              <TabsContent value="results">
+                <ResultsView snapshot={snapshot} act={act} onAsk={ask} />
+              </TabsContent>
+              <TabsContent value="activity">
+                <ActivityView snapshot={snapshot} act={act} />
+              </TabsContent>
+            </Tabs>
+          </div>
+        </TabsContent>
       </Tabs>
+      <Dialog open={adding !== ""} onOpenChange={(open) => !open && setAdding("")}>
+        <TabbedDialogContent className="sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Add work</DialogTitle>
+          </DialogHeader>
+          <Tabs className="min-h-0" value={adding} onValueChange={setAdding}>
+            <TabsList variant="line">
+              <TabsTrigger value="job">Job</TabsTrigger>
+              <TabsTrigger value="goal">Goal</TabsTrigger>
+              <TabsTrigger value="candidates">Candidates</TabsTrigger>
+              <TabsTrigger value="blueprints">Blueprints</TabsTrigger>
+            </TabsList>
+            <ScrollingTabsContent value="goal">
+              <NewGoalForm
+                act={act}
+                onCreated={(id) => {
+                  setAdding("");
+                  setQueryParam("goal", id);
+                  setTab("goals");
+                }}
+              />
+            </ScrollingTabsContent>
+            <ScrollingTabsContent value="candidates" className="flex flex-col overflow-hidden">
+              <CandidatesView snapshot={snapshot} act={act} />
+            </ScrollingTabsContent>
+            <ScrollingTabsContent value="job">
+              <NewJobForm act={act} onQueued={() => setAdding("")} />
+            </ScrollingTabsContent>
+            <ScrollingTabsContent value="blueprints">
+              <BlueprintsView act={act} />
+            </ScrollingTabsContent>
+          </Tabs>
+        </TabbedDialogContent>
+      </Dialog>
     </div>
   );
 }
+
+/** The key after `g` that jumps to each tab. */
+const GO_KEYS = { inbox: "i", queue: "q", goals: "g", results: "r" };
+
+/** `g` then a tab's key jumps to that tab, unless the keys go to a field or a dialog. */
+function useGoKeys(go: (tab: string) => void) {
+  const jump = useEffectEvent(go);
+  useEffect(() => {
+    let armed = 0;
+    const listen = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey || event.repeat) return;
+      if (isInteractiveTarget(event.target)) return;
+      const tab =
+        Date.now() - armed < 1000 &&
+        Object.entries(GO_KEYS).find(([, key]) => key === event.key)?.[0];
+      armed = 0;
+      if (tab) {
+        event.preventDefault();
+        jump(tab);
+      } else if (event.key === "g") armed = Date.now();
+    };
+    window.addEventListener("keydown", listen);
+    return () => window.removeEventListener("keydown", listen);
+  }, []);
+}
+
+/** A main tab, with its shortcut on hover. */
+function Tab({ value, children }: { value: keyof typeof GO_KEYS; children: ReactNode }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<TabsTrigger value={value} />}>{children}</TooltipTrigger>
+      <TooltipContent>
+        <KbdGroup>
+          <Kbd>g</Kbd>
+          <Kbd>{GO_KEYS[value]}</Kbd>
+        </KbdGroup>
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+/** A tab's quiet count; none when there's nothing. */
+function Count({ n }: { n: number }) {
+  return n > 0 ? <span className="font-normal text-muted-foreground tabular-nums">{n}</span> : null;
+}
+
+// Reads come every minute, so one this old means they're failing, most often on an expired token.
+const staleAt = (at: number) => (Date.now() - at > 3 * 60_000 ? at : undefined);
+// An old read may predate a reset, after which the window is whole again.
+const left = ({ used, resets }: Used): UsageWindow =>
+  resets !== undefined && resets < Date.now() ? { left: 100 } : { left: 100 - used, resets };

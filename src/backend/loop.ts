@@ -16,20 +16,25 @@ import { agent as makeAgent, classify, resetTime, type Agent } from "./agents.ts
 import { keepWork, release } from "./git.ts";
 import { piWindows } from "./models.ts";
 import { mirrorTasks } from "./tasksStore.ts";
-import { afterAttempt, builtinCheck, discardCancelledJob, prepare } from "./goals.ts";
-import { addJobs, autoPicks, endJob, ready, readJobs, record, startJob } from "./jobs.ts";
+import { afterAttempt, builtinCheck, discardCancelledJob, finishGoals, prepare } from "./goals.ts";
+import {
+  addJobs,
+  answer,
+  autoPicks,
+  endJob,
+  queueReviewFix,
+  ready,
+  readJobs,
+  record,
+  startJob,
+} from "./jobs.ts";
 import { findPr } from "./review.ts";
-import {
-  alive,
-  compactAt,
-  poolOf,
-  readCandidates,
-  readSettings,
-  refreshCandidates,
-  workersOf,
-} from "./state.ts";
+import { alive, compactAt, readCandidates, readSettings, refreshCandidates } from "./state.ts";
 import { noFacts, readStream, type Facts } from "./stream.ts";
+import { fiveHour } from "./usage.ts";
+import { watch } from "./triggers.ts";
 import {
+  presetWorkers,
   presetId,
   TIERS,
   type Attempt,
@@ -40,13 +45,13 @@ import {
   type Preset,
   type Settings,
   type Status,
-  type Tuning,
+  type UsageWindow,
   type Worker,
 } from "./types.ts";
 
 export type RunOptions = {
-  /** The agents of this run, each with its model and effort; each gets a worker for untiered jobs. */
-  agents: Record<string, Tuning>;
+  /** This run's worker counts by preset id, over the settings'. */
+  workers?: Record<string, number>;
   /** Usage-limit hits per pool before its workers stop; null: always wait for the reset. */
   limit: number | null;
   /** Epoch ms after which nothing new starts. */
@@ -62,6 +67,10 @@ export type RunOptions = {
   pollMs?: number;
   /** Tests record the waits for a limit reset instead of sleeping through them. */
   sleep?: (ms: number) => Promise<void>;
+  /** Reads a pool's 5-hour window; tests swap in their own. */
+  usage?: (pool: string) => Promise<UsageWindow>;
+  /** Queues jobs for events on GitHub and says what it queued; tests swap in their own. */
+  watch?: (state: string) => Promise<string[]>;
 };
 
 const MINUTE = 60_000;
@@ -70,6 +79,12 @@ const AUTO_PER_WORKER = 5;
 const STALE_CANDIDATES = 6 * 60 * MINUTE;
 const FOLLOWUPS = 2;
 const GATE_TIMEOUT = 30 * MINUTE;
+const WATCH_EVERY = 5 * MINUTE;
+/** A question nobody answers this long stops holding the job: the agent goes with its recommendation. */
+const ASK_WAIT = 15 * MINUTE;
+const NO_ANSWER = `Nobody answered within ${ASK_WAIT / MINUTE} minutes, so factory told the agent to go with its recommendation.`;
+/** What claude and pi print when the session to resume was never saved. */
+const LOST_SESSION = /No conversation found with session ID|No session found matching/;
 
 /**
  * An attempt under way, kept in running/<job id>.json until it's recorded: its session, its worktree,
@@ -88,7 +103,9 @@ type Live = {
   offset: number;
   pid?: number;
   /** What the next turn picks up from. */
-  waiting?: "asked" | "limited" | "interrupted";
+  waiting?: "asked" | "limited" | "alone" | "interrupted";
+  /** The turn this session started on, when not the first; later turns resume it. */
+  sessionTurn?: number;
   /** Needs no worker here has, so the agent was told it can't check them. */
   missing: string[];
 };
@@ -115,7 +132,9 @@ export async function run(options: RunOptions): Promise<string> {
   mkdirSync(runDir, { recursive: true });
   mkdirSync(join(state, "running"), { recursive: true });
   const settings = readSettings(state);
-  const slots = makeSlots(options.agents, settings);
+  const slots = makeSlots(settings, options.workers);
+  if (slots.length === 0)
+    throw new Error("no workers; give one a count above 0 under Settings, Workers");
   const pools = new Map<string, Pool>();
   for (const { worker } of slots) pools.set(worker.pool, { name: worker.pool, limits: 0 });
   const agents = new Set<number>();
@@ -124,6 +143,8 @@ export async function run(options: RunOptions): Promise<string> {
   let killing = false;
   let topping: Promise<void> | undefined;
   const borrowed = new Set<string>();
+  /** Each pool's last usage read, shared by its workers so one read serves them all. */
+  const reads = new Map<string, { at: number; done: Promise<void> }>();
   const piPresets = slots
     .map((slot) => slot.preset)
     .filter((preset) => preset.agent === "pi" && preset.model);
@@ -191,6 +212,56 @@ export async function run(options: RunOptions): Promise<string> {
     });
   }
 
+  /**
+   * Holds a pool until its 5-hour window resets once the window reaches the pool's reserve, so
+   * other apps on the account keep some. Reads at most once a minute; a failed read holds nothing.
+   * Reads the settings each time, so a changed reserve applies at once.
+   */
+  function keepReserve(pool: Pool): Promise<void> {
+    const reserve = readSettings(state).reserves[pool.name];
+    const last = reads.get(pool.name);
+    if (reserve === undefined || pool.until) return Promise.resolve();
+    if (last && Date.now() - last.at < MINUTE) return last.done;
+    const done = (options.usage ?? fiveHour)(pool.name).then(
+      ({ used, resets }) => {
+        pool.used = used;
+        if (used >= 100 - reserve && resets && resets > Date.now()) {
+          const wake = Math.min(resets + 2 * MINUTE, options.until ?? Infinity);
+          Object.assign(pool, { until: new Date(wake).toISOString(), reserved: true });
+          log(`${pool.name} used ${used}% of its 5 hours, keeps ${reserve}% until ${pool.until}`);
+        }
+        writeStatus();
+      },
+      (error: Error) => log(`can't read ${pool.name}'s usage: ${error.message}`),
+    );
+    reads.set(pool.name, { at: Date.now(), done });
+    return done;
+  }
+
+  /** The triggers' part: look for new events every few minutes, in the background. */
+  let watched = 0;
+  let watching: Promise<void> | undefined;
+  function lookOut(): void {
+    if (watching || Date.now() - watched < WATCH_EVERY) return;
+    watched = Date.now();
+    watching = (options.watch ?? watch)(state)
+      .then((lines) => lines.forEach(log))
+      .catch((error: Error) => log(`triggers failed: ${error.message}`))
+      .finally(() => (watching = undefined));
+  }
+
+  /** Nobody may be around to answer, overnight least of all: a question waits only so long. */
+  function moveOnFromAsks(): void {
+    for (const job of readJobs(state)) {
+      if (job.blocked !== "asked" || job.state !== "blocked") continue;
+      const ask = job.notes.findLast((note) => note.kind === "ask");
+      if (ask && Date.now() - Date.parse(ask.at) < ASK_WAIT) continue;
+      // An answer like the user's, so the question counts as settled everywhere a real one does.
+      answer(state, job.id, NO_ANSWER);
+      log(`${job.id} goes on without an answer`);
+    }
+  }
+
   /** Auto mode's part: keep a few of its jobs queued. Reads settings each time, so the toggle applies at once. */
   function topUp(): void {
     topping ??= fillFromAuto()
@@ -231,7 +302,7 @@ export async function run(options: RunOptions): Promise<string> {
   /**
    * Which preset a tiered job runs on: the first in its tier's list (then higher tiers' when its goal
    * allows) whose pool isn't limited and that has a free worker; undefined: it waits. null: none of
-   * this run's presets serve the tier, so it falls back to the untiered agent workers.
+   * this run's presets serve the tier, so any free worker takes it.
    */
   function choose(job: Job, jobs: Job[], self: Worker): string | null | undefined {
     const goal = jobs.find((each) => each.id === job.of)?.goal;
@@ -255,7 +326,7 @@ export async function run(options: RunOptions): Promise<string> {
         if (begun?.preset === worker.preset || (!here && begun?.agent === worker.agent)) return job;
         continue;
       }
-      if (job.preset) {
+      if (job.preset && slots.some((slot) => slot.worker.preset === job.preset)) {
         if (job.preset === worker.preset) return job;
         continue;
       }
@@ -264,20 +335,35 @@ export async function run(options: RunOptions): Promise<string> {
         if (chosen === worker.preset) return job;
         if (chosen !== null) continue;
       }
-      if ((job.agent ?? worker.agent) === worker.agent) return job;
+      if (firstFree(job.agent, worker) === worker) return job;
     }
   }
+
+  /**
+   * Who takes a job without a worker of its own: the first free worker in settings order, of its agent
+   * when it names one. A pin on a preset this run has no worker for lands here, on the pin's tuning.
+   */
+  const firstFree = (agent: string | undefined, self: Worker) =>
+    slots.find(
+      ({ worker }) =>
+        (agent ?? worker.agent) === worker.agent &&
+        (worker === self || worker.state === "idle") &&
+        !pools.get(worker.pool)!.until,
+    )?.worker;
 
   async function work(slot: Slot, handed?: Handed): Promise<void> {
     const { worker } = slot;
     const pool = pools.get(worker.pool)!;
     while (!ended()) {
       topUp();
+      lookOut();
+      moveOnFromAsks();
       if (pool.stopped) return set(worker, { state: "stopped", reason: pool.stopped });
+      if (!handed) await keepReserve(pool);
       if (pool.until) {
         set(worker, { state: "sleeping", until: pool.until });
         await (options.sleep ?? nap)(Math.max(0, Date.parse(pool.until) - Date.now()));
-        pool.until = undefined;
+        Object.assign(pool, { until: undefined, reserved: undefined });
         continue;
       }
       let job: Job | undefined;
@@ -286,7 +372,8 @@ export async function run(options: RunOptions): Promise<string> {
         ({ job } = handed);
         set(worker, { state: "working", job: job.id });
         log(`${worker.id} takes over ${job.id} from run ${handed.live.begun.run}`);
-        result = await attempt(slot, job, handed.live);
+        const taken = job;
+        result = await attempt(slot, job, handed.live).catch((error: Error) => broke(taken, error));
         handed = undefined;
       } else {
         job = pick(slot);
@@ -298,7 +385,10 @@ export async function run(options: RunOptions): Promise<string> {
         startJob(state, job.id, worker.agent, worker.preset);
         set(worker, { state: "working", job: job.id });
         log(`${worker.id} starts ${job.id}: ${job.item.label} ${job.item.id}`);
-        result = await attempt(slot, job, readLive(state, job.id));
+        const taken = job;
+        result = await attempt(slot, job, readLive(state, job.id)).catch((error: Error) =>
+          broke(taken, error),
+        );
       }
       if (!result) {
         // The run stopped: before the agent started the job goes back; a running agent is handed off.
@@ -316,12 +406,17 @@ export async function run(options: RunOptions): Promise<string> {
         log(
           `${worker.id} ${result.attempt.outcome} ${job.id} ${result.attempt.url ?? result.attempt.error?.split("\n")[0] ?? ""}`,
         );
+        const fix = queueReviewFix(state, job.id);
+        if (fix) log(`${job.id} found something: queued ${fix.id}, ${fix.item.title}`);
         // Still holding the worktree: a goal node merges from it.
         const worktree = readLive(state, job.id)?.worktree;
         if (worktree) {
           await afterAttempt(state, job.id, worktree, log);
-          // Lets go of its branch, which a later job may check out elsewhere.
-          await release(worktree);
+          // Lets go of its branch, which a later job may check out elsewhere. When that fails, the
+          // next job's checkout forces it anyway.
+          await release(worktree).catch((error: Error) =>
+            log(`can't release ${worktree}: ${error.message.trim().split("\n")[0]}`),
+          );
         }
         rmSync(livePath(state, job.id), { force: true });
         const seconds = (Date.parse(result.attempt.end) - Date.parse(result.attempt.start)) / 1000;
@@ -356,6 +451,22 @@ export async function run(options: RunOptions): Promise<string> {
   }
 
   /**
+   * One job's trouble (git in its worktree, a gate that won't run) fails that job; it doesn't end
+   * the run and every agent working in it.
+   */
+  function broke(job: Job, error: Error): Turned {
+    const begun = readLive(state, job.id)?.begun;
+    if (!begun) throw error;
+    const message = error.message.trim();
+    log(`${job.id} broke: ${message.split("\n")[0]}`);
+    const end = new Date().toISOString();
+    return {
+      attempt: { ...begun, end, outcome: "failed", error: message.slice(0, 2000) },
+      text: "",
+    };
+  }
+
+  /**
    * One attempt as a session: the first turn, or the turn that picks a paused one up, then follow-ups
    * while a gate fails or the agent stopped without finishing. Undefined when the run stopped first.
    */
@@ -375,17 +486,17 @@ export async function run(options: RunOptions): Promise<string> {
         ),
       );
     }
-    const agentOf = (resume: boolean) =>
+    const agentOf = () =>
       makeAgent(worker.agent, live!.begun, {
         id: live!.session,
-        resume,
+        resume: live!.turns > (live!.sessionTurn ?? 1),
         folder: join(state, "sessions"),
         compactAt: worker.agent === "claude" ? compactAt(preset) : undefined,
       });
     for (;;) {
       if (!live.pid) {
         if (stopping) return undefined;
-        live.pid = startAgent(agentOf(live.turns > 1), live, job.id, envFor(job, live.worktree));
+        live.pid = startAgent(agentOf(), live, job.id, envFor(job, live.worktree));
         writeLive(state, job.id, live);
       }
       const turn = await finishTurn(worker, live);
@@ -396,6 +507,11 @@ export async function run(options: RunOptions): Promise<string> {
       if (timedOut) return { attempt: await end(job, live, "timeout", facts), text };
       const outcome = classify(makeAgent(worker.agent, live.begun), code, text, facts.error);
       if (outcome === "limited") return pause(job, live, "limited", text);
+      // Once: an agent that saves no session at all would start over at every follow-up.
+      if (outcome === "failed" && live.turns > 1 && !live.sessionTurn && LOST_SESSION.test(text)) {
+        live = restart(job, live);
+        continue;
+      }
       const fresh = readJobs(state).find((each) => each.id === job.id)!;
       const said = fresh.notes.filter((note) => note.attempt === fresh.attempts.length + 1);
       // A question since the last answer: this turn asked it.
@@ -404,6 +520,8 @@ export async function run(options: RunOptions): Promise<string> {
       );
       if (said.slice(answered + 1).some((note) => note.kind === "ask"))
         return pause(job, live, "asked", text);
+      // It ran `factory alone` this turn: it goes on once no other job runs.
+      if (fresh.machine && !job.machine) return pause(job, live, "alone", text);
       const problem =
         outcome === "failed" || !said.some((note) => note.kind === "result")
           ? unfinished(code, facts, text)
@@ -496,7 +614,31 @@ export async function run(options: RunOptions): Promise<string> {
     };
   }
 
-  function pause(job: Job, live: Live, reason: "asked" | "limited", text: string): Turned {
+  /**
+   * The session to resume was never saved, say because a run stopped before its first turn got
+   * going: a new session starts from the prompt, with what this turn had to say after it.
+   */
+  function restart(job: Job, live: Live): Live {
+    const prompt = readFileSync(join(live.dir, "prompt.md"), "utf8");
+    const message = readFileSync(live.turn, "utf8");
+    const next = nextTurn(
+      live,
+      `${prompt}\n## Picking up\n\nAn earlier session at this job was lost; whatever it did is still in this folder.\n\n${message}`,
+    );
+    record(state, {
+      type: "note",
+      id: job.id,
+      note: {
+        kind: "factory",
+        text: "the session to resume was lost; a new one starts from the prompt",
+      },
+    });
+    const restarted = { ...next, session: randomUUID(), sessionTurn: next.turns };
+    writeLive(state, job.id, restarted);
+    return restarted;
+  }
+
+  function pause(job: Job, live: Live, reason: Paused, text: string): Turned {
     writeLive(state, job.id, { ...live, pid: undefined, waiting: reason });
     return { paused: reason, text };
   }
@@ -632,6 +774,10 @@ export async function run(options: RunOptions): Promise<string> {
   const stopMirror = mirrorTasks(state, settings, log);
   writeStatus();
   try {
+    // Retried after every goal job; a failed fetch here shouldn't keep the factory off.
+    await finishGoals(state, log).catch((error: Error) =>
+      log(`can't finish goals: ${error.message.trim().split("\n")[0]}`),
+    );
     await Promise.all(slots.map((slot) => work(slot, handed.get(slot))));
   } catch (error) {
     kill();
@@ -643,6 +789,9 @@ export async function run(options: RunOptions): Promise<string> {
     stopMirror();
     await topping;
     writeStatus();
+    log(
+      `off: ${slots.map(({ worker }) => `${worker.id} ${worker.reason ?? worker.state}`).join(", ")}`,
+    );
   }
   return id;
 }
@@ -650,36 +799,17 @@ export async function run(options: RunOptions): Promise<string> {
 type Handed = { job: Job; live: Live };
 type Turned =
   | { paused?: undefined; attempt: Attempt; text: string }
-  | { paused: "asked" | "limited"; text: string };
+  | { paused: Paused; text: string };
+type Paused = "asked" | "limited" | "alone";
 
-/**
- * One worker per agent of the run, for untiered jobs as before, plus each preset's workers. An agent
- * worker is its own preset, named after the agent.
- */
-export function makeSlots(agents: Record<string, Tuning>, settings: Settings): Slot[] {
-  const presets: [Preset, number][] = [
-    ...Object.entries(agents).map(([agent, tuning]): [Preset, number] => [
-      { agent, ...tuning, id: agent },
-      1,
-    ]),
-    ...settings.presets.map((preset): [Preset, number] => [preset, workersOf(preset, settings)]),
-  ];
-  return presets.flatMap(([preset, count]) =>
-    Array.from({ length: count }, (_, index) => ({
-      preset,
-      quickFailures: 0,
-      worker: {
-        id: `${presetId(preset)}#${index + 1}`,
-        agent: preset.agent,
-        model: preset.model,
-        effort: preset.effort,
-        preset: presetId(preset),
-        pool: poolOf(preset),
-        state: "idle" as const,
-        since: new Date().toISOString(),
-      },
-    })),
-  );
+/** Each preset's workers with the preset it runs, with the run's counts over the settings'. */
+export function makeSlots(settings: Settings, counts: Record<string, number> = {}): Slot[] {
+  const byId = new Map(settings.presets.map((preset) => [presetId(preset), preset]));
+  return presetWorkers(settings.presets, counts).map((worker) => ({
+    worker,
+    preset: byId.get(worker.preset)!,
+    quickFailures: 0,
+  }));
 }
 
 /**
@@ -710,10 +840,14 @@ export function piSettingsWarnings(presets: Preset[], windows: Record<string, nu
 function resumeText(live: Live, job: Job): string {
   if (live.waiting === "asked") {
     const said = job.notes.findLast((note) => note.kind === "answer" && note.re === undefined);
+    if (said?.text === NO_ANSWER)
+      return `Nobody answered your question within ${ASK_WAIT / MINUTE} minutes. Go with your recommendation, or with the option that deletes and publishes nothing when yours would, and record it with \`factory ask "<question>" --assume "<what you chose>"\` so the user can still weigh in. Then carry on with the job.`;
     return `The user answered your question: ${said?.text ?? "(no answer recorded)"}\n\nCarry on with the job.`;
   }
   if (live.waiting === "limited")
     return "You were stopped by a usage limit, which has reset. Carry on where you left off.";
+  if (live.waiting === "alone")
+    return "No other job runs now, and none starts until you finish. Do what needed the machine, then carry on with the job.";
   return "Your run was interrupted before it finished. Check where you were and carry on.";
 }
 
@@ -815,6 +949,7 @@ const NOTE_LABEL: Record<string, string> = {
   step: "step",
   train: "merge train",
   factory: "factory",
+  alone: "it needed to run alone",
 };
 
 /** What earlier attempts said and kept, so a retry picks up where they left off. */
@@ -850,9 +985,15 @@ You run headless for factory as job ${job.id}, and nobody watches live. Report t
 - \`${factory} step "<what you're doing now>" [--done N --of M]\` at each meaningful step (not every command), so the user sees where you are.
 - \`${factory} note "<text>"\` records something worth knowing later: what you found, tried, or what's in the way. A few per job, not a play-by-play.
 - Decide for yourself wherever a reasonable engineer would. When the user might decide otherwise, run \`${factory} ask "<question>" --assume "<what you'll do>"\` and carry on with that; the user answers later, and a different answer becomes a job of its own.
-- Only for a decision too costly to guess (a data format, deleting things, anything public), run \`${factory} ask "<question, with the options and your recommendation>"\` without --assume and end there. Your work in this folder is kept, and you'll get the answer in this same session.
+- Only for a decision too costly to guess (a data format, deleting things, anything public), run \`${factory} ask "<question, with the options and your recommendation>"\` without --assume and end there. Your work in this folder is kept, and you'll get the answer in this same session. Nobody may be around: after ${ASK_WAIT / MINUTE} minutes without an answer you'll be told to go with your recommendation.
 - Before you end, run \`${factory} result "<what changed and why, in a sentence or two>" --confidence low|medium|high\`, adding \`--url <link>\` for the PR or issue you opened, \`--followup "<task>"\` for each task you saw that deserves its own job, and \`--unverified "<what>"\` for each thing you couldn't check. Factory may run checks after you stop and come back to you with what failed.
+- ${
+    job.machine
+      ? "No other job runs while you work, so you may change things outside this folder when the job needs it. Put back anything you change only to verify, like a stopped service or a taken port."
+      : `Other jobs run on this machine at the same time, each in its own folder. Change nothing outside this one: no global installs, no edits under your home folder, no services left running, no fixed ports, no git stash (every worktree shares it). If the job can't be done without that, run \`${factory} alone "<what you need and why>"\` and end your turn; you'll carry on in this session once no other job runs.`
+  }
 - In a PR description you write, add the line \`Agent: ${signature}\`.
+- When the PR changes what users see, add screenshots of the app running to its description, with before and after when existing UI changes. \`gh\` can't upload images, so commit them to the repo's \`screenshots\` branch (an orphan branch; create it if it's missing) under a folder named after the PR's branch, and embed them from \`https://github.com/<owner>/<repo>/raw/screenshots/<path>\`. Keep them out of the PR's own commits.
 `;
 }
 

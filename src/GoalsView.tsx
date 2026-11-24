@@ -1,9 +1,21 @@
-import { useState } from "react";
-import { ArrowLeftIcon, ChevronRightIcon, FlameIcon, GitBranchIcon, PlusIcon } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import Markdown from "markdown-to-jsx/react";
+import {
+  ArrowLeftIcon,
+  CheckCheckIcon,
+  CheckIcon,
+  DownloadIcon,
+  ChevronRightIcon,
+  FlameIcon,
+  GitBranchIcon,
+  PlusIcon,
+  XIcon,
+} from "lucide-react";
 import { api, type Act } from "@/api";
 import {
   critical,
   depths,
+  openAssumptions,
   PLANNING,
   prUrl,
   TIERS,
@@ -12,6 +24,7 @@ import {
   type Tier,
 } from "@/backend/types.ts";
 import { Badge } from "@/components/ui/badge";
+import { TierBadge } from "@/TierBadge";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
@@ -21,24 +34,30 @@ import {
   EmptyHeader,
   EmptyTitle,
 } from "@/components/ui/empty";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import { ItemGroup } from "@/components/ui/item";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/tooltip/tooltip";
-import { ago, minutesSince } from "@/format";
+import { ago, minutesSince, repoName } from "@/format";
 import { useQueryParam } from "@/hooks/use-query-param";
-import { NewGoalDialog } from "@/NewGoalDialog";
+import { MARKDOWN } from "@/PrReview";
 import { Row, Section } from "@/Row";
+import { RowGroup } from "@/components/variants/item";
 import { StateIcon, StatePill, TaskDetails } from "@/TaskDetails";
 
-const TIER_SHORT: Record<Tier, string> = { communicator: "comm", builder: "build", grunt: "grunt" };
-
 /** How a goal's own state reads: planning until its plan is in, then working, not queued. */
-function goalLabel(goal: Job, nodes: Job[]): string | undefined {
+function goalLabel(goal: Job, nodes: Job[], on: boolean): string | undefined {
   if (goal.blocked) return BLOCKED[goal.blocked];
   if (goal.state !== "queued") return undefined;
+  if (!on) return "waiting for the factory";
   const planning = nodes.some(
     (node) =>
-      node.item.play === "decompose" && (node.state === "queued" || node.state === "running"),
+      node.item.blueprint === "decompose" && (node.state === "queued" || node.state === "running"),
   );
   return planning ? "planning" : "working";
 }
@@ -51,6 +70,14 @@ const BLOCKED: Record<string, string> = {
   held: "held by a failure",
   review: "merging",
 };
+
+/** The brief the goal started from; goals from before it was kept have it only in their decomposer's prompt. */
+function briefOf(goal: Job, nodes: Job[]): string | undefined {
+  if (goal.goal!.brief) return goal.goal!.brief;
+  const prompt = nodes.find((node) => node.item.blueprint === "decompose")?.prompt;
+  const brief = prompt?.match(/^Repo: .*\n\n([^]*?)\n\n## The plan format/m)?.[1];
+  return brief === "(no brief beyond the title)" ? undefined : brief;
+}
 
 const sentence = (text: string) => text.charAt(0).toUpperCase() + text.slice(1) + ".";
 
@@ -69,33 +96,21 @@ function lastActivity(nodes: Job[], goal: Job): string {
 }
 
 /** Goals: large tasks as graphs of jobs, each on its own integration branch. */
-export function GoalsView({ snapshot, act }: { snapshot: Snapshot; act: Act }) {
+export function GoalsView({
+  snapshot,
+  act,
+  onNew,
+}: {
+  snapshot: Snapshot;
+  act: Act;
+  onNew: () => void;
+}) {
   const [open, setOpen] = useQueryParam("goal", "");
-  const [creating, setCreating] = useState(false);
   const goals = snapshot.jobs.filter((job) => job.goal && job.state !== "removed");
   const shown = goals.find((goal) => goal.id === open);
   if (shown)
     return <GoalView goal={shown} snapshot={snapshot} act={act} onBack={() => setOpen("")} />;
-  // One dialog for both the empty page and the list, so the goal appearing mid-create doesn't remount it.
-  return (
-    <>
-      <GoalList
-        goals={goals}
-        snapshot={snapshot}
-        onNew={() => setCreating(true)}
-        onOpen={setOpen}
-      />
-      <NewGoalDialog
-        act={act}
-        open={creating}
-        onOpenChange={setCreating}
-        onCreated={(id) => {
-          setCreating(false);
-          setOpen(id);
-        }}
-      />
-    </>
-  );
+  return <GoalList goals={goals} snapshot={snapshot} onNew={onNew} onOpen={setOpen} />;
 }
 
 function GoalList({
@@ -114,6 +129,8 @@ function GoalList({
       <PlusIcon /> New goal
     </Button>
   );
+  const active = goals.filter((goal) => goal.state !== "done");
+  const finished = goals.filter((goal) => goal.state === "done");
   if (goals.length === 0)
     return (
       <Empty>
@@ -129,62 +146,67 @@ function GoalList({
   return (
     <div className="flex flex-col gap-4 pt-2">
       <div className="flex justify-end">{newGoal}</div>
-      <ItemGroup>
-        {goals.map((goal) => {
-          const nodes = nodesOf(snapshot.jobs, goal);
-          const done = nodes.filter((node) => node.state === "done").length;
-          const used = nodes.reduce((sum, node) => sum + node.attempts.length, 0);
-          const budget = goal.goal!.budget?.attempts;
-          return (
-            <Row
-              key={goal.id}
-              leading={<StateIcon state={goal.state} />}
-              progress={nodes.length ? done / nodes.length : 0}
-              title={
-                <button
-                  type="button"
-                  className="text-left hover:underline"
-                  onClick={() => onOpen(goal.id)}
-                >
-                  {goal.item.title}
-                </button>
-              }
-              meta={
-                <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                  <StatePill state={goal.state} label={goalLabel(goal, nodes)} />
-                  <span>
-                    {done}/{nodes.length} done
-                  </span>
-                  {TIERS.map((tier) => {
-                    const of = nodes.filter((node) => node.tier === tier);
-                    return of.length ? (
-                      <span key={tier}>
-                        {TIER_SHORT[tier]} {of.filter((node) => node.state === "done").length}/
-                        {of.length}
-                      </span>
-                    ) : null;
-                  })}
-                  <span>
-                    {used}
-                    {budget ? `/${budget}` : ""} attempts
-                  </span>
-                  <span>{ago(lastActivity(nodes, goal))}</span>
-                </span>
-              }
-            >
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label="Open goal"
-                onClick={() => onOpen(goal.id)}
-              >
-                <ChevronRightIcon />
-              </Button>
-            </Row>
-          );
-        })}
-      </ItemGroup>
+      {active.length > 0 && (
+        <RowGroup>
+          {active.map((goal) => (
+            <GoalRow key={goal.id} goal={goal} snapshot={snapshot} onOpen={onOpen} />
+          ))}
+        </RowGroup>
+      )}
+      {finished.length > 0 && (
+        <Section title={`Done (${finished.length})`}>
+          <RowGroup>
+            {finished.map((goal) => (
+              <GoalRow key={goal.id} goal={goal} snapshot={snapshot} onOpen={onOpen} />
+            ))}
+          </RowGroup>
+        </Section>
+      )}
     </div>
+  );
+}
+
+function GoalRow({
+  goal,
+  snapshot,
+  onOpen,
+}: {
+  goal: Job;
+  snapshot: Snapshot;
+  onOpen: (id: string) => void;
+}) {
+  const nodes = nodesOf(snapshot.jobs, goal);
+  const done = nodes.filter((node) => node.state === "done").length;
+  const used = nodes.reduce((sum, node) => sum + node.attempts.length, 0);
+  const budget = goal.goal!.budget?.attempts;
+  return (
+    <Row
+      leading={<StateIcon state={goal.state} />}
+      progress={nodes.length ? done / nodes.length : 0}
+      title={
+        <button type="button" className="text-left hover:underline" onClick={() => onOpen(goal.id)}>
+          <span className="font-normal text-muted-foreground">{repoName(goal.goal!.repo)}: </span>
+          {goal.item.title}
+        </button>
+      }
+      meta={
+        <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <StatePill state={goal.state} label={goalLabel(goal, nodes, snapshot.on)} />
+          <span>
+            {done}/{nodes.length} jobs done
+          </span>
+          <span>
+            {used}
+            {budget ? `/${budget}` : ""} attempts
+          </span>
+          <span>{ago(lastActivity(nodes, goal))}</span>
+        </span>
+      }
+    >
+      <Button variant="ghost" size="icon-sm" aria-label="Open goal" onClick={() => onOpen(goal.id)}>
+        <ChevronRightIcon />
+      </Button>
+    </Row>
   );
 }
 
@@ -199,7 +221,7 @@ function GoalView({
   act: Act;
   onBack: () => void;
 }) {
-  const { jobs, status } = snapshot;
+  const { jobs } = snapshot;
   const nodes = nodesOf(jobs, goal);
   const info = goal.goal!;
   const done = nodes.filter((node) => node.state === "done").length;
@@ -207,26 +229,53 @@ function GoalView({
   const red = goal.blocked === "red";
   const factorySaid = goal.notes.findLast((note) => note.kind === "factory");
   const final = prUrl(goal);
-  const planning = nodes.filter((node) => (PLANNING as readonly string[]).includes(node.item.play));
+  const brief = briefOf(goal, nodes);
+  const planning = nodes.filter((node) =>
+    (PLANNING as readonly string[]).includes(node.item.blueprint),
+  );
+  const planned = nodes.filter((node) => !planning.includes(node));
   const unverified = nodes.flatMap((node) => node.unverified.map((need) => ({ node, need })));
-  const assumed = nodes.flatMap((node) =>
-    node.notes.flatMap((note, index) =>
-      note.kind === "assume" &&
-      !node.notes.some((other) => other.kind === "answer" && other.re === index)
-        ? [{ node, note }]
-        : [],
-    ),
+  const assumed = nodes.flatMap((node) => openAssumptions(node).map((note) => ({ node, note })));
+
+  const checkpoint = goal.blocked === "checkpoint";
+  const checks = (unverified.length > 0 || assumed.length > 0) && (
+    <ul className="flex flex-col gap-2 text-sm">
+      {unverified.map(({ node, need }) => (
+        <li key={`${node.id} ${need}`} className="flex flex-wrap items-center gap-2">
+          <Badge variant="outline">unverified</Badge>
+          <span className="flex-1">
+            {node.item.title}: {need}
+          </span>
+          <Button size="sm" variant="outline" onClick={() => act(() => api.verify(node.id, need))}>
+            <CheckCheckIcon data-icon="inline-start" />
+            Checked
+          </Button>
+        </li>
+      ))}
+      {assumed.map(({ node, note }) => (
+        <Assumption
+          key={`${node.id} ${note.at}`}
+          node={node}
+          index={note.index}
+          question={note.text}
+          assumed={note.assumed ?? ""}
+          act={act}
+        />
+      ))}
+    </ul>
   );
 
   return (
     <div className="flex flex-col gap-6 pt-2">
       <div className="flex flex-wrap items-center gap-2">
-        <Button variant="ghost" size="icon-sm" aria-label="All goals" onClick={onBack}>
-          <ArrowLeftIcon />
-        </Button>
-        <h2 className="font-heading text-lg font-semibold">{goal.item.title}</h2>
-        <StatePill state={goal.state} label={goalLabel(goal, nodes)} />
-        <span className="ml-auto flex gap-1">
+        <div className="flex min-w-0 flex-1 basis-80 flex-wrap items-center gap-2">
+          <Button variant="ghost" size="icon-sm" aria-label="All goals" onClick={onBack}>
+            <ArrowLeftIcon />
+          </Button>
+          <h2 className="font-heading text-lg font-semibold">{goal.item.title}</h2>
+          <StatePill state={goal.state} label={goalLabel(goal, nodes, snapshot.on)} />
+        </div>
+        <span className="flex gap-1">
           {goal.blocked === "paused" ? (
             <Button
               variant="outline"
@@ -247,11 +296,19 @@ function GoalView({
             )
           )}
           {goal.state !== "done" && <Replan goal={goal} act={act} />}
+          <ExportButton goal={goal} act={act} />
           {goal.state !== "done" && (
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => act(() => api.goal(goal.id, "cancel"))}
+              onClick={() => {
+                if (
+                  confirm(
+                    `Cancel ${goal.item.title}? Every job that hasn't finished is removed; this can't be undone.`,
+                  )
+                )
+                  void act(() => api.goal(goal.id, "cancel"));
+              }}
             >
               Cancel goal
             </Button>
@@ -260,41 +317,96 @@ function GoalView({
       </div>
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
-        <span className="flex items-center gap-1">
+        <Fact explain="The integration branch: each job merges here, and it becomes one PR to main when the goal is done.">
           <GitBranchIcon className="size-4" /> goal/{info.slug}
-        </span>
-        <span className={red ? "text-destructive" : ""}>
-          {info.gates.length === 0
-            ? "no goal gates"
-            : `${red ? "red" : "green"}: ${info.gates.map((gate) => `\`${gate}\``).join(", ")}`}
-        </span>
+        </Fact>
+        <Fact explain="Commands run on the integration branch after every merge. While one fails, the goal stops and a fix goes first.">
+          {info.gates.length === 0 ? (
+            "no goal checks"
+          ) : (
+            <span className={red ? "text-destructive" : ""}>
+              {info.gates.map((gate) => (
+                <code key={gate} className="mr-1 font-mono text-xs">
+                  {gate}
+                </code>
+              ))}
+              {red ? "failing" : "passing"}
+            </span>
+          )}
+        </Fact>
         <span>
-          {done}/{nodes.length} done
+          {done}/{nodes.length} jobs done
         </span>
-        <span>
+        <Fact explain="Agent attempts used so far. At the budget the goal stops and asks before going on.">
           {used}
           {info.budget ? ` of ${info.budget.attempts}` : ""} attempts
-        </span>
-        {final && (
-          <a className="text-primary hover:underline" href={final} target="_blank" rel="noreferrer">
-            final PR
-          </a>
-        )}
+        </Fact>
       </div>
 
-      {goal.blocked === "checkpoint" && (
-        <div className="flex flex-col gap-3 rounded-md border border-warning/50 bg-warning/10 p-3 text-sm sm:flex-row sm:items-center">
+      {goal.state === "done" && (
+        <div className="flex flex-col gap-3 rounded-md border border-success/50 bg-success/10 p-3 text-sm sm:flex-row sm:items-center">
           <p className="flex-1">
-            {sentence(goal.why ?? factorySaid?.text ?? "waiting for your approval")}
+            Done: every job merged into goal/{info.slug}
+            {final ? ", and it's up for review as one PR." : "."}
           </p>
+          {final && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="self-start sm:self-auto"
+              nativeButton={false}
+              render={<a href={final} target="_blank" rel="noreferrer" />}
+            >
+              Open the PR
+            </Button>
+          )}
+        </div>
+      )}
+
+      {brief && (
+        <Collapsible defaultOpen={planned.length === 0}>
+          <CollapsibleTrigger
+            render={
+              <button
+                type="button"
+                className="group flex items-center gap-1 text-sm font-medium text-muted-foreground"
+              />
+            }
+          >
+            <ChevronRightIcon className="size-4 transition-transform group-aria-expanded:rotate-90" />
+            Brief
+          </CollapsibleTrigger>
+          <CollapsibleContent className="mt-2">
+            <div className="flex flex-col gap-2 rounded-md border p-3 text-sm wrap-anywhere">
+              <Markdown options={MARKDOWN}>{brief}</Markdown>
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
+      )}
+
+      {checkpoint && (
+        <div className="flex flex-col gap-3 rounded-md border border-warning/50 bg-warning/10 p-3 text-sm">
+          <p>{sentence(goal.why ?? factorySaid?.text ?? "waiting for your approval")}</p>
+          <PlanCost nodes={nodes} budget={info.budget?.attempts} used={used} />
+          {checks && (
+            <div className="flex flex-col gap-2 border-t border-warning/30 pt-3">
+              <h3 className="font-medium">Check these before approving</h3>
+              {checks}
+            </div>
+          )}
           <Button
             size="sm"
-            className="self-start sm:self-auto"
+            className="self-start sm:self-end"
             onClick={() => act(() => api.goal(goal.id, "approve"))}
           >
             Approve
           </Button>
         </div>
+      )}
+      {!snapshot.on && goal.state === "queued" && (
+        <p className="rounded-md border p-3 text-sm text-muted-foreground">
+          The factory is off. Its jobs are in the queue and start when you turn it on.
+        </p>
       )}
       {red && factorySaid && (
         <p className="rounded-md border border-destructive/40 p-3 text-sm text-destructive">
@@ -302,227 +414,291 @@ function GoalView({
         </p>
       )}
 
-      {(unverified.length > 0 || assumed.length > 0) && (
-        <Section title="For you to check">
-          <ul className="flex flex-col gap-2 text-sm">
-            {unverified.map(({ node, need }) => (
-              <li key={`${node.id} ${need}`} className="flex flex-wrap items-center gap-2">
-                <Badge variant="outline">unverified</Badge>
-                <span className="flex-1">
-                  {node.item.title}: {need}
-                </span>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => act(() => api.verify(node.id, need))}
-                >
-                  Checked
-                </Button>
-              </li>
-            ))}
-            {assumed.map(({ node, note }) => (
-              <Assumption
-                key={`${node.id} ${note.at}`}
-                node={node}
-                question={note.text}
-                assumed={note.assumed ?? ""}
-                act={act}
-              />
-            ))}
-          </ul>
-        </Section>
-      )}
-
-      {planning.length > 0 && (
-        <Section title="Planning">
-          <div className="flex flex-wrap gap-2">
-            {planning.map((node) => (
-              <NodeCard
-                key={node.id}
-                node={node}
-                snapshot={snapshot}
-                act={act}
-                status={status}
-                onPath={false}
-                dependency={false}
-                onHover={() => {}}
-              />
-            ))}
-          </div>
-        </Section>
-      )}
+      {checks && !checkpoint && <Section title="For you to check">{checks}</Section>}
 
       <Section title="Plan">
-        <div className="overflow-x-auto pb-2">
-          <Columns
-            nodes={nodes.filter((node) => !node.parent && !planning.includes(node))}
-            all={nodes}
-            snapshot={snapshot}
-            act={act}
-            status={status}
-          />
-        </div>
+        <PlanList
+          // Planning first: it made the plan, and while it runs it's all there is.
+          nodes={[...planning, ...nodes.filter((node) => !node.parent && !planning.includes(node))]}
+          all={nodes}
+          path={critical(nodes)}
+          snapshot={snapshot}
+          act={act}
+        />
       </Section>
     </div>
   );
 }
 
 /**
- * The plan as columns by dependency depth, left to right. A milestone is one card holding its own
- * columns, collapsed once it's done. Factory's helpers sit in the column of the node they serve.
+ * The plan top to bottom in the order its dependencies allow, as rows like the queue's. A milestone
+ * is a heading over its own nodes, collapsed once it's done. Factory's helpers follow the node they serve.
  */
-function Columns({
+function PlanList({
   nodes,
   all,
+  path,
   snapshot,
   act,
-  status,
 }: {
   nodes: Job[];
   all: Job[];
+  path: Set<string>;
   snapshot: Snapshot;
   act: Act;
-  status: Snapshot["status"];
 }) {
-  const [hovered, setHovered] = useState<string>();
-  const planned = nodes.filter((node) => !node.branchOf);
-  const depth = depths(planned);
+  const depth = depths(nodes.filter((node) => !node.branchOf));
   for (const helper of nodes.filter((node) => node.branchOf))
-    depth.set(helper.id, depth.get(helper.branchOf!) ?? 0);
-  const path = critical(all);
-  const highlighted = new Set(all.find((node) => node.id === hovered)?.after ?? []);
-  const layers = [...new Set(depth.values())].sort((a, b) => a - b);
+    depth.set(helper.id, (depth.get(helper.branchOf!) ?? 0) + 0.5);
+  const sorted = nodes.toSorted((a, b) => depth.get(a.id)! - depth.get(b.id)!);
   return (
-    <div className="flex w-max gap-3">
-      {layers.map((layer) => (
-        <div key={layer} className="flex flex-col gap-2">
-          {nodes
-            .filter((node) => depth.get(node.id) === layer)
-            .map((node) => {
-              const children = all.filter((each) => each.parent === node.id);
-              const props = {
-                node,
-                snapshot,
-                act,
-                status,
-                // One node is trivially on the path, so it says nothing then.
-                onPath: path.size > 1 && path.has(node.id),
-                dependency: highlighted.has(node.id),
-                onHover: setHovered,
-              };
-              return children.length > 0 ? (
-                <Milestone key={node.id} {...props} members={children} all={all} />
-              ) : (
-                <NodeCard key={node.id} {...props} />
-              );
-            })}
-        </div>
-      ))}
-    </div>
+    <RowGroup>
+      {sorted.map((node) => {
+        const members = all.filter((each) => each.parent === node.id);
+        return members.length > 0 ? (
+          <Milestone
+            key={node.id}
+            node={node}
+            members={members}
+            all={all}
+            path={path}
+            snapshot={snapshot}
+            act={act}
+          />
+        ) : (
+          <NodeRow
+            key={node.id}
+            node={node}
+            snapshot={snapshot}
+            act={act}
+            // One node is trivially on the path, so it says nothing then.
+            onPath={path.size > 1 && path.has(node.id)}
+          />
+        );
+      })}
+    </RowGroup>
   );
 }
 
-type CardProps = {
+function Milestone({
+  node,
+  members,
+  all,
+  path,
+  snapshot,
+  act,
+}: {
+  node: Job;
+  members: Job[];
+  all: Job[];
+  path: Set<string>;
+  snapshot: Snapshot;
+  act: Act;
+}) {
+  const done = members.filter((member) => member.state === "done").length;
+  return (
+    <Collapsible defaultOpen={node.state !== "done"} className="mt-2">
+      <CollapsibleTrigger
+        render={
+          <button
+            type="button"
+            className="group flex w-full items-center gap-2 pb-2 text-left text-sm font-medium"
+          />
+        }
+      >
+        <ChevronRightIcon className="size-4 text-muted-foreground transition-transform group-aria-expanded:rotate-90" />
+        <span className="flex-1">{node.item.title}</span>
+        <span className="text-xs text-muted-foreground tabular-nums">
+          {done}/{members.length}
+        </span>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="border-l pl-3">
+          <PlanList nodes={members} all={all} path={path} snapshot={snapshot} act={act} />
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+/** One node as a row like the queue's: state, tier, what it waits for, and what it's doing right now. */
+function NodeRow({
+  node,
+  snapshot,
+  act,
+  onPath,
+}: {
   node: Job;
   snapshot: Snapshot;
   act: Act;
-  status: Snapshot["status"];
   onPath: boolean;
-  dependency: boolean;
-  onHover: (id: string | undefined) => void;
-};
-
-function Milestone({ members, all, ...props }: CardProps & { members: Job[]; all: Job[] }) {
-  const { node, snapshot, act, status } = props;
-  const done = members.filter((member) => member.state === "done").length;
-  return (
-    <div className="min-w-60 rounded-md border border-dashed p-2">
-      <Collapsible defaultOpen={node.state !== "done"}>
-        <CollapsibleTrigger
-          render={
-            <button
-              type="button"
-              className="flex w-full items-center gap-2 text-left text-sm font-medium"
-            />
-          }
-        >
-          <StateIcon state={node.state} />
-          <span className="flex-1">{node.item.title}</span>
-          <span className="text-xs text-muted-foreground">
-            {done}/{members.length}
-          </span>
-        </CollapsibleTrigger>
-        <CollapsibleContent className="mt-2">
-          <Columns nodes={members} all={all} snapshot={snapshot} act={act} status={status} />
-        </CollapsibleContent>
-      </Collapsible>
-    </div>
-  );
-}
-
-/** One node: state, tier, what it's doing right now, and its details on click. */
-function NodeCard({ node, snapshot, act, status, onPath, dependency, onHover }: CardProps) {
-  const worker = status?.workers.find((each) => each.job === node.id);
+}) {
+  const worker = snapshot.status?.workers.find((each) => each.job === node.id);
   const step = node.notes.findLast(
     (note) => note.kind === "step" && note.attempt === node.attempts.length + 1,
   );
   const heavy = node.attempts.some((attempt) => (attempt.compactions ?? 0) > 2);
-  const ring = dependency ? "ring-2 ring-accent" : onPath ? "border-primary/60" : "";
+  const editable = unstarted(node);
+  const waiting = node.after.flatMap((id) => {
+    const before = snapshot.jobs.find((job) => job.id === id);
+    return before && before.state !== "done" ? [before.item.title] : [];
+  });
   return (
-    <div
-      className={`flex w-60 flex-col gap-1 rounded-md border bg-card p-2 text-sm ${ring}`}
-      onMouseEnter={() => onHover(node.id)}
-      onMouseLeave={() => onHover(undefined)}
-    >
-      <div className="flex items-start gap-2">
-        <StateIcon state={node.state} />
-        <span className="min-w-0 flex-1 wrap-anywhere [&_button]:whitespace-normal">
-          <TaskDetails item={node.item} job={node} snapshot={snapshot} act={act} bare />
-        </span>
-      </div>
-      <div className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
-        {node.tier && <Badge variant="secondary">{node.tier}</Badge>}
-        {node.front && <Badge variant="outline">factory</Badge>}
-        {node.blocked && <span>{BLOCKED[node.blocked]}</span>}
-        {node.attempts.length > 0 && (
-          <span>
-            {node.attempts.length} attempt{node.attempts.length === 1 ? "" : "s"}
+    <Row
+      leading={<StateIcon state={node.state} />}
+      title={<TaskDetails item={node.item} job={node} snapshot={snapshot} act={act} bare />}
+      meta={
+        <span className="flex flex-col gap-1">
+          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            {node.tier &&
+              (editable ? <TierMenu node={node} act={act} /> : <TierBadge tier={node.tier} />)}
+            {node.front && <Badge variant="outline">factory</Badge>}
+            {node.blocked && <span>{BLOCKED[node.blocked]}</span>}
+            {waiting.length > 0 && <span>after {waiting.join(", ")}</span>}
+            {node.attempts.length > 0 && (
+              <span>
+                {node.attempts.length} attempt{node.attempts.length === 1 ? "" : "s"}
+              </span>
+            )}
+            {heavy && (
+              <Tooltip>
+                <TooltipTrigger
+                  render={<span className="flex items-center gap-0.5 text-warning" />}
+                >
+                  <FlameIcon className="size-3.5" /> heavy
+                </TooltipTrigger>
+                <TooltipContent>
+                  Compacted more than twice; replans split work like this smaller.
+                </TooltipContent>
+              </Tooltip>
+            )}
+            {onPath && <span className="text-primary">critical path</span>}
           </span>
-        )}
-        {heavy && (
-          <Tooltip>
-            <TooltipTrigger render={<span className="flex items-center text-warning" />}>
-              <FlameIcon className="size-3.5" /> heavy
-            </TooltipTrigger>
-            <TooltipContent>
-              Compacted more than twice; replans split work like this smaller.
-            </TooltipContent>
-          </Tooltip>
-        )}
-        {onPath && <span className="text-primary">critical path</span>}
-      </div>
-      {worker && (
-        <div className="text-xs">
-          <span className="text-primary">{worker.id}</span>, {minutesSince(worker.since)} min
-          {worker.context ? `, ${Math.round(worker.context / 1000)}k context` : ""}
-          <div className="truncate text-muted-foreground">
-            {step
-              ? `${step.text}${step.of ? ` (${step.done ?? 0}/${step.of})` : ""}`
-              : (worker.activity ?? "starting")}
-          </div>
-        </div>
+          {worker && (
+            <span>
+              <span className="text-primary">{worker.id}</span>, {minutesSince(worker.since)} min
+              {worker.context ? `, ${Math.round(worker.context / 1000)}k context` : ""}:{" "}
+              {step
+                ? `${step.text}${step.of ? ` (${step.done ?? 0}/${step.of})` : ""}`
+                : (worker.activity ?? "starting")}
+            </span>
+          )}
+        </span>
+      }
+    >
+      {editable && (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Drop from the plan"
+                onClick={() => act(() => api.drop(node.id))}
+              />
+            }
+          >
+            <XIcon />
+          </TooltipTrigger>
+          <TooltipContent>
+            Drop from the plan; what waits on it waits on what it waited on
+          </TooltipContent>
+        </Tooltip>
       )}
+    </Row>
+  );
+}
+
+/** A node that hasn't started yet, so it can still move to another tier or be dropped. */
+const unstarted = (node: Job) =>
+  node.key !== undefined &&
+  (node.state === "queued" || (node.state === "blocked" && node.blocked === "held"));
+
+/** What approving commits to: the jobs left by tier, and the attempts they take at the least. */
+function PlanCost({ nodes, budget, used }: { nodes: Job[]; budget?: number; used: number }) {
+  const left = nodes.filter(
+    (node) => unstarted(node) && !nodes.some((each) => each.parent === node.id),
+  );
+  if (left.length === 0) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground">
+      <span className="text-foreground">
+        {left.length} job{left.length === 1 ? "" : "s"} to go:
+      </span>
+      {TIERS.map((tier) => {
+        const count = left.filter((node) => node.tier === tier).length;
+        return (
+          count > 0 && (
+            <span key={tier} className="flex items-center gap-1">
+              {count} <TierBadge tier={tier} />
+            </span>
+          )
+        );
+      })}
+      <span>
+        at least {left.length} attempt{left.length === 1 ? "" : "s"}
+        {budget ? ` of the ${budget - used} left in the budget` : ""}. Change a tier or drop a job
+        below; replan for bigger changes.
+      </span>
     </div>
+  );
+}
+
+/** The node's tier, as a menu to move it while it hasn't started. */
+function TierMenu({ node, act }: { node: Job; act: Act }) {
+  return (
+    <DropdownMenu>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <DropdownMenuTrigger
+              render={
+                <button type="button" aria-label={`Tier: ${node.tier}`} className="rounded-4xl" />
+              }
+            />
+          }
+        >
+          <TierBadge tier={node.tier!} more />
+        </TooltipTrigger>
+        <TooltipContent>Run it on another tier</TooltipContent>
+      </Tooltip>
+      <DropdownMenuContent align="start" className="w-auto">
+        <DropdownMenuRadioGroup
+          value={node.tier}
+          onValueChange={(tier: Tier) => act(() => api.retier(node.id, tier))}
+        >
+          {TIERS.map((tier) => (
+            <DropdownMenuRadioItem key={tier} value={tier}>
+              <TierBadge tier={tier} />
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/** A fact in the goal's header, with what it means on hover. */
+function Fact({ explain, children }: { explain: string; children: ReactNode }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<span className="flex items-center gap-1" />}>
+        {children}
+      </TooltipTrigger>
+      <TooltipContent className="max-w-72">{explain}</TooltipContent>
+    </Tooltip>
   );
 }
 
 function Assumption({
   node,
+  index,
   question,
   assumed,
   act,
 }: {
   node: Job;
+  index: number;
   question: string;
   assumed: string;
   act: Act;
@@ -538,7 +714,7 @@ function Assumption({
         className="flex gap-2"
         onSubmit={(event) => {
           event.preventDefault();
-          void act(() => api.answer(node.id, text));
+          void act(() => api.answer(node.id, text, index));
         }}
       >
         <Input
@@ -549,11 +725,42 @@ function Assumption({
         <Button type="submit" variant="outline" size="sm" disabled={!text.trim()}>
           Answer
         </Button>
-        <Button type="button" size="sm" onClick={() => act(() => api.answer(node.id, "fine"))}>
+        <Button
+          type="button"
+          size="sm"
+          onClick={() => act(() => api.answer(node.id, "fine", index))}
+        >
+          <CheckIcon data-icon="inline-start" />
           Fine
         </Button>
       </form>
     </li>
+  );
+}
+
+function ExportButton({ goal, act }: { goal: Job; act: Act }) {
+  const [exporting, setExporting] = useState(false);
+  const run = async () => {
+    setExporting(true);
+    try {
+      await act(() => api.exportGoal(goal.id, goal.goal!.slug));
+    } finally {
+      setExporting(false);
+    }
+  };
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={<Button variant="ghost" size="sm" disabled={exporting} onClick={run} />}
+      >
+        <DownloadIcon data-icon="inline-start" />
+        {exporting ? "Exporting…" : "Export"}
+      </TooltipTrigger>
+      <TooltipContent>
+        A zip of its jobs, events, prompts, agent logs, memory, plan and PRs, for an agent to review
+        how the goal went
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -577,11 +784,14 @@ function Replan({ goal, act }: { goal: Job; act: Act }) {
         autoFocus
         value={why}
         onChange={(event) => setWhy(event.target.value)}
-        placeholder="Why replan?"
+        placeholder="What should change?"
         className="h-8 w-48"
       />
       <Button type="submit" size="sm" disabled={!why.trim()}>
-        Queue
+        Replan
+      </Button>
+      <Button type="button" variant="ghost" size="sm" onClick={() => setWhy(undefined)}>
+        Never mind
       </Button>
     </form>
   );

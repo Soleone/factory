@@ -3,14 +3,14 @@
 /** Unset means the agent's own default. */
 export type Tuning = { model?: string; effort?: string };
 
-/** An agent with a model and effort, saved to queue jobs with in one click, and what tiers run on. */
+/** A worker: an agent with a model and effort. Runs work on these, tiers list them, and the Queue arrow pins jobs to them. */
 export type Preset = Tuning & {
   agent: string;
   /** Stable, so tiers can name it; unset: agent/model/effort. */
   id?: string;
   /** The account its usage limit counts against; unset: claude, or pi's provider. */
   pool?: string;
-  /** Process slots a run gives it; unset: 1 when a tier lists it, else 0. */
+  /** Process slots a run gives it; unset: 1. At 0 it runs nothing on its own, only jobs pinned to it. */
   workers?: number;
   /** Context tokens at which the runner compacts; unset: 90k for Haiku, 200k otherwise. */
   compactAt?: number;
@@ -21,12 +21,21 @@ export type Preset = Tuning & {
 /** What kind of intelligence a job needs, highest first. */
 export const TIERS = ["communicator", "builder", "grunt"] as const;
 
-/** The plays of factory's own jobs that write a goal's plan. */
+/** The blueprints of factory's own jobs that write a goal's plan. */
 export const PLANNING = ["decompose", "replan"] as const;
 export type Tier = (typeof TIERS)[number];
 
+/** A role other than the author's to review its work: builders review, and communicators review builders. */
+export const reviewTier = (job: Job): Tier => (job.tier === "builder" ? "communicator" : "builder");
+
 export const presetId = (preset: Preset) =>
   preset.id ?? [preset.agent, preset.model, preset.effort].filter(Boolean).join("/");
+
+export const workersOf = (preset: Preset) => preset.workers ?? 1;
+
+/** The account a preset's usage counts against: claude's, or pi's provider. */
+export const poolOf = (preset: Preset) =>
+  preset.pool ?? (preset.agent === "pi" ? (preset.model?.split("/")[0] ?? "pi") : preset.agent);
 
 /**
  * A model the settings offer for an agent: what --model takes, how to show it, and its efforts.
@@ -34,21 +43,27 @@ export const presetId = (preset: Preset) =>
  */
 export type Model = { value: string; label: string; efforts: string[]; scoped: boolean };
 
+/** What the Queue arrow pins a job to: a worker's preset and tuning, so a run without it still has the tuning, or a tier. */
+export type Pin = Partial<Pick<Job, "agent" | "model" | "effort" | "preset" | "tier">>;
+
+/** A run asked for from the page: this run's worker counts by preset id, over the settings'. */
+export type RunRequest = Pick<Settings, "limit" | "until"> & { workers: Record<string, number> };
+
 /** stopped: the factory was turned off with --kill while the agent worked. timeout: no output for `idle` minutes. */
 export type Outcome = "done" | "failed" | "limited" | "timeout" | "stopped";
 
 /** The global settings; a run starts from these unless told otherwise. */
 export type Settings = {
-  /** The registered agents, each with its model and effort (unset: the agent's default). */
-  agents: Record<string, Tuning>;
   /** The agent the Plan chat talks to, with its model and effort; a change starts a new chat. */
   chat: Tuning & { agent: string };
-  /** Agents with a model and effort to queue candidates with, like pi on its biggest model. */
+  /** The workers, in the order they take queue work: the first free one gets the next job. */
   presets: Preset[];
-  /** Usage-limit hits per agent per run before that agent stops; null: never stop, wait for the reset. */
+  /** Usage-limit hits per provider per run before its workers stop; null: never stop, wait for the reset. */
   limit: number | null;
   /** HH:MM local time after which a run starts nothing new. */
   until?: string;
+  /** Percent of a pool's 5-hour window left for other apps: past it, the pool starts nothing new until the reset. */
+  reserves: Record<string, number>;
   /** Minutes without a sign of life from an agent before its attempt ends as a timeout. */
   idle: number;
   /** Each tier's presets by id, in the order they're tried. */
@@ -61,8 +76,13 @@ export type Settings = {
   capabilities: string[];
   /** Environment per repo path for the agents and gates that work it. */
   env: Record<string, Record<string, string>>;
-  /** Auto mode tops up the queue from workwork; empty repos or plays means all of them. */
-  auto: { on: boolean; levels: string[]; plays: string[]; repos: string[] };
+  /** Auto mode tops up the queue from workwork; empty repos or blueprints means all of them. */
+  auto: { on: boolean; attention: string[]; blueprints: string[]; repos: string[] };
+  /**
+   * While a run works, what queues a job in the repos factory has jobs in: CI failing on the
+   * default branch, an open issue with `label` (empty: none), a person's remarks on a job's PR.
+   */
+  triggers: { ci: boolean; label: string; reviews: boolean };
 };
 
 /** A workwork candidate, as `workwork --json` prints it. `id` is workwork's, not a job's. */
@@ -70,10 +90,21 @@ export type Item = {
   repo: string;
   label: string;
   id: string;
-  play: string;
-  level: string;
+  blueprint: string;
+  attention: string;
   title: string;
 };
+
+/** Before workwork 0.3 a blueprint was a play and attention a level, with auto for none. */
+export type LegacyItem =
+  | Item
+  | (Omit<Item, "blueprint" | "attention"> & { play: string; level: string });
+
+export function upgradeItem(item: LegacyItem): Item {
+  if (!("play" in item)) return item;
+  const { play, level, ...rest } = item;
+  return { ...rest, blueprint: play, attention: level === "auto" ? "none" : level };
+}
 
 /** A candidate's identity across workwork runs. */
 export const itemKey = (item: Pick<Item, "repo" | "id">) => `${item.repo} ${item.id}`;
@@ -81,8 +112,17 @@ export const itemKey = (item: Pick<Item, "repo" | "id">) => `${item.repo} ${item
 /** `workwork --all --json` takes minutes, so its answer is kept here for browsing and auto mode. */
 export type Candidates = { at: string; items: Item[] };
 
-/** A play as `workwork plays --json` prints it, with the fields factory shows. */
-export type Play = { name: string; description: string };
+/** A blueprint as `workwork blueprints --json` prints it. `custom` ones are the user's own. */
+export type Blueprint = {
+  name: string;
+  attention: string;
+  description: string;
+  finder: string;
+  done: string;
+  onRequest: boolean;
+  prompt: string;
+  custom: boolean;
+};
 
 /** Tokens by kind over an attempt, as the runner's event stream reports them. */
 export type Tokens = { input: number; cached: number; output: number };
@@ -127,9 +167,10 @@ export type Note = {
   attempt: number;
   /**
    * step: progress in the agent's words. assume: a question it carried on from with `assumed`.
-   * factory: what factory did, like a follow-up, an escalation or a merge.
+   * factory: what factory did, like a follow-up, an escalation or a merge. alone: the agent needs
+   * the machine to itself, and why.
    */
-  kind: "note" | "ask" | "assume" | "answer" | "result" | "step" | "train" | "factory";
+  kind: "note" | "ask" | "assume" | "answer" | "result" | "step" | "train" | "factory" | "alone";
   text: string;
   confidence?: Confidence;
   followups?: string[];
@@ -148,6 +189,8 @@ export type Goal = {
   repo: string;
   /** Names the branch `goal/<slug>` and the memory file `.factory/<slug>.md`. */
   slug: string;
+  /** What the user asked for when starting it from the page or `goal new`; a decomposer's plan replaces the summary. */
+  brief?: string;
   summary: string;
   /** Run on the integration branch after every merge into it. */
   gates: string[];
@@ -196,6 +239,11 @@ export type Job = Tuning & {
   /** Globs of files it expects to change; unset: not tracked, empty: anything, so it runs alone. */
   touches?: string[];
   needs: string[];
+  /**
+   * It reaches outside its worktree (global installs, home config, services, ports, devices), so it
+   * runs only while no other job does. Unset: it stays in its worktree and runs alongside others.
+   */
+  machine?: boolean;
   /** Needs no worker had when it was done, until the user checks them. */
   unverified: string[];
   goal?: Goal;
@@ -233,8 +281,42 @@ export type Worker = Tuning & {
   context?: number;
 };
 
+/** Each preset's workers, in settings order and ready, with a run's counts over the settings'. */
+export const presetWorkers = (presets: Preset[], counts: Record<string, number> = {}): Worker[] =>
+  presets.flatMap((preset) =>
+    Array.from({ length: counts[presetId(preset)] ?? workersOf(preset) }, (_, index) => ({
+      id: `${presetId(preset)}#${index + 1}`,
+      agent: preset.agent,
+      model: preset.model,
+      effort: preset.effort,
+      preset: presetId(preset),
+      pool: poolOf(preset),
+      state: "idle" as const,
+      since: new Date().toISOString(),
+    })),
+  );
+
+/** The pools whose 5-hour usage factory can read, so a reserve can be kept on them. */
+export const USAGE_POOLS = ["claude", "anthropic", "openai-codex"] as const;
+
+/** A usage window: the percent used, and when it resets in epoch ms; no reset while nothing was used. */
+export type UsageWindow = { used: number; resets?: number };
+/** A pool's two limits. */
+export type Usage = { fiveHour: UsageWindow; sevenDay: UsageWindow };
+/** A pool's limits as of a read, in epoch ms. */
+export type ReadUsage = Usage & { at: number };
+
 /** What one usage limit counts against: an account at a provider. */
-export type Pool = { name: string; limits: number; until?: string; stopped?: string };
+export type Pool = {
+  name: string;
+  limits: number;
+  until?: string;
+  stopped?: string;
+  /** Percent of its 5-hour window used when last read; only read for a pool with a reserve. */
+  used?: number;
+  /** Its until is the reset of a window that reached its reserve, not a limit hit. */
+  reserved?: boolean;
+};
 
 /** What status.json holds while a run is on, and after it ended. */
 export type Status = {
@@ -261,6 +343,8 @@ export type Snapshot = {
   prs: Record<string, Pr>;
   /** Where each job on the merge train is, by job id; gone when serve restarts. */
   train: Record<string, TrainCar>;
+  /** The last good usage read of each pool a run works on, by pool; a pool never read is missing. */
+  usage: Record<string, ReadUsage>;
 };
 
 export type TrainCar =
@@ -275,8 +359,8 @@ export type Pr = {
   state: "OPEN" | "MERGED" | "CLOSED";
   draft: boolean;
   title: string;
-  /** The PR body's Level line: the agent may have raised the candidate's. */
-  level?: string;
+  /** The PR body's Attention line: the agent may have raised the candidate's. */
+  attention?: string;
   additions: number;
   deletions: number;
   files: string[];
@@ -290,6 +374,15 @@ export type Pr = {
 export const prUrl = (job: Job) =>
   job.notes.findLast((note) => note.kind === "factory" && note.url?.includes("/pull/"))?.url ??
   job.attempts.findLast((attempt) => attempt.url?.includes("/pull/"))?.url;
+
+/** Assumptions an agent carried on from that the user hasn't answered yet, with their index among the notes. */
+export const openAssumptions = (job: Job) =>
+  job.notes.flatMap((note, index) =>
+    note.kind === "assume" &&
+    !job.notes.some((other) => other.kind === "answer" && other.re === index)
+      ? [{ ...note, index }]
+      : [],
+  );
 
 /** Merging from the page skips GitHub's own page, so it only goes ahead when nothing argues against it. */
 export const canMerge = (pr: Pr) =>

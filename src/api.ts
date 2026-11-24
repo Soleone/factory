@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
-import type { Candidates, Job, Model, Play, Preset, Snapshot, Tier } from "./backend/types.ts";
+import type {
+  Blueprint,
+  Candidates,
+  Job,
+  Model,
+  Pin,
+  RunRequest,
+  Snapshot,
+  Tier,
+} from "./backend/types.ts";
 import type { clonableRepos } from "./backend/repos.ts";
 import type { DialogAnswer } from "./pi";
 
@@ -20,7 +29,14 @@ export const api = {
       "/api/candidates",
     ),
   refreshCandidates: () => call("POST", "/api/candidates/refresh"),
-  plays: () => call<Play[]>("GET", "/api/plays"),
+  blueprints: () => call<Blueprint[]>("GET", "/api/blueprints"),
+  /** Saves one of the user's own, replacing theirs of the same name. */
+  saveBlueprint: (blueprint: Omit<Blueprint, "custom">) =>
+    call("PUT", "/api/blueprints", blueprint),
+  deleteBlueprint: (name: string) => call("POST", "/api/blueprints/delete", { name }),
+  /** Queues every candidate the blueprint finds in the repo, on-request ones included. */
+  runBlueprint: (name: string, repo: string) =>
+    call<Job[]>("POST", "/api/blueprints/run", { name, repo }),
   /** What an agent is told to do for the candidate. */
   prompt: (item: { repo: string; id: string }) =>
     call<string>("POST", "/api/candidates/prompt", { repo: item.repo, id: item.id }),
@@ -28,28 +44,44 @@ export const api = {
   jobPrompt: (id: string) => call<string>("GET", `/api/jobs/${id}/prompt`),
   repos: () => call<Awaited<ReturnType<typeof clonableRepos>>>("GET", "/api/repos"),
   clone: (name: string) => call("POST", "/api/repos/clone", { name }),
-  /** Without a pin, the job goes to whichever agent is free first, on its run's model and effort. */
-  queue: (items: { repo: string; id: string }[], pin?: Preset) =>
+  /** Without a pin, the job goes to the first free worker, on its model and effort. */
+  queue: (items: { repo: string; id: string }[], pin?: Pin) =>
     call("POST", "/api/jobs", { items, pin }),
+  /** A waiting job's new role or worker; an empty pin lets any free worker take it. */
+  pin: (id: string, pin: Pin) => call("POST", `/api/jobs/${id}/pin`, pin),
   /** A job of your own: a prompt for a tier, without workwork. */
-  ownJob: (job: { repo: string; prompt: string; tier: Tier; title: string }) =>
+  ownJob: (job: { repo: string; prompt: string; tier: Tier; title: string; machine: boolean }) =>
     call<Job>("POST", "/api/jobs/own", job),
   remove: (id: string) => call("POST", `/api/jobs/${id}/remove`),
   retry: (id: string) => call("POST", `/api/jobs/${id}/retry`),
   /** Answers the question a blocked job's agent asked, which picks its session up again, or else its oldest assumption. */
-  answer: (id: string, text: string) => call("POST", `/api/jobs/${id}/answer`, { text }),
+  answer: (id: string, text: string, re?: number) =>
+    call("POST", `/api/jobs/${id}/answer`, { text, re }),
   /** A goal's approve, pause, resume or cancel. */
   goal: (id: string, action: "approve" | "pause" | "resume" | "cancel") =>
     call("POST", `/api/jobs/${id}/${action}`),
   /** Without `repo`, `project` names a new one to create. */
+  /** Downloads the goal's export zip; it gathers PRs from GitHub, so it can take a while. */
+  exportGoal: async (id: string, slug: string) => {
+    const response = await fetch(`/api/jobs/${id}/export`);
+    if (!response.ok) throw new Error((await response.json()).error);
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(await response.blob());
+    link.download = `factory-goal-${slug}.zip`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+  },
   newGoal: (goal: { title: string; brief: string; repo?: string; project?: string }) =>
     call<Job>("POST", "/api/goals", goal),
   importPlan: (plan: string) => call<Job>("POST", "/api/goals/import", { plan }),
+  /** A goal node that hasn't started, on another tier or dropped. */
+  retier: (id: string, tier: Tier) => call("POST", `/api/jobs/${id}/tier`, { tier }),
+  drop: (id: string) => call("POST", `/api/jobs/${id}/drop`),
   replan: (id: string, why: string) => call("POST", `/api/jobs/${id}/replan`, { why }),
   /** The user checked what the job couldn't; without a need, all of it. */
   verify: (id: string, need?: string) => call("POST", `/api/jobs/${id}/verify`, { need }),
   followup: (id: string, task: string) => call("POST", `/api/jobs/${id}/followup`, { task }),
-  review: (id: string, agent: string) => call("POST", `/api/jobs/${id}/review`, { agent }),
+  review: (id: string) => call("POST", `/api/jobs/${id}/review`, {}),
   prDetails: (id: string) => call<{ body: string; diff: string }>("GET", `/api/jobs/${id}/pr`),
   merge: (id: string) => call("POST", `/api/jobs/${id}/merge`),
   rebase: (id: string) => call("POST", `/api/jobs/${id}/rebase`),
@@ -58,13 +90,13 @@ export const api = {
   move: (id: string, index: number) => call("POST", `/api/jobs/${id}/move`, { index }),
   models: () => call<Record<string, Model[]>>("GET", "/api/models"),
   saveSettings: (settings: Snapshot["settings"]) => call("PUT", "/api/settings", settings),
-  turnOn: (run: Pick<Snapshot["settings"], "agents" | "limit" | "until">) =>
-    call("POST", "/api/on", run),
+  turnOn: (run: RunRequest) => call("POST", "/api/on", run),
   turnOff: () => call("POST", "/api/off"),
   chat: (message: string) => call("POST", "/api/chat", { message }),
   abortChat: () => call("POST", "/api/chat/abort"),
   answerChat: (answer: { id: string } & DialogAnswer) => call("POST", "/api/chat/answer", answer),
-  resetChat: () => call("POST", "/api/chat/reset"),
+  newChat: () => call("POST", "/api/chat/new"),
+  openChat: (id: string) => call("POST", "/api/chat/open", { id }),
 };
 
 /** Runs a change against the factory; the page reloads after it and shows what went wrong, if anything. */

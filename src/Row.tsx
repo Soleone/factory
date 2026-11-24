@@ -1,33 +1,55 @@
 import type { CSSProperties, ReactNode } from "react";
 import {
-  Item,
   ItemActions,
   ItemContent,
   ItemDescription,
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
+import { RowItem } from "@/components/variants/item";
+import { openRow } from "./rowKeys";
 
-/** One line in a list: a title, a muted line under it, and buttons on the right. */
+/**
+ * One line in a list: a title, a muted line under it, and buttons on the right. A filled card,
+ * deeper on hover; focusable for the list keys in `useRowKeys`, which find it by `data-row`.
+ * A click on its empty space opens it like its title does.
+ */
 export function Row({
   leading,
   title,
   meta,
   below,
   progress,
+  marked,
   children,
 }: {
   leading?: ReactNode;
   title: ReactNode;
-  meta: ReactNode;
+  meta?: ReactNode;
   /** Blocks that can't sit in the description's paragraph, like a form. */
   below?: ReactNode;
   /** How much of its time a running job has used, from 0 to 1, as a bar along the bottom. */
   progress?: number;
+  /** Draws a bar along the left edge, like for what ended since the last visit. */
+  marked?: boolean;
   children?: ReactNode;
 }) {
   return (
-    <Item variant="outline" size="sm" className="relative overflow-hidden">
+    <RowItem
+      size="sm"
+      tabIndex={-1}
+      data-row
+      className="relative overflow-hidden has-[[data-slot=item-title]_:is(button,a)]:cursor-pointer"
+      onClick={(event) => {
+        const row = event.currentTarget;
+        const target = event.target as HTMLElement;
+        // React bubbles clicks from portals, like the dialog a title opens, through the row too.
+        if (!row.contains(target)) return;
+        const control = target.closest("a, button, input, label, select, textarea, form, [role]");
+        if (control && row.contains(control)) return;
+        openRow(row);
+      }}
+    >
       {progress !== undefined && (
         <span
           aria-hidden
@@ -35,14 +57,20 @@ export function Row({
           style={{ "--progress": `${Math.min(progress, 1) * 100}%` } as CSSProperties}
         />
       )}
+      {/* Here, not in `leading`: ItemMedia's translate would make the bar fill the icon instead. */}
+      {marked && <span aria-hidden className="absolute inset-y-0 left-0 w-1 bg-foreground" />}
       {leading && <ItemMedia>{leading}</ItemMedia>}
-      <ItemContent>
+      {/* min-w-0 lets long text truncate instead of wrapping the content under the icon. */}
+      <ItemContent className="min-w-0">
         <ItemTitle>{title}</ItemTitle>
-        <ItemDescription>{meta}</ItemDescription>
+        {meta && <ItemDescription>{meta}</ItemDescription>}
         {below}
       </ItemContent>
-      {children && <ItemActions>{children}</ItemActions>}
-    </Item>
+      {/* A form below would center the actions on it; keep them on the title line. */}
+      {children && (
+        <ItemActions className={below ? "self-start" : undefined}>{children}</ItemActions>
+      )}
+    </RowItem>
   );
 }
 

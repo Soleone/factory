@@ -54,12 +54,13 @@ type PlanNode = {
   touches?: string[];
   gates?: string[];
   needs?: string[];
+  machine?: boolean;
   checkpoint?: boolean;
   parent?: string;
   review?: Tier;
 };
 
-/** Factory's own jobs inside a goal, told apart by their play. */
+/** Factory's own jobs inside a goal, told apart by their blueprint. */
 const [DECOMPOSE, REPLAN] = PLANNING;
 const REVIEW = "review";
 const FIX = "fix";
@@ -126,8 +127,11 @@ export function checkPlan(raw: unknown): string[] {
       problems.push(`${at}: gates must be a list of commands`);
     if (node?.needs !== undefined && !strings(node.needs))
       problems.push(`${at}: needs must be a list`);
+    if (node?.machine !== undefined && typeof node.machine !== "boolean")
+      problems.push(`${at}: machine must be true or false`);
   }
   for (const node of plan.nodes) {
+    if (node == null) continue;
     for (const key of strings(node.after) ? node.after : [])
       if (!keys.has(key)) problems.push(`${node.key}: after names no node ${key}`);
     if (node.parent !== undefined && !keys.has(node.parent))
@@ -186,18 +190,18 @@ const slugOf = (plan: Plan) =>
     .replace(/^-|-$/g, "")
     .slice(0, 40);
 
-const memoryPath = (slug: string) => `.factory/${slug}.md`;
-const planPath = (slug: string) => `.factory/${slug}.plan.json`;
-const replanPath = (slug: string) => `.factory/${slug}.replan.json`;
-const integration = (goal: Goal) => `goal/${goal.slug}`;
+export const memoryPath = (slug: string) => `.factory/${slug}.md`;
+export const planPath = (slug: string) => `.factory/${slug}.plan.json`;
+export const replanPath = (slug: string) => `.factory/${slug}.replan.json`;
+export const integration = (goal: Goal) => `goal/${goal.slug}`;
 const nodeBranch = (goal: Goal, key: string) => `node/${goal.slug}/${key}`;
 
-const goalItem = (repo: string, id: string, play: string, title: string): Item => ({
+const goalItem = (repo: string, id: string, blueprint: string, title: string): Item => ({
   repo,
   label: basename(repo),
   id,
-  play,
-  level: "decide",
+  blueprint,
+  attention: "decide",
   title,
 });
 
@@ -274,6 +278,7 @@ function nodeFields(goal: Job, node: PlanNode, ids: Map<string, string>): Omit<N
     gates: node.gates ?? [],
     touches: node.touches ?? [],
     needs: node.needs ?? [],
+    machine: node.machine || undefined,
     checkpoint: node.checkpoint || undefined,
     review: node.review,
   };
@@ -337,7 +342,14 @@ export async function newGoal(
     )
   )
     throw new Error(`a goal ${slug} already exists in ${repo}`);
-  const goal: Goal = { repo, slug, summary, gates: [], allowUp: false };
+  const goal: Goal = {
+    repo,
+    slug,
+    brief: brief.trim() || undefined,
+    summary,
+    gates: [],
+    allowUp: false,
+  };
   const job = addJob(state, {
     id: newId(),
     item: goalItem(repo, `goal/${slug}`, "goal", title),
@@ -361,7 +373,7 @@ export async function newGoal(
 }
 
 const TIER_RUBRIC = `Pick the lowest tier that will get each node right; tiers are the main lever on cost.
-- communicator (the most capable and most limited model): the decomposition itself, UX and visual design, user-facing copy, anything the user judges by taste.
+- communicator (the most capable and most limited model): the decomposition itself, UX and visual design, anything the user judges by taste, and anything people read: user-facing copy, READMEs and other docs, naming the domain's terms. Writing for a reader is judgment, never mechanical, so it is never grunt work.
 - builder (intelligent and thorough, not a great communicator): architecture, foundations other nodes build on, tricky logic, reviews.
 - grunt (follows a detailed spec, little judgment, very cheap): anything a detailed prompt makes mechanical, like porting a spec'd component, writing tests from a spec, wiring, renames. Writing a grunt prompt in more detail is cheaper than running the node on a higher tier.`;
 
@@ -373,7 +385,7 @@ const PLAN_SPEC = `A plan is JSON:
     "key": unique, lowercase, "title", "tier": "communicator" | "builder" | "grunt",
     "prompt": markdown, self-contained: what to build, where, how to verify, what not to touch,
     "after": [keys it depends on], "touches": [globs of files it changes; empty means anything, so it runs alone],
-    "gates": [commands run in its worktree before it merges], "needs"?: ["display" | "gpu" | ...],
+    "gates": [commands run in its worktree before it merges], "needs"?: ["display" | "gpu" | ...], "machine"?: true when it must change things outside its worktree (global installs, home config, services, devices), so it runs while no other node does,
     "checkpoint"?: true to pause the goal for the user's approval once it's done,
     "parent"?: a key, which makes that node a milestone (a milestone's nodes wait for what it comes after; never list your own milestone in after), "review"?: a tier that reviews it before it merges
   }]
@@ -406,10 +418,11 @@ Read the repo enough to plan well. Write the plan to \`${planPath(slug)}\` in th
 /** Checks factory itself runs after the agent says it's done, before the job's gates: the plan files. */
 export function builtinCheck(job: Job, jobs: Job[], worktree: string): string | undefined {
   const goal = jobs.find((each) => each.id === job.of)?.goal;
-  if (!goal || (job.item.play !== DECOMPOSE && job.item.play !== REPLAN)) return undefined;
+  if (!goal || (job.item.blueprint !== DECOMPOSE && job.item.blueprint !== REPLAN))
+    return undefined;
   const path = join(
     worktree,
-    job.item.play === DECOMPOSE ? planPath(goal.slug) : replanPath(goal.slug),
+    job.item.blueprint === DECOMPOSE ? planPath(goal.slug) : replanPath(goal.slug),
   );
   if (!existsSync(path)) return `There's no plan at ${path}. Write it there.`;
   let plan: unknown;
@@ -418,10 +431,9 @@ export function builtinCheck(job: Job, jobs: Job[], worktree: string): string | 
   } catch (error) {
     return `${path} isn't valid JSON: ${(error as Error).message}`;
   }
-  const problems = [
-    ...checkPlan(plan),
-    ...(job.item.play === REPLAN ? replanProblems(plan as Plan, job, jobs) : []),
-  ];
+  const problems = checkPlan(plan);
+  if (problems.length === 0 && job.item.blueprint === REPLAN)
+    problems.push(...replanProblems(plan as Plan, job, jobs));
   if (problems.length)
     return `The plan at ${path} has problems; fix them all:\n${problems.map((each) => `- ${each}`).join("\n")}`;
 }
@@ -450,8 +462,8 @@ export async function prepare(
     remote.trim() ? `origin/${branch}` : `origin/${integration(goal)}`,
   );
   await output("git", ["checkout", "--quiet", "-B", branch], worktree);
-  if (job.item.play === DECOMPOSE || job.item.play === REVIEW) return job.prompt!;
-  if (job.item.play === REPLAN) return job.prompt!;
+  if (job.item.blueprint === DECOMPOSE || job.item.blueprint === REVIEW) return job.prompt!;
+  if (job.item.blueprint === REPLAN) return job.prompt!;
   return nodePrompt(job, jobs, goalJob, branch);
 }
 
@@ -459,7 +471,7 @@ export async function prepare(
 function branchFor(job: Job, jobs: Job[], goal: Goal): string {
   const served = job.branchOf && jobs.find((each) => each.id === job.branchOf);
   if (served) return nodeBranch(goal, served.key!);
-  return nodeBranch(goal, job.key ?? `${job.item.play}-${job.id}`);
+  return nodeBranch(goal, job.key ?? `${job.item.blueprint}-${job.id}`);
 }
 
 function nodePrompt(job: Job, jobs: Job[], goalJob: Job, branch: string): string {
@@ -525,6 +537,7 @@ export async function afterAttempt(
     else if (job.attempts.at(-1)?.outcome === "done")
       await delivered(state, job, jobs, goalJob, worktree, log);
     checkBudget(state, goalJob.id);
+    await finishGoals(state, log);
   } catch (error) {
     const message = (error as Error).message.trim().split("\n").slice(0, 5).join("\n");
     log(`goal ${goalJob.goal.slug}: ${job.id} didn't deliver: ${message}`);
@@ -545,8 +558,8 @@ async function delivered(
   log: Log,
 ): Promise<void> {
   const goal = goalJob.goal!;
-  const play = job.item.play;
-  if (play === DECOMPOSE) {
+  const blueprint = job.item.blueprint;
+  if (blueprint === DECOMPOSE) {
     const plan = JSON.parse(readFileSync(join(worktree, planPath(goal.slug)), "utf8")) as Plan;
     const { summary, gates, budget, allowUp, replanTier } = plan.goal;
     record(state, {
@@ -560,8 +573,8 @@ async function delivered(
     record(state, { type: "merged", id: job.id });
     return;
   }
-  if (play === REPLAN) return applyReplan(state, job, jobs, goalJob, worktree);
-  if (play === MAIN) {
+  if (blueprint === REPLAN) return applyReplan(state, job, jobs, goalJob, worktree);
+  if (blueprint === MAIN) {
     // Its branch is the integration branch moved onto main, so it replaces it.
     await output(
       "git",
@@ -572,7 +585,7 @@ async function delivered(
     return afterMerge(state, job, goalJob.id, worktree, log);
   }
   const served = job.branchOf ? jobs.find((each) => each.id === job.branchOf)! : job;
-  if (play === REVIEW) {
+  if (blueprint === REVIEW) {
     const findings = job.notes.findLast((note) => note.kind === "result")?.followups ?? [];
     record(state, { type: "merged", id: job.id });
     if (findings.length === 0) return merge(state, served, goalJob, worktree, log);
@@ -592,7 +605,7 @@ async function delivered(
   if (
     served === job &&
     job.review &&
-    !jobs.some((each) => each.branchOf === job.id && each.item.play === REVIEW)
+    !jobs.some((each) => each.branchOf === job.id && each.item.blueprint === REVIEW)
   ) {
     await output(
       "git",
@@ -619,14 +632,19 @@ async function delivered(
 function helper(
   node: Job,
   goalJob: Job,
-  play: string,
+  blueprint: string,
   title: string,
   tier: Tier,
   prompt: string,
 ): NewJob {
   return {
     id: newId(),
-    item: goalItem(goalJob.goal!.repo, `${node.key ?? node.item.id}+${play}`, play, title),
+    item: goalItem(
+      goalJob.goal!.repo,
+      `${node.key ?? node.item.id}+${blueprint}`,
+      blueprint,
+      title,
+    ),
     source: "goal",
     of: goalJob.id,
     parent: node.parent,
@@ -634,9 +652,10 @@ function helper(
     tier,
     front: true,
     prompt,
-    gates: play === REVIEW ? [] : node.gates,
+    gates: blueprint === REVIEW ? [] : node.gates,
     touches: node.touches,
     needs: node.needs,
+    machine: node.machine,
   };
 }
 
@@ -667,7 +686,7 @@ async function merge(
 ): Promise<void> {
   const goal = goalJob.goal!;
   const git = (...args: string[]) => output("git", args, worktree);
-  const branch = nodeBranch(goal, node.key ?? `${node.item.play}-${node.id}`);
+  const branch = nodeBranch(goal, node.key ?? `${node.item.blueprint}-${node.id}`);
   const base = integration(goal);
   for (let tries = 0; ; tries++) {
     await git("fetch", "--quiet", "origin");
@@ -716,7 +735,7 @@ async function merge(
   }
   const said = (by ?? node).notes.findLast((note) => note.kind === "result");
   const url =
-    node.item.play === MAIN
+    node.item.blueprint === MAIN
       ? undefined
       : await createPr(
           goal.repo,
@@ -758,7 +777,7 @@ async function remember(goal: Goal, node: Job, worktree: string): Promise<void> 
   await output("git", ["push", "--quiet", "origin", `HEAD:${integration(goal)}`], worktree);
 }
 
-/** After a merge: the goal's gates, checkpoints, milestones, a red goal turning green, the final PR. */
+/** After a merge: the goal's gates, checkpoints, milestones and a red goal turning green. */
 async function afterMerge(
   state: string,
   node: Job,
@@ -812,8 +831,19 @@ async function afterMerge(
     await rebaseOntoMain(state, goalJob, worktree, log);
     queueReplan(state, goalJob, `milestone ${parent.item.title} is done`);
   }
-  const rest = readJobs(state).filter((each) => each.of === goalId && each.state !== "removed");
-  if (rest.length > 0 && rest.every((each) => each.state === "done")) {
+}
+
+/**
+ * Opens the final PR of every goal whose nodes are all done. Runs after each goal attempt, not only
+ * a merge: a replan can be the last to finish, and a run's start picks up any goal left waiting.
+ */
+export async function finishGoals(state: string, log: Log): Promise<void> {
+  const jobs = readJobs(state);
+  for (const goalJob of jobs) {
+    if (!goalJob.goal || goalJob.state !== "queued") continue;
+    const rest = jobs.filter((each) => each.of === goalJob.id && each.state !== "removed");
+    if (rest.length === 0 || rest.some((each) => each.state !== "done")) continue;
+    const goal = goalJob.goal;
     const main = await originHead(goal.repo);
     const unverified = rest.flatMap((each) =>
       each.unverified.map((need) => `- [ ] ${each.item.title}: ${need}`),
@@ -827,10 +857,10 @@ async function afterMerge(
     );
     record(state, {
       type: "note",
-      id: goalId,
+      id: goalJob.id,
       note: { kind: "factory", text: `every node is done; the final PR is open`, url },
     });
-    record(state, { type: "merged", id: goalId });
+    record(state, { type: "merged", id: goalJob.id });
     log(`goal ${goal.slug} is done: ${url}`);
   }
 }
@@ -892,7 +922,7 @@ export function queueReplan(state: string, goalJob: Job, why: string): Job | und
     jobs.some(
       (each) =>
         each.of === goalJob.id &&
-        each.item.play === REPLAN &&
+        each.item.blueprint === REPLAN &&
         ["queued", "running"].includes(each.state),
     )
   )
@@ -1003,6 +1033,7 @@ function applyReplan(state: string, job: Job, jobs: Job[], goalJob: Job, worktre
       "gates",
       "touches",
       "needs",
+      "machine",
       "checkpoint",
       "review",
     ] as const)
@@ -1090,6 +1121,39 @@ export function resumeGoal(state: string, goalId: string): void {
   const goalJob = findGoal(state, goalId);
   if (goalJob.blocked !== "paused") throw new Error(`goal ${goalId} isn't paused`);
   record(state, { type: "unblock", id: goalId });
+}
+
+/** A goal node that hasn't started, which the user may still change or drop. */
+function unstartedNode(state: string, id: string): { node: Job; jobs: Job[] } {
+  const jobs = readJobs(state);
+  const node = jobs.find((job) => job.id === id);
+  if (!node?.of || !node.key) throw new Error(`${id} is not a node of a goal`);
+  if (started(node) || node.state === "removed") throw new Error(`${node.key} has started`);
+  return { node, jobs };
+}
+
+/** The user moves a node that hasn't started to another tier. */
+export function retierNode(state: string, id: string, tier: Tier): void {
+  if (!isTier(tier)) throw new Error(`${String(tier)} is not one of ${TIERS.join(", ")}`);
+  unstartedNode(state, id);
+  record(state, { type: "update", id, change: { tier } });
+}
+
+/** The user drops a node that hasn't started; what waited on it waits on what it waited on instead. */
+export function dropNode(state: string, id: string): void {
+  const { node, jobs } = unstartedNode(state, id);
+  if (jobs.some((job) => job.parent === id && job.state !== "removed"))
+    throw new Error(`${node.key} is a milestone; drop its nodes instead`);
+  for (const job of jobs)
+    if (job.after.includes(id))
+      record(state, {
+        type: "update",
+        id: job.id,
+        change: {
+          after: [...new Set([...job.after.filter((each) => each !== id), ...node.after])],
+        },
+      });
+  record(state, { type: "remove", id });
 }
 
 /** Removes the goal and everything under it that hasn't finished; running agents finish their turn. */
