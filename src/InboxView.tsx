@@ -12,7 +12,8 @@ import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { ItemGroup } from "@/components/ui/item";
 import { holds, inbox, type InboxItem } from "@/inbox";
-import { canBoard, MergeButton, mergeTrain, Result, reviewerOf } from "@/ResultsView";
+import { canBoard, MergeButton, mergeTrain } from "@/PullRequest";
+import { Result, reviewerOf } from "@/Result";
 import { Row } from "@/Row";
 import { AssumeAnswer, TaskDetails } from "@/TaskDetails";
 
