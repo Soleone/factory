@@ -6,6 +6,7 @@ import { dirname, extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AGENT_NAMES } from "./agents.ts";
 import { chat } from "./chat.ts";
+import { githubIdentity } from "./github.ts";
 import { clonableRepos, cloneRepo, createRepo, localRepos, sourceRoot } from "./repos.ts";
 import { agentModels } from "./models.ts";
 import {
@@ -96,6 +97,7 @@ export function serve(
     prs,
     (id, url, files) => queueConflicts(state, id, url, files),
     (id, text) => addNote(state, id, { kind: "train", text }),
+    () => readSettings(state).commitIdentity,
   );
   const planner = chat(state, () => {
     const { port } = server.address() as AddressInfo;
@@ -270,7 +272,7 @@ export function serve(
     "POST /api/jobs/rebase": async (_, id) => {
       const { url, pr } = await openPr(id);
       if (!canRebase(pr)) throw new Error(`${url} isn't ready to rebase: see it on GitHub`);
-      await rebasePr(url);
+      await rebasePr(url, readSettings(state).commitIdentity);
       await prs.fresh(url);
     },
     "POST /api/train": (body: { ids: string[] }) =>
@@ -289,6 +291,7 @@ export function serve(
       Object.fromEntries(
         await Promise.all(AGENT_NAMES.map(async (name) => [name, await modelsOf(name)])),
       ),
+    "GET /api/github-profile": () => githubIdentity(),
     "PUT /api/settings": (body: Settings) => {
       const before = JSON.stringify(readSettings(state).chat);
       writeSettings(state, checkSettings(body));

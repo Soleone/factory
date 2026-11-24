@@ -1,8 +1,9 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { identityEnv, requireIdentity, worktreeGit } from "./git.ts";
 import { output } from "./state.ts";
-import type { Item, Pr } from "./types.ts";
+import type { CommitIdentity, Item, Pr } from "./types.ts";
 
 const MINUTE = 60_000;
 
@@ -111,7 +112,7 @@ export class Conflicts extends Error {
   }
 }
 
-export async function rebasePr(url: string): Promise<void> {
+export async function rebasePr(url: string, identity: CommitIdentity | undefined): Promise<void> {
   const pull = /^(https:\/\/github\.com\/[\w.-]+\/[\w.-]+)\/pull\/(\d+)$/.exec(url);
   if (!pull) throw new Error("Rebase requires a github.com pull request URL");
   const [, repo, number] = pull;
@@ -122,7 +123,7 @@ export async function rebasePr(url: string): Promise<void> {
     throw new Error("Rebase requires a separate PR branch in the same repository");
 
   const dir = await mkdtemp(join(tmpdir(), "factory-rebase-"));
-  const git = (...args: string[]) => output("git", args, dir);
+  const git = worktreeGit(dir, identityEnv(identity));
   const remote = `${repo}.git`;
   const base = "refs/factory/base";
   const head = "refs/factory/head";
@@ -140,6 +141,7 @@ export async function rebasePr(url: string): Promise<void> {
     );
     const before = (await git("rev-parse", head)).trim();
     await git("checkout", "--quiet", "--detach", head);
+    await requireIdentity(git);
     try {
       await git("rebase", "--rebase-merges", base);
     } catch (error) {

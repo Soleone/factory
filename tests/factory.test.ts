@@ -535,8 +535,67 @@ exit 0`;
       sh(base.repo, "git", "show", "--name-only", "--format=", first.attempts[0].branch!),
     ).toBe("left.txt\n");
     await removeJob(base.state, a.id);
+    expect(
+      sh(
+        base.repo,
+        "git",
+        "show",
+        "-s",
+        "--format=%an <%ae> / %cn <%ce>",
+        second.attempts[0].branch!,
+      ),
+    ).toBe("Test <test@example.com> / Test <test@example.com>\n");
     // b's stays, and the next checkout didn't save a's work a second time.
     expect(sh(base.repo, "git", "branch", "--list", "factory/*")).toBe(`  factory/${b.id}-1\n`);
+  });
+
+  test("requires Git identity before launching an agent and uses the saved identity on retry", async () => {
+    const base = setup(["a"]);
+    const queued = base.pick("a");
+    const previousConfig = process.env.GIT_CONFIG_GLOBAL;
+    const noIdentity = join(scratch, "require-explicit.gitconfig");
+    writeFileSync(noIdentity, "[user]\n\tuseConfigOnly = true\n");
+    const repoConfig = sh(base.repo, "git", "config", "--local", "--list");
+    const launched = join(base.state, "launched");
+    agents({
+      claude: `touch '${launched}'; git commit -q --allow-empty -m agent || exit 1; echo x > left.txt; ${RESULT}`,
+    });
+    try {
+      process.env.GIT_CONFIG_GLOBAL = noIdentity;
+      const [failed] = await work(options(base));
+      expect(failed.state).toBe("failed");
+      expect(failed.attempts).toHaveLength(1);
+      expect(failed.attempts[0].error).toContain("Settings → GitHub");
+      expect(existsSync(launched)).toBe(false);
+
+      const commitIdentity = { name: "Factory Test", email: "factory@example.com" };
+      writeSettings(base.state, { ...readSettings(base.state), commitIdentity });
+      retryJob(base.state, queued.id);
+      const [finished] = await work(options(base));
+      expect(finished.state).toBe("done");
+      expect(finished.attempts).toHaveLength(2);
+      expect(existsSync(launched)).toBe(true);
+      expect(
+        sh(
+          base.repo,
+          "git",
+          "log",
+          "-2",
+          "--format=%s: %an <%ae> / %cn <%ce>",
+          finished.attempts[1].branch!,
+        )
+          .trim()
+          .split("\n"),
+      ).toEqual([
+        "factory: changes the agent left uncommitted: Factory Test <factory@example.com> / Factory Test <factory@example.com>",
+        "agent: Factory Test <factory@example.com> / Factory Test <factory@example.com>",
+      ]);
+      expect(sh(base.repo, "git", "config", "--local", "--list")).toBe(repoConfig);
+      expect(sh(base.repo, "git", "log", "-1", "--format=%s")).toBe("start\n");
+      expect(readFileSync(noIdentity, "utf8")).toBe("[user]\n\tuseConfigOnly = true\n");
+    } finally {
+      process.env.GIT_CONFIG_GLOBAL = previousConfig;
+    }
   });
 
   test("links the PR GitHub has on workwork's branch over the log's last link", async () => {
@@ -1639,6 +1698,62 @@ esac`;
       (jobs) => jobs.find((job) => job.id === goal.id)!.state !== "queued",
     );
     expect(jobs.filter((job) => job.key).map((job) => job.state)).toEqual(["done", "done"]);
+  });
+
+  test("GitHub profile suggestions do not save; commit identity can be saved, reloaded and cleared", async () => {
+    const state = mkdtempSync(join(scratch, "state-"));
+    const bin = mkdtempSync(join(scratch, "profile-"));
+    process.env.PATH = bin;
+    const server = serve(state, 0, "127.0.0.1", () => ({}));
+    await once(server, "listening");
+    const { port } = server.address() as AddressInfo;
+    const url = `http://127.0.0.1:${port}/api`;
+    const profile = () => fetch(`${url}/github-profile`);
+    const save = (commitIdentity: Settings["commitIdentity"]) =>
+      fetch(`${url}/settings`, {
+        method: "PUT",
+        body: JSON.stringify({ ...readSettings(state), commitIdentity }),
+      });
+    const saved = async () => ((await (await fetch(`${url}/state`)).json()) as Snapshot).settings;
+    try {
+      expect(await (await profile()).json()).toMatchObject({
+        error: expect.stringContaining("not installed"),
+      });
+      script(bin, "gh", "echo private-diagnostic >&2; exit 1");
+      expect(await (await profile()).json()).toEqual({
+        error:
+          "Could not read the GitHub profile. Sign in with gh auth login and try again, or enter your name and email manually.",
+      });
+      expect((await save({ name: "Manual User ", email: " manual@example.com " })).ok).toBe(true);
+      const manual = { name: "Manual User", email: "manual@example.com" };
+      expect(readSettings(state).commitIdentity).toEqual(manual);
+      expect((await saved()).commitIdentity).toEqual(manual);
+
+      for (const name of ["Public Name", null]) {
+        script(
+          bin,
+          "gh",
+          `test "$*" = 'api --hostname github.com user --jq {name, login, id}' || exit 1\necho '${JSON.stringify({ name, login: "octocat", id: 42 })}'`,
+        );
+        expect(await (await profile()).json()).toEqual({
+          name: name ?? "octocat",
+          email: "42+octocat@users.noreply.github.com",
+        });
+        expect(readSettings(state).commitIdentity).toEqual(manual);
+      }
+      for (const identity of [
+        { name: "Missing email", email: "" },
+        { name: "Manual User", email: "invalid" },
+      ]) {
+        expect((await save(identity)).status).toBe(400);
+        expect(readSettings(state).commitIdentity).toEqual(manual);
+      }
+      expect((await save({ name: "", email: "" })).ok).toBe(true);
+      expect((await saved()).commitIdentity).toBeUndefined();
+      expect(readSettings(state).triggers).toEqual({ ci: true, label: "factory", reviews: true });
+    } finally {
+      server.close();
+    }
   });
 
   test("serve lists a newly cloned repo even when workwork finds no candidates", async () => {
