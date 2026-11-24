@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   writeFileSync,
 } from "node:fs";
@@ -11,7 +12,7 @@ import { once } from "node:events";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { promisify } from "node:util";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join, relative } from "node:path";
 import { afterEach, beforeAll, describe, expect, test } from "vite-plus/test";
 import { agent, classify, resetTime } from "../src/backend/agents.ts";
 import {
@@ -67,6 +68,10 @@ import { inbox } from "../src/inbox.ts";
 const scratch = mkdtempSync(join(tmpdir(), "factory-test-"));
 const NOW = Date.parse("2026-11-16T04:00:00Z");
 const MINUTE = 60_000;
+
+/** Whether `command` is an executable on PATH. */
+const onPath = (command: string) =>
+  (process.env.PATH ?? "").split(delimiter).some((dir) => dir && existsSync(join(dir, command)));
 
 beforeAll(() => {
   // Isolate git from the user's config (hooks, signing).
@@ -1478,7 +1483,8 @@ echo "$key" > $key.txt; git add $key.txt; git commit -qm "$key"; git push -q ori
     });
   });
 
-  test("a goal's export zips its jobs, events, attempt folders, memory, plan and PRs", async () => {
+  /** Runs a one-node goal to done and exports it to a fresh `goal.zip`. */
+  async function exportedGoal() {
     const { repo, state, base } = goalRepo();
     agents({ claude: NODE });
     const goal = await importPlan(state, plan(repo, [{ key: "a" }]));
@@ -1488,34 +1494,70 @@ echo "$key" > $key.txt; git add $key.txt; git commit -qm "$key"; git push -q ori
       (jobs) => jobs.find((job) => job.id === goal.id)!.state === "done",
     );
     const node = jobs.find((job) => job.key === "a")!;
+    // A job outside the goal, which the export leaves out.
+    addJobs(state, [item(repo, "elsewhere")], "pick");
     const out = join(mkdtempSync(join(scratch, "export-")), "goal.zip");
     await exportGoal(
       state,
       readJobs(state).find((job) => job.id === goal.id)!,
       out,
     );
-    const entries = sh(scratch, "unzip", "-Z1", out).trim().split("\n");
-    expect(entries).toEqual(
-      expect.arrayContaining([
-        "REVIEW.md",
-        "summary.txt",
-        "goal.json",
-        "jobs.json",
-        "events.jsonl",
-        "settings.json",
-        `attempts/${node.id}-1/prompt.md`,
-        `attempts/${node.id}-1/agent.log`,
-        "repo/memory.md",
-        "repo/plan.json",
-        "repo/git-log.txt",
-        "prs/101.json",
-        "prs/101.diff",
-      ]),
-    );
-    const unzip = (path: string) => sh(scratch, "unzip", "-p", out, path);
-    expect(JSON.parse(unzip("jobs.json")).map((job: Job) => job.key)).toEqual(["a"]);
-    expect(unzip("events.jsonl").trim().split("\n")[0]).toContain(`"id":"${goal.id}"`);
+    return { goal, node, out };
+  }
+
+  const exportEntries = (node: Job) => [
+    "REVIEW.md",
+    "summary.txt",
+    "goal.json",
+    "jobs.json",
+    "events.jsonl",
+    "settings.json",
+    `attempts/${node.id}-1/prompt.md`,
+    `attempts/${node.id}-1/agent.log`,
+    "repo/memory.md",
+    "repo/plan.json",
+    "repo/git-log.txt",
+    "prs/101.json",
+    "prs/101.diff",
+  ];
+
+  function expectExportContents(goal: Job, node: Job, read: (path: string) => string): void {
+    expect(JSON.parse(read("jobs.json")).map((job: Job) => job.key)).toEqual(["a"]);
+    const ids = read("events.jsonl")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as Event)
+      .map((event) => ("job" in event ? event.job.id : event.id));
+    expect(ids[0]).toBe(goal.id);
+    expect(new Set(ids)).toEqual(new Set([goal.id, node.id]));
+  }
+
+  test("a goal's export stages its jobs, events, attempt folders, memory, plan and PRs for zip", async () => {
+    // A fake zip on PATH copies what it was asked to archive to <out>.d, so this runs without zip.
+    const bin = mkdtempSync(join(scratch, "zip-"));
+    script(bin, "zip", `[ "$1 $3" = "-qr ." ] || exit 2; cp -R . "$2.d" && : > "$2"`);
+    process.env.PATH = `${bin}:${process.env.PATH}`;
+    const { goal, node, out } = await exportedGoal();
+    expect(existsSync(out)).toBe(true);
+    const staged = `${out}.d`;
+    const entries = readdirSync(staged, { recursive: true, withFileTypes: true })
+      .filter((entry) => entry.isFile())
+      .map((entry) => relative(staged, join(entry.parentPath, entry.name)));
+    expect(entries).toEqual(expect.arrayContaining(exportEntries(node)));
+    expectExportContents(goal, node, (path) => readFileSync(join(staged, path), "utf8"));
   });
+
+  // Needs zip and unzip on PATH, and is reported as skipped without them:
+  // `vp test run tests/factory.test.ts -t "real zip"`.
+  test.skipIf(!onPath("zip") || !onPath("unzip"))(
+    "a goal's export is a real zip archive (needs zip and unzip on PATH)",
+    async () => {
+      const { goal, node, out } = await exportedGoal();
+      const entries = sh(scratch, "unzip", "-Z1", out).trim().split("\n");
+      expect(entries).toEqual(expect.arrayContaining(exportEntries(node)));
+      expectExportContents(goal, node, (path) => sh(scratch, "unzip", "-p", out, path));
+    },
+  );
 
   test("a node that no longer rebases gets a conflicts job on its branch, then merges", async () => {
     const { repo, state, files, base } = goalRepo();

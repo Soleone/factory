@@ -167,7 +167,7 @@ pn dev
 vp check && vp test run && kit check
 ```
 
-The page is built on the [kit](https://github.com/Soleone/kit) web stack: Vite+, React, shadcn base-nova and the @soleone theme. `src/backend/` holds the CLI, the factory and the server; `src/` the page. `pn dev` runs Vite with hot reload at http://localhost:7040 in front of `factory serve` on 7041, which restarts when `src/backend/` changes. It uses your real state folder, so Turn on starts real agents. `pn build` bundles the CLI to `dist/cli.mjs` and the page to `dist/web/`. The Tasks store test runs against Tasks' own checkout (`$SRC/products/tasks/bin/tasks-cli`, or `TASKS_CLI`) and is skipped without it.
+The page is built on the [kit](https://github.com/Soleone/kit) web stack: Vite+, React, shadcn base-nova and the @soleone theme. `src/backend/` holds the CLI, the factory and the server; `src/` the page. `pn dev` runs Vite with hot reload at http://localhost:7040 in front of `factory serve` on 7041, which restarts when `src/backend/` changes. It uses your real state folder, so Turn on starts real agents. `pn build` bundles the CLI to `dist/cli.mjs` and the page to `dist/web/`. The Tasks store test runs against Tasks' own checkout (`$SRC/products/tasks/bin/tasks-cli`, or `TASKS_CLI`) and is skipped without it. The goal export test fakes `zip` and checks what it was given; the real-archive test, `vp test run tests/factory.test.ts -t "real zip"`, needs `zip` and `unzip` on PATH and is skipped without them.
 
 ### Try the UI with dummy data
 
