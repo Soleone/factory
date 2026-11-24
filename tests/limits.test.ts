@@ -266,11 +266,11 @@ describe("the factory", () => {
   test("kills an agent that runs past the timeout, children included", async () => {
     const base = setup(["a"]);
     const marker = join(scratch, `survived-${Date.now()}`);
-    agents({ claude: `(sleep 2; touch ${marker}) & sleep 30` });
+    agents({ claude: `(sleep 1; touch ${marker}) & sleep 30` });
     base.pick("a");
     const [job] = await work({ ...options(base), idleMs: 300 });
     expect(job.attempts.map((attempt) => attempt.outcome)).toEqual(["timeout", "timeout"]);
-    await new Promise((resolve) => setTimeout(resolve, 2500));
+    await new Promise((resolve) => setTimeout(resolve, 1500));
     expect(() => readFileSync(marker)).toThrow();
   });
 
