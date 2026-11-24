@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vite-plus/test";
-import { checkPlan, showGoal } from "../src/backend/goals.ts";
+import { builtinCheck, checkPlan, showGoal } from "../src/backend/goals.ts";
 import {
   addJob,
   addNote,
@@ -294,6 +294,25 @@ test("goal show: layers by dependency depth, tiers, the critical path, and what 
   );
   expect(text).toContain("estimate: 1 communicator, 1 builder, 2 grunt attempts to go");
   expect(text).toContain("port: assumed yes, asked keep the old API?");
+});
+
+test.each([
+  ["decompose", "plan"],
+  ["replan", "replan"],
+])("%s gets validation feedback for a null plan node", (blueprint, file) => {
+  const { state: worktree, add, jobs } = graph();
+  const job = add("plan-writer", { item: { ...item("plan-writer"), blueprint } });
+  mkdirSync(join(worktree, ".factory"));
+  mkdirSync(join(worktree, ".git"));
+  writeFileSync(
+    join(worktree, ".factory", `g.${file}.json`),
+    JSON.stringify({
+      format: "factory-plan/1",
+      goal: { title: "t", repo: worktree, summary: "s", gates: [] },
+      nodes: [null],
+    }),
+  );
+  expect(builtinCheck(job, jobs(), worktree)).toContain("- nodes[0]: key must be");
 });
 
 test("a plan can't make a node wait for the milestone that contains it", () => {
