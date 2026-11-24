@@ -27,7 +27,10 @@ export function mergeTrain(
     for (;;) {
       const pr = await prs.fresh(url);
       if (pr.state !== "OPEN" || (pr.conflicts !== null && pr.checks !== "pending")) return pr;
-      if (Date.now() > deadline) throw new Error("checks still running after 30 minutes");
+      if (Date.now() > deadline)
+        throw new Error(
+          "GitHub did not confirm the pull request was ready to merge within 30 minutes. Check it on GitHub and add it to the merge train again when it's ready",
+        );
       cars.set(id, { step: "waiting" });
       await new Promise((resolve) => setTimeout(resolve, POLL));
     }
@@ -36,9 +39,17 @@ export function mergeTrain(
   async function land(id: string, url: string): Promise<void> {
     for (let tries = 1; ; tries++) {
       const pr = await settled(id, url);
-      if (pr.state !== "OPEN") throw new Error(`already ${pr.state.toLowerCase()}`);
+      if (pr.state !== "OPEN")
+        throw new Error(
+          pr.state === "MERGED"
+            ? "This pull request is already merged; no action needed"
+            : "This pull request is closed. Reopen it on GitHub before adding it to the merge train again",
+        );
       if (pr.conflicts) {
-        if (pr.fork) throw new Error("conflicts in a fork");
+        if (pr.fork)
+          throw new Error(
+            "Factory can't resolve conflicts on a branch in a fork. Resolve them on the fork's branch, then add the pull request to the merge train again",
+          );
       } else {
         if (!canMerge(pr)) throw new Error(blocker(pr));
         cars.set(id, { step: "merging" });
@@ -51,7 +62,10 @@ export function mergeTrain(
           if (tries >= TRIES || pr.fork) throw error;
         }
       }
-      if (tries >= TRIES) throw new Error(`still conflicting after ${TRIES} rebases`);
+      if (tries >= TRIES)
+        throw new Error(
+          "The pull request still has conflicts after rebasing. Resolve them on its branch, then add it to the merge train again",
+        );
       cars.set(id, { step: "rebasing" });
       await rebasePr(url);
     }
@@ -91,7 +105,8 @@ export function mergeTrain(
 }
 
 function blocker(pr: Pr): string {
-  if (pr.draft) return "draft";
-  if (pr.checks === "failing") return "checks failing";
+  if (pr.draft) return "This pull request is a draft. Mark it ready for review on GitHub first";
+  if (pr.checks === "failing")
+    return "GitHub checks did not pass. Open the pull request on GitHub to see which checks need attention";
   return "not ready to merge";
 }

@@ -221,7 +221,9 @@ describe("queue", () => {
     moveJob(state, c.id, 1);
     expect(ids(readJobs(state))).toEqual(["a", "c", "auto1"]);
     await expect(removeJob(state, b.id)).rejects.toThrow("is removed");
-    expect(() => retryJob(state, a.id)).toThrow("is queued");
+    expect(() => retryJob(state, a.id)).toThrow(
+      `Job ${a.id} is queued. Try again with a job in an allowed state: failed.`,
+    );
   });
 });
 
@@ -1620,13 +1622,19 @@ esac`;
       // The fake gh answers the same for every PR, so the first merge closes the second.
       expect(train).toEqual({
         [jobs[0].id]: { step: "merged" },
-        [jobs[1].id]: { step: "skipped", reason: "already merged" },
+        [jobs[1].id]: {
+          step: "skipped",
+          reason: "This pull request is already merged; no action needed",
+        },
       });
       expect(github.calls().match(/pr merge/g)).toHaveLength(1);
       const said = readJobs(base.state).map((job) =>
         job.notes.filter((note) => note.kind === "train").map((note) => note.text),
       );
-      expect(said).toEqual([["merged"], ["skipped: already merged"]]);
+      expect(said).toEqual([
+        ["merged"],
+        ["skipped: This pull request is already merged; no action needed"],
+      ]);
     } finally {
       server.close();
     }

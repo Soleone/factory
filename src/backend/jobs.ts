@@ -562,8 +562,11 @@ This came up while an agent worked on "${job.item.title}"${url ? ` (${url})` : "
 
 function find(state: string, id: string, ...states: Job["state"][]): Job {
   const job = readJobs(state).find((job) => job.id === id);
-  if (!job) throw new Error(`no job ${id}`);
-  if (!states.includes(job.state)) throw new Error(`job ${id} is ${job.state}`);
+  if (!job) throw new Error(`Job ${id} was not found. Check the job ID and try again.`);
+  if (!states.includes(job.state))
+    throw new Error(
+      `Job ${id} is ${job.state}. Try again with a job in an allowed state: ${states.join(", ")}.`,
+    );
   return job;
 }
 
