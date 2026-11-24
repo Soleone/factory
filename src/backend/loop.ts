@@ -524,13 +524,7 @@ export async function run(options: RunOptions): Promise<string> {
       live = begun.live;
     } else if (!live.pid) {
       if (stopping) return undefined;
-      live = nextTurn(
-        live,
-        resumeText(
-          live,
-          readJobs(state).find((each) => each.id === job.id)!,
-        ),
-      );
+      live = nextTurn(live, resumeText(live, reread(job)));
     }
     const agentOf = () =>
       makeAgent(worker.agent, live!.begun, {
@@ -562,9 +556,7 @@ export async function run(options: RunOptions): Promise<string> {
           facts.error &&
           claudeStartupRejected(text, facts.error) &&
           (await cleanWorktree(live.worktree)) &&
-          !readJobs(state)
-            .find((each) => each.id === job.id)!
-            .notes.some((note) => note.attempt === job.attempts.length + 1)
+          !reread(job).notes.some((note) => note.attempt === job.attempts.length + 1)
         ) {
           return {
             paused: "limited",
@@ -587,7 +579,7 @@ export async function run(options: RunOptions): Promise<string> {
         live = restart(job, live);
         continue;
       }
-      const fresh = readJobs(state).find((each) => each.id === job.id)!;
+      const fresh = reread(job);
       const said = fresh.notes.filter((note) => note.attempt === fresh.attempts.length + 1);
       // A question since the last answer: this turn asked it.
       const answered = said.findLastIndex(
@@ -826,7 +818,7 @@ export async function run(options: RunOptions): Promise<string> {
     );
     const whole = readFileSync(live.begun.log, "utf8");
     const facts = readStream(whole);
-    const fresh = readJobs(state).find((each) => each.id === job.id)!;
+    const fresh = reread(job);
     const result = fresh.notes.findLast(
       (note) => note.kind === "result" && note.attempt === fresh.attempts.length + 1,
     );
@@ -860,6 +852,11 @@ export async function run(options: RunOptions): Promise<string> {
       if (failed !== undefined)
         return `The gate \`${gate}\` failed. The last lines of its output:\n\n\`\`\`\n${failed}\n\`\`\`\n\nFix this; the gates run again when you stop.`;
     }
+  }
+
+  /** The job as recorded now: the agent's notes and answers arrive while it runs. */
+  function reread(job: Job): Job {
+    return readJobs(state).find((each) => each.id === job.id)!;
   }
 
   function envFor(job: Job, worktree: string): Record<string, string> {
