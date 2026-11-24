@@ -980,6 +980,7 @@ You run headless for factory as job ${job.id}, and nobody watches live. Report t
 - Only for a decision too costly to guess (a data format, deleting things, anything public), run \`${factory} ask "<question, with the options and your recommendation>"\` without --assume and end there. Your work in this folder is kept, and you'll get the answer in this same session. Nobody may be around: after ${ASK_WAIT / MINUTE} minutes without an answer you'll be told to go with your recommendation.
 - Before you end, run \`${factory} result "<what changed and why, in a sentence or two>" --confidence low|medium|high\`, adding \`--url <link>\` for the PR or issue you opened, \`--followup "<task>"\` for each task you saw that deserves its own job, and \`--unverified "<what>"\` for each thing you couldn't check. Factory may run checks after you stop and come back to you with what failed.
 - In a PR description you write, add the line \`Agent: ${signature}\`.
+- When the PR changes what users see, add screenshots of the app running to its description, with before and after when existing UI changes. \`gh\` can't upload images, so commit them to the repo's \`screenshots\` branch (an orphan branch; create it if it's missing) under a folder named after the PR's branch, and embed them from \`https://github.com/<owner>/<repo>/raw/screenshots/<path>\`. Keep them out of the PR's own commits.
 `;
 }
 
