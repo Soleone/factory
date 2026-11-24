@@ -131,6 +131,7 @@ export function checkPlan(raw: unknown): string[] {
       problems.push(`${at}: machine must be true or false`);
   }
   for (const node of plan.nodes) {
+    if (node == null) continue;
     for (const key of strings(node.after) ? node.after : [])
       if (!keys.has(key)) problems.push(`${node.key}: after names no node ${key}`);
     if (node.parent !== undefined && !keys.has(node.parent))
@@ -430,10 +431,9 @@ export function builtinCheck(job: Job, jobs: Job[], worktree: string): string | 
   } catch (error) {
     return `${path} isn't valid JSON: ${(error as Error).message}`;
   }
-  const problems = [
-    ...checkPlan(plan),
-    ...(job.item.blueprint === REPLAN ? replanProblems(plan as Plan, job, jobs) : []),
-  ];
+  const problems = checkPlan(plan);
+  if (problems.length === 0 && job.item.blueprint === REPLAN)
+    problems.push(...replanProblems(plan as Plan, job, jobs));
   if (problems.length)
     return `The plan at ${path} has problems; fix them all:\n${problems.map((each) => `- ${each}`).join("\n")}`;
 }
