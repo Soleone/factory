@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.6.0](https://github.com/Soleone/factory/compare/v0.5.3...v0.6.0) (2026-11-24)
+
+### Features
+
+* **agent:** every tool step shows its full input ([6fc7a1b](https://github.com/Soleone/factory/commit/6fc7a1b7f983ba0c58ff61cda9f89d67e0737353))
+* **agent:** Live Agent keeps earlier chats and switches between them from its header ([74d7a70](https://github.com/Soleone/factory/commit/74d7a70c6555dfb69004939e51839098d1791b81))
+* **agent:** show a tool step's full input when it opens ([bd48c9a](https://github.com/Soleone/factory/commit/bd48c9ac5a1a8bcd4f7a9673b3e0bede5bbcfb12))
+* **candidates:** a job that changed nothing shows as no change ([878fbc7](https://github.com/Soleone/factory/commit/878fbc73a065eb95babfc5cc6d86f2d6f30353f8))
+* **candidates:** select candidates, or all of a blueprint's, and queue them in one go ([4cfe05b](https://github.com/Soleone/factory/commit/4cfe05b2415eed161b736a45f0361ddbc63f8e10))
+* **cli:** every page action for agents, with layered help ([a3076f8](https://github.com/Soleone/factory/commit/a3076f83e0808e34a9f50914fa0f545ffe5e1682))
+* **demo:** show the latest features, and the pool before the factory is on ([ae9a1c7](https://github.com/Soleone/factory/commit/ae9a1c7b19380bc5369fb2275584eef775181448))
+* **details:** tabs for summary, prompt, log, PR description and diff ([7f72bbf](https://github.com/Soleone/factory/commit/7f72bbf06bf3b0ba1eac305541a3cb1f5551b756))
+* **goals:** export a goal as a zip for an agent to review how it went ([ad12bab](https://github.com/Soleone/factory/commit/ad12baba612456c650a37738b3d196f1921ca0cb))
+* **inbox:** questions as speech bubbles, icons on the buttons that move work ([d2e5a3d](https://github.com/Soleone/factory/commit/d2e5a3dc59005c6e5faa70723cdd1faa20f3163f))
+* **jobs:** agents add screenshots to PRs that change what users see ([7233c4d](https://github.com/Soleone/factory/commit/7233c4d0c822b7ab689c474ae1260944094a5cd6))
+* **jobs:** jobs run side by side, and machine jobs run alone ([c7e00ba](https://github.com/Soleone/factory/commit/c7e00ba15521dd68392a38dd1f4b516b540cfde0))
+* **lists:** click a card's empty space to open it, with a pointer cursor to show it ([02d0ff8](https://github.com/Soleone/factory/commit/02d0ff85f884ca07be442ddeffccd1877fa6c7c7))
+* **lists:** flat rows and keyboard navigation in every list ([c4796cd](https://github.com/Soleone/factory/commit/c4796cdc414a3a9077863759af5558f44707edde))
+* **lists:** rows as soft filled cards with a little space between, tinted when keyboard-selected ([26282de](https://github.com/Soleone/factory/commit/26282de186081e53236fd3aea279369e7f36f622))
+* **review:** another role reviews a PR, and its findings queue a fix on it ([59d0b0a](https://github.com/Soleone/factory/commit/59d0b0a3db70ff87f342c69a7b3b5c8b11447dcf))
+* **review:** jump to a changed file and see line numbers in the PR diff ([c899864](https://github.com/Soleone/factory/commit/c89986495bba23bed49422cf88ccf76c1756a007))
+
+### Bug Fixes
+
+* **inbox:** even padding around the send button in the answer field ([463cc49](https://github.com/Soleone/factory/commit/463cc49a384b50322a0bb9342eb31faad29ddde8))
+* **results:** unread bar no longer covers the row checkbox ([aba5eef](https://github.com/Soleone/factory/commit/aba5eef6c8ea8ccbb99bb7edca6036ec308cb545))
+
 ## [0.5.3](https://github.com/Soleone/factory/compare/v0.5.2...v0.5.3) (2026-11-23)
 
 ### Features
