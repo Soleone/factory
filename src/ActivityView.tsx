@@ -4,6 +4,7 @@ import {
   FactoryIcon,
   FlagIcon,
   LightbulbIcon,
+  LockIcon,
   ListPlusIcon,
   MessageCircleQuestionIcon,
   PlayIcon,
@@ -41,6 +42,7 @@ const NOTE_ICONS: Record<Exclude<Note["kind"], "step">, ReactNode> = {
   result: <FlagIcon className="text-primary" />,
   train: <TrainFrontIcon className="text-muted-foreground" />,
   factory: <FactoryIcon className="text-muted-foreground" />,
+  alone: <LockIcon className="text-muted-foreground" />,
 };
 
 const SHOWN = 200;

@@ -103,7 +103,7 @@ type Live = {
   offset: number;
   pid?: number;
   /** What the next turn picks up from. */
-  waiting?: "asked" | "limited" | "interrupted";
+  waiting?: "asked" | "limited" | "alone" | "interrupted";
   /** The turn this session started on, when not the first; later turns resume it. */
   sessionTurn?: number;
   /** Needs no worker here has, so the agent was told it can't check them. */
@@ -518,6 +518,8 @@ export async function run(options: RunOptions): Promise<string> {
       );
       if (said.slice(answered + 1).some((note) => note.kind === "ask"))
         return pause(job, live, "asked", text);
+      // It ran `factory alone` this turn: it goes on once no other job runs.
+      if (fresh.machine && !job.machine) return pause(job, live, "alone", text);
       const problem =
         outcome === "failed" || !said.some((note) => note.kind === "result")
           ? unfinished(code, facts, text)
@@ -634,7 +636,7 @@ export async function run(options: RunOptions): Promise<string> {
     return restarted;
   }
 
-  function pause(job: Job, live: Live, reason: "asked" | "limited", text: string): Turned {
+  function pause(job: Job, live: Live, reason: Paused, text: string): Turned {
     writeLive(state, job.id, { ...live, pid: undefined, waiting: reason });
     return { paused: reason, text };
   }
@@ -795,7 +797,8 @@ export async function run(options: RunOptions): Promise<string> {
 type Handed = { job: Job; live: Live };
 type Turned =
   | { paused?: undefined; attempt: Attempt; text: string }
-  | { paused: "asked" | "limited"; text: string };
+  | { paused: Paused; text: string };
+type Paused = "asked" | "limited" | "alone";
 
 /** Each preset's workers with the preset it runs, with the run's counts over the settings'. */
 export function makeSlots(settings: Settings, counts: Record<string, number> = {}): Slot[] {
@@ -841,6 +844,8 @@ function resumeText(live: Live, job: Job): string {
   }
   if (live.waiting === "limited")
     return "You were stopped by a usage limit, which has reset. Carry on where you left off.";
+  if (live.waiting === "alone")
+    return "No other job runs now, and none starts until you finish. Do what needed the machine, then carry on with the job.";
   return "Your run was interrupted before it finished. Check where you were and carry on.";
 }
 
@@ -942,6 +947,7 @@ const NOTE_LABEL: Record<string, string> = {
   step: "step",
   train: "merge train",
   factory: "factory",
+  alone: "it needed to run alone",
 };
 
 /** What earlier attempts said and kept, so a retry picks up where they left off. */
@@ -979,6 +985,11 @@ You run headless for factory as job ${job.id}, and nobody watches live. Report t
 - Decide for yourself wherever a reasonable engineer would. When the user might decide otherwise, run \`${factory} ask "<question>" --assume "<what you'll do>"\` and carry on with that; the user answers later, and a different answer becomes a job of its own.
 - Only for a decision too costly to guess (a data format, deleting things, anything public), run \`${factory} ask "<question, with the options and your recommendation>"\` without --assume and end there. Your work in this folder is kept, and you'll get the answer in this same session. Nobody may be around: after ${ASK_WAIT / MINUTE} minutes without an answer you'll be told to go with your recommendation.
 - Before you end, run \`${factory} result "<what changed and why, in a sentence or two>" --confidence low|medium|high\`, adding \`--url <link>\` for the PR or issue you opened, \`--followup "<task>"\` for each task you saw that deserves its own job, and \`--unverified "<what>"\` for each thing you couldn't check. Factory may run checks after you stop and come back to you with what failed.
+- ${
+    job.machine
+      ? "No other job runs while you work, so you may change things outside this folder when the job needs it. Put back anything you change only to verify, like a stopped service or a taken port."
+      : `Other jobs run on this machine at the same time, each in its own folder. Change nothing outside this one: no global installs, no edits under your home folder, no services left running, no fixed ports, no git stash (every worktree shares it). If the job can't be done without that, run \`${factory} alone "<what you need and why>"\` and end your turn; you'll carry on in this session once no other job runs.`
+  }
 - In a PR description you write, add the line \`Agent: ${signature}\`.
 - When the PR changes what users see, add screenshots of the app running to its description, with before and after when existing UI changes. \`gh\` can't upload images, so commit them to the repo's \`screenshots\` branch (an orphan branch; create it if it's missing) under a folder named after the PR's branch, and embed them from \`https://github.com/<owner>/<repo>/raw/screenshots/<path>\`. Keep them out of the PR's own commits.
 `;

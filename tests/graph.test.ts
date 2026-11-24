@@ -217,6 +217,36 @@ describe("the graph", () => {
     startJob(state, "a", "claude");
     expect([isReady("b"), isReady("c")]).toEqual([false, true]);
   });
+
+  test("a machine job runs alone, and while it waits nothing else starts", () => {
+    const { state, add, isReady } = graph();
+    add("a");
+    add("m", { machine: true });
+    add("b");
+    startJob(state, "a", "claude");
+    // m waits for a to finish, and b waits behind m so m gets its turn.
+    expect([isReady("m"), isReady("b")]).toEqual([false, false]);
+    record(state, { type: "merged", id: "a" });
+    expect(isReady("m")).toBe(true);
+    startJob(state, "m", "claude");
+    expect(isReady("b")).toBe(false);
+    record(state, { type: "merged", id: "m" });
+    expect(isReady("b")).toBe(true);
+  });
+
+  test("`factory alone` marks the job, and its paused attempt waits to run alone", () => {
+    const { state, add, byId, isReady } = graph();
+    add("x");
+    add("y");
+    startJob(state, "x", "claude");
+    startJob(state, "y", "claude");
+    addNote(state, "x", { kind: "alone", text: "installs a global tool" });
+    record(state, { type: "pause", id: "x", reason: "alone" });
+    expect(byId("x")).toMatchObject({ state: "queued", open: true, machine: true });
+    expect(isReady("x")).toBe(false);
+    record(state, { type: "merged", id: "y" });
+    expect(isReady("x")).toBe(true);
+  });
 });
 
 describe("assumptions", () => {

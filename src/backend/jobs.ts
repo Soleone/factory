@@ -33,8 +33,8 @@ export type Event = { at: string } & (
   | { type: "start"; id: string; agent: string; preset?: string }
   | { type: "attempt"; id: string; attempt: Attempt }
   | { type: "note"; id: string; note: NoteBody }
-  /** The open attempt waits: for the user's answer, or for its pool's limit to reset. */
-  | { type: "pause"; id: string; reason: "asked" | "limited" }
+  /** The open attempt waits: for the user's answer, its pool's limit to reset, or to run alone. */
+  | { type: "pause"; id: string; reason: "asked" | "limited" | "alone" }
   | { type: "block"; id: string; reason: Blocked; why?: string }
   /** A replan's change to a job that hasn't started. */
   | { type: "update"; id: string; change: Change }
@@ -60,6 +60,7 @@ export type NewJob = Pick<Job, "id" | "item" | "source"> &
       | "gates"
       | "touches"
       | "needs"
+      | "machine"
       | "goal"
       | "key"
       | "checkpoint"
@@ -81,6 +82,7 @@ export type Change = Partial<
     | "gates"
     | "touches"
     | "needs"
+    | "machine"
     | "checkpoint"
     | "review"
     | "goal"
@@ -204,6 +206,7 @@ export function replay(events: Event[]): Job[] {
       // attempt (old logs) belong to the last one.
       const attempt = job.attempts.length + (job.open ? 1 : 0);
       job.notes.push({ ...event.note, at: event.at, attempt });
+      if (kind === "alone") job.machine = true;
       if (kind === "answer" && event.note.re === undefined && job.state === "blocked") {
         job.state = "queued";
         job.blocked = undefined;
@@ -332,10 +335,23 @@ function ordered(others: Job[], jobs: Map<string, Job>): Job[] {
 }
 
 /**
- * Whether a job may start now, whoever takes it: queued, not a goal or a group, everything it comes
- * after done, no goal or group above it waiting, and no running job that may touch the same files.
+ * Whether a job may start now, whoever takes it: it's due, and starting it shares the machine
+ * safely. A machine job runs alone; while one is due, nothing else starts, so it gets its turn.
  */
 export function ready(job: Job, jobs: Job[]): boolean {
+  if (!due(job, jobs)) return false;
+  const running = jobs.filter((other) => other.state === "running");
+  if (running.some((other) => other.machine)) return false;
+  if (job.machine) return running.length === 0;
+  if (jobs.some((other) => other.machine && other.id !== job.id && due(other, jobs))) return false;
+  return !running.some((other) => other.item.repo === job.item.repo && overlap(job, other));
+}
+
+/**
+ * Whether a job's turn has come, setting aside what else runs: queued, not a goal or a group,
+ * everything it comes after done, and no goal or group above it waiting.
+ */
+function due(job: Job, jobs: Job[]): boolean {
   if (job.state !== "queued" || job.goal) return false;
   const byId = new Map(jobs.map((each) => [each.id, each]));
   if (jobs.some((each) => each.parent === job.id && each.state !== "removed")) return false;
@@ -350,10 +366,7 @@ export function ready(job: Job, jobs: Job[]): boolean {
     if (!above.goal && !above.after.every((id) => byId.get(id)?.state === "done")) return false;
     up = above.parent ?? (above.goal ? undefined : above.of);
   }
-  return !jobs.some(
-    (other) =>
-      other.state === "running" && other.item.repo === job.item.repo && overlap(job, other),
-  );
+  return true;
 }
 
 /**
@@ -408,7 +421,14 @@ export function addJob(state: string, job: NewJob, at = new Date().toISOString()
 /** A job of the user's own, from a prompt for a tier, without workwork. */
 export function addOwnJob(
   state: string,
-  own: { repo: string; prompt: string; tier: Tier; title?: string; after?: string[] },
+  own: {
+    repo: string;
+    prompt: string;
+    tier: Tier;
+    title?: string;
+    after?: string[];
+    machine?: boolean;
+  },
 ): Job {
   if (!TIERS.includes(own.tier)) throw new Error(`a tier is ${TIERS.join(", ")}, not ${own.tier}`);
   const first = own.prompt.split("\n").find((line) => line.trim());
@@ -428,6 +448,7 @@ export function addOwnJob(
     tier: own.tier,
     prompt: own.prompt,
     after: own.after,
+    machine: own.machine,
   });
 }
 
@@ -586,7 +607,7 @@ export function moveJob(state: string, id: string, index: number): void {
 }
 
 /** What agents say while they work; the rest come from the user, the merge train and factory. */
-const AGENT_KINDS: Note["kind"][] = ["note", "ask", "assume", "result", "step"];
+const AGENT_KINDS: Note["kind"][] = ["note", "ask", "assume", "result", "step", "alone"];
 
 /** An agent's note on the job it works, what the merge train did with its PR, or factory's own. */
 export function addNote(state: string, id: string, note: NoteBody): void {

@@ -167,9 +167,10 @@ export type Note = {
   attempt: number;
   /**
    * step: progress in the agent's words. assume: a question it carried on from with `assumed`.
-   * factory: what factory did, like a follow-up, an escalation or a merge.
+   * factory: what factory did, like a follow-up, an escalation or a merge. alone: the agent needs
+   * the machine to itself, and why.
    */
-  kind: "note" | "ask" | "assume" | "answer" | "result" | "step" | "train" | "factory";
+  kind: "note" | "ask" | "assume" | "answer" | "result" | "step" | "train" | "factory" | "alone";
   text: string;
   confidence?: Confidence;
   followups?: string[];
@@ -238,6 +239,11 @@ export type Job = Tuning & {
   /** Globs of files it expects to change; unset: not tracked, empty: anything, so it runs alone. */
   touches?: string[];
   needs: string[];
+  /**
+   * It reaches outside its worktree (global installs, home config, services, ports, devices), so it
+   * runs only while no other job does. Unset: it stays in its worktree and runs alongside others.
+   */
+  machine?: boolean;
   /** Needs no worker had when it was done, until the user checks them. */
   unverified: string[];
   goal?: Goal;

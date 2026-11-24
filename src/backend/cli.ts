@@ -86,6 +86,8 @@ const HELP: Record<string, string> = {
                                one job of your own, without workwork
   pin: --tier communicator|builder|grunt, or --preset ID, or --agent NAME [--model M] [--effort E]
   --after JOB                  start once that job is done
+  --machine                    the jobs reach outside their worktree (installs, home config,
+                               services, devices), so each runs while no other job does
 
 Change the queue:
   factory move <job> <N>       put a queued pick at position N (1 is next) among the picks
@@ -159,6 +161,8 @@ Run options (defaults from settings.json):
   factory ask "<question>" [--assume "<default>"]
                                a decision for the user; with --assume you carry on with the default,
                                without it the job waits for the answer once you end
+  factory alone "<why>"        the job needs the machine to itself; once you end the turn, it waits
+                               until no other job runs and goes on in your session
   factory result "<summary>" [--confidence low|medium|high] [--url LINK] [--followup "<task>"]...
                  [--unverified "<what>"]...
                                what the job delivered, tasks that deserve their own job, and what
@@ -201,6 +205,7 @@ async function main(): Promise<void> {
       unverified: { type: "string", multiple: true },
       agent: { type: "string" },
       all: { type: "boolean" },
+      machine: { type: "boolean" },
       kill: { type: "boolean" },
       job: { type: "string" },
       after: { type: "string", multiple: true },
@@ -242,6 +247,8 @@ async function main(): Promise<void> {
         ? { kind: "ask", text: text(args[0]) }
         : { kind: "assume", text: text(args[0]), assumed: text(values.assume) },
     );
+  if (command === "alone")
+    return addNote(STATE, ownJob(values.job), { kind: "alone", text: text(args[0]) });
   if (command === "step") return step(args[0], values);
   if (command === "goal") return goal(args, values);
   if (command === "result") return result(args[0], values);
@@ -332,6 +339,7 @@ async function add(
     tier?: string;
     preset?: string;
     title?: string;
+    machine?: boolean;
   },
 ): Promise<void> {
   if (values.prompt) return addOwn(values);
@@ -350,7 +358,11 @@ async function add(
   for (const after of values.after ?? [])
     if (!readJobs(STATE).some((job) => job.id === after))
       throw new Error(`--after names no job ${after}; factory status lists them`);
-  const added = addJobs(STATE, items, "pick", { ...pinOf(values), after: values.after });
+  const added = addJobs(STATE, items, "pick", {
+    ...pinOf(values),
+    after: values.after,
+    machine: values.machine,
+  });
   for (const job of added) console.log(`queued ${job.id}: ${job.item.label} ${job.item.id}`);
   for (const item of items.filter((item) => !added.some((job) => job.item === item)))
     console.log(`already queued: ${item.label} ${item.id}`);
@@ -363,6 +375,7 @@ function addOwn(values: {
   tier?: string;
   title?: string;
   after?: string[];
+  machine?: boolean;
 }): void {
   const job = addOwnJob(STATE, {
     repo: resolve(values.repo ?? "."),
@@ -370,6 +383,7 @@ function addOwn(values: {
     tier: values.tier as Tier,
     title: values.title,
     after: values.after,
+    machine: values.machine,
   });
   console.log(`queued ${job.id}: ${job.item.title} (${job.tier})`);
 }

@@ -50,7 +50,7 @@ export const api = {
   /** A waiting job's new role or worker; an empty pin lets any free worker take it. */
   pin: (id: string, pin: Pin) => call("POST", `/api/jobs/${id}/pin`, pin),
   /** A job of your own: a prompt for a tier, without workwork. */
-  ownJob: (job: { repo: string; prompt: string; tier: Tier; title: string }) =>
+  ownJob: (job: { repo: string; prompt: string; tier: Tier; title: string; machine: boolean }) =>
     call<Job>("POST", "/api/jobs/own", job),
   remove: (id: string) => call("POST", `/api/jobs/${id}/remove`),
   retry: (id: string) => call("POST", `/api/jobs/${id}/retry`),

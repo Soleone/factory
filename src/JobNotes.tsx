@@ -14,6 +14,7 @@ export const KIND: Record<Note["kind"], string> = {
   step: "step",
   train: "merge train",
   factory: "factory",
+  alone: "needs to run alone",
 };
 
 /** What the agent reported last, and the follow-ups worth their own job. */

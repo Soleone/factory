@@ -232,8 +232,13 @@ export function serve(
       const { agent, model, effort, preset, tier } = pin;
       return addJobs(state, candidates(items), "pick", { agent, model, effort, preset, tier });
     },
-    "POST /api/jobs/own": (body: { repo: string; prompt: string; tier: Tier; title?: string }) =>
-      addOwnJob(state, body),
+    "POST /api/jobs/own": (body: {
+      repo: string;
+      prompt: string;
+      tier: Tier;
+      title?: string;
+      machine?: boolean;
+    }) => addOwnJob(state, body),
     "POST /api/jobs/remove": (_, id) => removeJob(state, id),
     "POST /api/jobs/retry": (_, id) => retryJob(state, id),
     "POST /api/jobs/answer": (body: { text: string; re?: number }, id) =>

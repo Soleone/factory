@@ -4,6 +4,7 @@ import { TIERS, type Tier } from "@/backend/types.ts";
 import { Button } from "@/components/ui/button";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -22,6 +23,7 @@ export function NewJobForm({ act, onQueued }: { act: Act; onQueued: () => void }
   const [tier, setTier] = useState<Tier>("builder");
   const [title, setTitle] = useState("");
   const [prompt, setPrompt] = useState("");
+  const [machine, setMachine] = useState(false);
 
   useEffect(() => {
     void api.candidates().then((listing) => setRepos(listing.repos));
@@ -29,7 +31,7 @@ export function NewJobForm({ act, onQueued }: { act: Act; onQueued: () => void }
 
   const submit = () =>
     act(async () => {
-      await api.ownJob({ repo, tier, title, prompt });
+      await api.ownJob({ repo, tier, title, prompt, machine });
       onQueued();
     });
 
@@ -102,6 +104,12 @@ export function NewJobForm({ act, onQueued }: { act: Act; onQueued: () => void }
             Markdown. The agent gets it as written, in a fresh worktree of the repo's default
             branch.
           </FieldDescription>
+        </Field>
+        <Field orientation="horizontal">
+          <Switch id="job-machine" checked={machine} onCheckedChange={setMachine} />
+          <FieldLabel htmlFor="job-machine">
+            Changes things outside its worktree, so it runs while no other job does
+          </FieldLabel>
         </Field>
         <div className="flex justify-end">
           <Button disabled={!repo || !prompt.trim()} onClick={submit}>

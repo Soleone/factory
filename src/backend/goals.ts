@@ -54,6 +54,7 @@ type PlanNode = {
   touches?: string[];
   gates?: string[];
   needs?: string[];
+  machine?: boolean;
   checkpoint?: boolean;
   parent?: string;
   review?: Tier;
@@ -126,6 +127,8 @@ export function checkPlan(raw: unknown): string[] {
       problems.push(`${at}: gates must be a list of commands`);
     if (node?.needs !== undefined && !strings(node.needs))
       problems.push(`${at}: needs must be a list`);
+    if (node?.machine !== undefined && typeof node.machine !== "boolean")
+      problems.push(`${at}: machine must be true or false`);
   }
   for (const node of plan.nodes) {
     for (const key of strings(node.after) ? node.after : [])
@@ -274,6 +277,7 @@ function nodeFields(goal: Job, node: PlanNode, ids: Map<string, string>): Omit<N
     gates: node.gates ?? [],
     touches: node.touches ?? [],
     needs: node.needs ?? [],
+    machine: node.machine || undefined,
     checkpoint: node.checkpoint || undefined,
     review: node.review,
   };
@@ -380,7 +384,7 @@ const PLAN_SPEC = `A plan is JSON:
     "key": unique, lowercase, "title", "tier": "communicator" | "builder" | "grunt",
     "prompt": markdown, self-contained: what to build, where, how to verify, what not to touch,
     "after": [keys it depends on], "touches": [globs of files it changes; empty means anything, so it runs alone],
-    "gates": [commands run in its worktree before it merges], "needs"?: ["display" | "gpu" | ...],
+    "gates": [commands run in its worktree before it merges], "needs"?: ["display" | "gpu" | ...], "machine"?: true when it must change things outside its worktree (global installs, home config, services, devices), so it runs while no other node does,
     "checkpoint"?: true to pause the goal for the user's approval once it's done,
     "parent"?: a key, which makes that node a milestone (a milestone's nodes wait for what it comes after; never list your own milestone in after), "review"?: a tier that reviews it before it merges
   }]
@@ -641,6 +645,7 @@ function helper(
     gates: blueprint === REVIEW ? [] : node.gates,
     touches: node.touches,
     needs: node.needs,
+    machine: node.machine,
   };
 }
 
@@ -1018,6 +1023,7 @@ function applyReplan(state: string, job: Job, jobs: Job[], goalJob: Job, worktre
       "gates",
       "touches",
       "needs",
+      "machine",
       "checkpoint",
       "review",
     ] as const)

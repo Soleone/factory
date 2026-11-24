@@ -12,6 +12,7 @@ import {
   type Status,
   type Worker,
 } from "@/backend/types.ts";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Empty,
@@ -53,8 +54,20 @@ function Meta({
     <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
       <StatePill state={job.state} />
       <PinChip job={job} settings={settings} act={act} />
+      {job.machine && <Alone />}
       {jobMeta(job, byId)}
     </span>
+  );
+}
+
+function Alone() {
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<Badge variant="outline" />}>runs alone</TooltipTrigger>
+      <TooltipContent>
+        It changes things outside its worktree, so it waits until no other job runs
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -387,6 +400,7 @@ export function QueueView({
                       meta={
                         <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
                           {job.tier && <TierBadge tier={job.tier} />}
+                          {job.machine && <Alone />}
                           {byId.get(job.of!)!.item.title}
                         </span>
                       }
