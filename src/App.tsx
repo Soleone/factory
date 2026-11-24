@@ -1,5 +1,5 @@
 import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from "react";
-import { GitForkIcon, PlusIcon } from "lucide-react";
+import { GitForkIcon, PlusIcon, XIcon } from "lucide-react";
 import { ActivityView } from "@/ActivityView";
 import { BlueprintsView } from "@/BlueprintsView";
 import { api, useFactory, type Act } from "@/api";
@@ -48,7 +48,7 @@ if (old === "candidates" || old === "blueprints") {
 }
 
 export function App() {
-  const { snapshot, error, act } = useFactory();
+  const { snapshot, error, dismiss, act } = useFactory();
   /** The Live Agent draft, here so the Results tab can fill it with a question. */
   const [plan, setPlan] = useState("");
   const chat = useChat();
@@ -83,7 +83,7 @@ export function App() {
         />
       }
     >
-      <Factory snapshot={snapshot} error={error} act={act} onAsk={setPlan} />
+      <Factory snapshot={snapshot} error={error} onDismiss={dismiss} act={act} onAsk={setPlan} />
       <Dialog open={shown !== undefined} onOpenChange={(open) => !open && setShownJob(undefined)}>
         {shown && (
           <TabbedDialogContent className="h-[min(48rem,calc(100dvh-8rem))] sm:max-w-5xl">
@@ -98,11 +98,13 @@ export function App() {
 function Factory({
   snapshot,
   error,
+  onDismiss,
   act,
   onAsk,
 }: {
   snapshot: Snapshot;
   error: string | undefined;
+  onDismiss: () => void;
   act: Act;
   onAsk: (question: string) => void;
 }) {
@@ -193,9 +195,12 @@ function Factory({
         </div>
       </header>
       {error && (
-        <p role="alert" className="text-sm wrap-anywhere whitespace-pre-line text-destructive">
-          {error}
-        </p>
+        <div role="alert" className="flex items-start gap-2 text-sm text-destructive">
+          <p className="flex-1 wrap-anywhere whitespace-pre-line">{error}</p>
+          <Button variant="ghost" size="icon-xs" aria-label="Dismiss" onClick={onDismiss}>
+            <XIcon />
+          </Button>
+        </div>
       )}
       <Tabs value={tab} onValueChange={setTab}>
         <div className="flex items-center gap-2">

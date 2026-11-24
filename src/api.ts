@@ -119,7 +119,12 @@ export const api = {
 export type Act = (change: () => Promise<unknown>) => Promise<void>;
 
 /** The factory's state, polled every few seconds and right after every change. */
-export function useFactory(): { snapshot?: Snapshot; error?: string; act: Act } {
+export function useFactory(): {
+  snapshot?: Snapshot;
+  error?: string;
+  dismiss: () => void;
+  act: Act;
+} {
   const [snapshot, setSnapshot] = useState<Snapshot>();
   const [error, setError] = useState<string>();
 
@@ -154,5 +159,5 @@ export function useFactory(): { snapshot?: Snapshot; error?: string; act: Act } 
     [reload],
   );
 
-  return { snapshot, error, act };
+  return { snapshot, error, dismiss: () => setError(undefined), act };
 }
