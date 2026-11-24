@@ -378,42 +378,40 @@ export function QueueView({
               </EmptyContent>
             </Empty>
           ) : (
-            <>
-              <Reorder.Group
-                as="div"
-                axis="y"
-                values={shown.map((job) => job.id)}
-                onReorder={setOrder}
-                className="flex flex-col gap-1.5"
-              >
-                <AnimatePresence mode="popLayout" initial={false}>
-                  {shown.map((job, index) => (
-                    <Pick key={job.id} job={job} onDragEnd={() => void drop(job)}>
-                      {(grip) => (
-                        <Row
-                          leading={
-                            <span className="flex items-center gap-1">
-                              <ReorderHandle
-                                label={itemTitle(job.item)}
-                                index={index}
-                                count={shown.length}
-                                onMove={(target) => void act(() => api.move(job.id, target))}
-                                grip={grip}
-                              />
-                              <StateIcon state={job.state} />
-                            </span>
-                          }
-                          title={details(job, true)}
-                          meta={<Meta job={job} byId={byId} settings={settings} act={act} />}
-                        >
-                          {remove(job)}
-                        </Row>
-                      )}
-                    </Pick>
-                  ))}
-                </AnimatePresence>
-              </Reorder.Group>
-            </>
+            <Reorder.Group
+              as="div"
+              axis="y"
+              values={shown.map((job) => job.id)}
+              onReorder={setOrder}
+              className="flex flex-col gap-1.5"
+            >
+              <AnimatePresence mode="popLayout" initial={false}>
+                {shown.map((job, index) => (
+                  <Pick key={job.id} job={job} onDragEnd={() => void drop(job)}>
+                    {(grip) => (
+                      <Row
+                        leading={
+                          <span className="flex items-center gap-1">
+                            <ReorderHandle
+                              label={itemTitle(job.item)}
+                              index={index}
+                              count={shown.length}
+                              onMove={(target) => void act(() => api.move(job.id, target))}
+                              grip={grip}
+                            />
+                            <StateIcon state={job.state} />
+                          </span>
+                        }
+                        title={details(job, true)}
+                        meta={<Meta job={job} byId={byId} settings={settings} act={act} />}
+                      >
+                        {remove(job)}
+                      </Row>
+                    )}
+                  </Pick>
+                ))}
+              </AnimatePresence>
+            </Reorder.Group>
           )}
         </Section>
 
