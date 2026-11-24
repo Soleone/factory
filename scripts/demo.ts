@@ -602,6 +602,8 @@ function dispatch(
           ),
         snapshot.train,
       );
+    case "GET /api/projects":
+      return [...new Set(items.map((item) => item.repo))].sort();
     case "GET /api/candidates":
       return {
         at: snapshot.candidates.at,

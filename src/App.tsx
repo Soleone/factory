@@ -1,8 +1,9 @@
-import { useEffect, useEffectEvent, useState, type ReactNode } from "react";
-import { PlusIcon } from "lucide-react";
+import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from "react";
+import { GitForkIcon, PlusIcon } from "lucide-react";
 import { ActivityView } from "@/ActivityView";
 import { BlueprintsView } from "@/BlueprintsView";
-import { useFactory, type Act } from "@/api";
+import { api, useFactory, type Act } from "@/api";
+import { CloneDialog } from "@/CloneDialog";
 import type { Snapshot, UsageWindow as Used } from "@/backend/types.ts";
 import { AgentSidebar } from "@/components/soleone/agent";
 import { isInteractiveTarget } from "@/components/soleone/theme";
@@ -111,6 +112,25 @@ function Factory({
   const [tab, setTab] = useQueryParam("tab", landing);
   const [view, setView] = useQueryParam("view", "results");
   const [adding, setAdding] = useQueryParam("add", "");
+  const [project, setProject] = useState<string | null>(null);
+  const [projects, setProjects] = useState<string[]>([]);
+  const [projectRefresh, setProjectRefresh] = useState(0);
+  const [cloneOpen, setCloneOpen] = useState(false);
+  const cloneTrigger = useRef<HTMLButtonElement>(null);
+  const candidatesAt = snapshot.candidates.at;
+
+  useEffect(() => {
+    const controller = new AbortController();
+    // Keep the last list if the server is briefly unavailable.
+    void api.projects(controller.signal).then(
+      (paths) => {
+        if (!controller.signal.aborted) setProjects(paths);
+      },
+      () => {},
+    );
+    return () => controller.abort();
+  }, [candidatesAt, projectRefresh]);
+
   useGoKeys(setTab);
   useRowKeys();
   const { isMobile, setOpen, setOpenMobile } = useSidebar();
@@ -164,6 +184,9 @@ function Factory({
           <span className="text-sm text-muted-foreground">{run}</span>
         </div>
         <Controls snapshot={snapshot} act={act} />
+        <Button ref={cloneTrigger} variant="outline" size="sm" onClick={() => setCloneOpen(true)}>
+          <GitForkIcon /> Clone
+        </Button>
         <div className="flex items-center gap-1">
           <ThemePicker />
           <SettingsDialog snapshot={snapshot} act={act} />
@@ -225,7 +248,14 @@ function Factory({
                 <TabsTrigger value="activity">Activity</TabsTrigger>
               </TabsList>
               <TabsContent value="results">
-                <ResultsView snapshot={snapshot} act={act} onAsk={ask} />
+                <ResultsView
+                  snapshot={snapshot}
+                  act={act}
+                  onAsk={ask}
+                  projects={projects}
+                  project={project}
+                  onProjectChange={setProject}
+                />
               </TabsContent>
               <TabsContent value="activity">
                 <ActivityView snapshot={snapshot} act={act} />
@@ -234,6 +264,13 @@ function Factory({
           </div>
         </TabsContent>
       </Tabs>
+      <CloneDialog
+        act={act}
+        open={cloneOpen}
+        onOpenChange={setCloneOpen}
+        onCloned={() => setProjectRefresh((current) => current + 1)}
+        finalFocus={cloneTrigger}
+      />
       <Dialog open={adding !== ""} onOpenChange={(open) => !open && setAdding("")}>
         <TabbedDialogContent className="sm:max-w-3xl">
           <DialogHeader>
@@ -257,7 +294,13 @@ function Factory({
               />
             </ScrollingTabsContent>
             <ScrollingTabsContent value="candidates" className="flex flex-col overflow-hidden">
-              <CandidatesView snapshot={snapshot} act={act} />
+              <CandidatesView
+                snapshot={snapshot}
+                act={act}
+                projects={projects}
+                project={project}
+                onProjectChange={setProject}
+              />
             </ScrollingTabsContent>
             <ScrollingTabsContent value="job">
               <NewJobForm act={act} onQueued={() => setAdding("")} />

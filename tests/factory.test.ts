@@ -1776,15 +1776,21 @@ esac`;
     const { port } = server.address() as AddressInfo;
     const url = `http://127.0.0.1:${port}/api`;
     const candidates = async () => (await fetch(`${url}/candidates`)).json();
+    const projects = async () => (await fetch(`${url}/projects`)).json();
     try {
       expect(await candidates()).toEqual({ at: null, items: [], repos: [], root: source });
+      expect(await projects()).toEqual([]);
       const response = await fetch(`${url}/repos/clone`, {
         method: "POST",
         body: JSON.stringify({ name: "owner/new-app" }),
       });
       expect(response.status).toBe(200);
       const repos = [join(source, "new-app")];
+      expect(await projects()).toEqual(repos);
       expect(await candidates()).toMatchObject({ items: [], repos });
+      const query = new URLSearchParams({ repo: repos[0] });
+      const results = await (await fetch(`${url}/results?${query.toString()}`)).json();
+      expect(results).toMatchObject({ repo: repos[0], running: [], finished: [], total: 0 });
       await expect
         .poll(candidates)
         .toEqual({ at: expect.any(String), items: [], repos, root: source });

@@ -37,6 +37,7 @@ export const api = {
     if (repo) query.set("repo", repo);
     return call<ResultsPage>("GET", `/api/results?${query}`, undefined, signal);
   },
+  projects: (signal: AbortSignal) => call<string[]>("GET", "/api/projects", undefined, signal),
   candidates: () =>
     call<{ at: string | null; items: Candidates["items"]; repos: string[]; root: string }>(
       "GET",

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api, type Act } from "@/api";
 import { ChevronDownIcon, RefreshCwIcon } from "lucide-react";
 import type { Item, Job, Pin, Settings, Snapshot } from "@/backend/types.ts";
@@ -17,18 +17,9 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectSeparator,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/tooltip/tooltip";
-import { CloneDialog } from "@/CloneDialog";
+import { ProjectsFilter } from "@/ProjectsFilter";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ago, itemTitle, repoName } from "@/format";
 import { PinMenuItems } from "@/PinMenu";
@@ -38,18 +29,24 @@ import { RowGroup } from "@/components/variants/item";
 import { StateIcon, StatePill, TaskDetails, taskState } from "@/TaskDetails";
 
 const ALL = "";
-const CLONE = { value: "clone-project", label: "Clone project..." };
 const PAGE = 100;
 const key = (item: { repo: string; id: string }) => `${item.repo} ${item.id}`;
 
 /** Everything workwork found, by blueprint, to pick from. */
-export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act }) {
-  const [cloneOpen, setCloneOpen] = useState(false);
-  const [cloneCount, setCloneCount] = useState(0);
-  const repoTrigger = useRef<HTMLButtonElement>(null);
+export function CandidatesView({
+  snapshot,
+  act,
+  projects,
+  project,
+  onProjectChange,
+}: {
+  snapshot: Snapshot;
+  act: Act;
+  projects: readonly string[];
+  project: string | null;
+  onProjectChange: (project: string | null) => void;
+}) {
   const [items, setItems] = useState<Item[]>([]);
-  const [repoPaths, setRepoPaths] = useState<string[]>([]);
-  const [repo, setRepo] = useState(ALL);
   const [blueprint, setBlueprint] = useState(ALL);
   const [attention, setAttention] = useState(["none", "skim", "decide"]);
   const [search, setSearch] = useState("");
@@ -62,15 +59,13 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
 
   useEffect(() => {
     let ignore = false;
-    void api.candidates().then(({ items, repos }) => {
-      if (ignore) return;
-      setItems(items);
-      setRepoPaths(repos);
+    void api.candidates().then(({ items }) => {
+      if (!ignore) setItems(items);
     });
     return () => {
       ignore = true;
     };
-  }, [at, cloneCount]);
+  }, [at]);
 
   useEffect(() => {
     void api
@@ -87,16 +82,7 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
     return byItem;
   }, [snapshot.jobs]);
 
-  const allRepos = { value: ALL, label: `All repos (${items.length})` };
-  const repos = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const item of items) counts.set(item.repo, (counts.get(item.repo) ?? 0) + 1);
-    return repoPaths
-      .map((path) => ({ value: path, label: `${repoName(path)} (${counts.get(path) ?? 0})` }))
-      .sort((a, b) => a.label.localeCompare(b.label));
-  }, [items, repoPaths]);
-
-  const inRepo = repo === ALL ? items : items.filter((item) => item.repo === repo);
+  const inRepo = project === null ? items : items.filter((item) => item.repo === project);
   const blueprintCounts = new Map<string, number>();
   for (const item of inRepo)
     blueprintCounts.set(item.blueprint, (blueprintCounts.get(item.blueprint) ?? 0) + 1);
@@ -134,9 +120,9 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
         <EmptyDescription>
           {refreshing
             ? "workwork is looking through every repo under $SRC. That takes a few minutes."
-            : repo === ALL
+            : project === null
               ? "Ask workwork for candidates across your repos. It takes a few minutes."
-              : `There are no candidates for ${repoName(repo)}.`}
+              : `There are no candidates for ${repoName(project)}.`}
         </EmptyDescription>
       </EmptyHeader>
       <EmptyContent>
@@ -166,49 +152,19 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
             </ToggleGroupItem>
           ))}
         </ToggleGroup>
-        <Select
-          items={[allRepos, ...repos, CLONE]}
-          value={repo}
-          onValueChange={(value) => {
-            if (value === CLONE.value) {
-              setCloneOpen(true);
-              return;
-            }
-            const next = value ?? ALL;
-            setRepo(next);
+        <ProjectsFilter
+          projects={projects}
+          project={project}
+          onProjectChange={(next) => {
+            onProjectChange(next);
             setShown(PAGE);
             if (
               !items.some(
-                (item) => item.blueprint === blueprint && (next === ALL || item.repo === next),
+                (item) => item.blueprint === blueprint && (next === null || item.repo === next),
               )
             )
               setBlueprint(ALL);
           }}
-        >
-          <SelectTrigger aria-label="Repo" ref={repoTrigger}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent alignItemWithTrigger={false}>
-            <SelectGroup>
-              <SelectItem value={allRepos.value}>{allRepos.label}</SelectItem>
-              {repos.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectGroup>
-            <SelectSeparator />
-            <SelectGroup>
-              <SelectItem value={CLONE.value}>{CLONE.label}</SelectItem>
-            </SelectGroup>
-          </SelectContent>
-        </Select>
-        <CloneDialog
-          act={act}
-          open={cloneOpen}
-          onOpenChange={setCloneOpen}
-          onCloned={() => setCloneCount((count) => count + 1)}
-          finalFocus={repoTrigger}
         />
         <span className="flex flex-1 items-center justify-end gap-2 text-sm text-muted-foreground">
           {refreshing ? "Asking workwork…" : `${count} candidates${at ? `, ${ago(at)}` : ""}`}
