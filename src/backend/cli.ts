@@ -54,12 +54,14 @@ import {
   type Item,
   type Job,
   type Pin,
+  type Snapshot,
   type Status,
   presetId,
   type Tier,
   TIERS,
 } from "./types.ts";
 import { serve } from "./web.ts";
+import { inboxText } from "./inboxText.ts";
 // Bundled into dist, so it works from source and from the package alike.
 import packageJson from "../../package.json" with { type: "json" };
 
@@ -68,6 +70,7 @@ const OVERVIEW = `factory: works coding jobs with headless agents, from workwork
 
   factory status               on or off, what each worker does, questions waiting, the queue
   factory report [--all]       results of the last run (or all): outcome, PR, what waits on the user
+  factory inbox                everything that waits on the user, as the page's Inbox lists it
   factory add <id>... --repo DIR
                                queue workwork candidates; --prompt FILE --tier T for a job of your own
 
@@ -123,7 +126,12 @@ Change the queue:
 merge, rebase and close go through the running factory serve ($FACTORY_URL, default
 http://127.0.0.1:7040), like the page.`,
 
-  inbox: `What waits on the user (factory status shows questions, factory report the rest):
+  inbox: `What waits on the user:
+  factory inbox                the page's Inbox: work stopped until you act (questions, approvals,
+                               failures), then what's ready when you are (PRs, assumptions,
+                               unverified work), with counts, each job's id and PR; read from the
+                               running factory serve ($FACTORY_URL, default http://127.0.0.1:7040),
+                               for the same PR states as the page
   factory answer <job> "<text>"
                                answer the question a blocked job asked; it goes on in the same session
   factory answer <job> "<text>" --assumption N
@@ -234,6 +242,7 @@ async function main(): Promise<void> {
   mkdirSync(STATE, { recursive: true });
   if (command === "status") return status();
   if (command === "report") return console.log(report(values.all ?? false));
+  if (command === "inbox") return console.log(inboxText(await serveState()));
   if (command === "remove") {
     for (const id of args) await removeJob(STATE, id);
     return;
@@ -546,7 +555,7 @@ async function prAction(action: "rebase" | "close", id: string | undefined): Pro
 }
 
 async function callServe(path: string, body: object): Promise<void> {
-  const serve = process.env.FACTORY_URL ?? "http://127.0.0.1:7040";
+  const serve = serveUrl();
   const response = await fetch(`${serve}${path}`, {
     method: "POST",
     body: JSON.stringify(body),
@@ -555,6 +564,20 @@ async function callServe(path: string, body: object): Promise<void> {
   });
   if (!response.ok) throw new Error(((await response.json()) as { error: string }).error);
 }
+
+/** The page's snapshot, so the inbox sees the PR states serve has fetched, as the page does. */
+async function serveState(): Promise<Snapshot> {
+  const serve = serveUrl();
+  const response = await fetch(`${serve}/api/state`).catch(() => {
+    throw new Error(
+      `no factory serve at ${serve}: factory inbox reads the page's state, PR states included; start factory serve, or set FACTORY_URL to where it runs`,
+    );
+  });
+  if (!response.ok) throw new Error(((await response.json()) as { error: string }).error);
+  return (await response.json()) as Snapshot;
+}
+
+const serveUrl = () => process.env.FACTORY_URL ?? "http://127.0.0.1:7040";
 
 /** What a job runs on, from the flags: a tier, a preset, or an agent with its model and effort. */
 function pinOf(values: {

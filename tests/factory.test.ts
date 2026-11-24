@@ -1982,6 +1982,29 @@ esac`;
     await expect(cli("pin", a.id, "--tier", "boss")).rejects.toThrow(/--tier wants/);
   });
 
+  test("factory inbox reads the running serve, and says how to start it when none runs", async () => {
+    const data = mkdtempSync(join(scratch, "data-"));
+    const state = join(data, "apps", "factory");
+    mkdirSync(state, { recursive: true });
+    const server = serve(state, 0, "127.0.0.1", () => ({}));
+    await once(server, "listening");
+    const { port } = server.address() as AddressInfo;
+    const inbox = (url: string) =>
+      promisify(execFile)(process.execPath, ["src/backend/cli.ts", "inbox"], {
+        env: { ...process.env, DATA: data, FACTORY_URL: url },
+      });
+    try {
+      const { stdout } = await inbox(`http://127.0.0.1:${port}`);
+      expect(stdout).toMatch(/^Nothing waits on you/);
+    } finally {
+      server.close();
+    }
+    await once(server, "close");
+    await expect(inbox(`http://127.0.0.1:${port}`)).rejects.toThrow(
+      /no factory serve at .*start factory serve, or set FACTORY_URL/,
+    );
+  });
+
   /** Starts serve with a fake agent on PATH; `page` opens the Plan chat's event stream. */
   async function chatServer(
     name: string,
