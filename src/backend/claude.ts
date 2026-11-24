@@ -1,5 +1,8 @@
 // Claude Code's stream-json, spoken as Pi's RPC records so the page reads one format. Trimmed
-// from pluck's src-tauri/src/agent/claude.rs: no sessions on disk and no permission prompts.
+// from pluck's src-tauri/src/agent/claude.rs: no sessions on disk, and the only permission prompt is
+// AskUserQuestion, which ends the turn so the user's click arrives as the next prompt, as with Pi.
+
+import type { AgentQuestion } from "../components/soleone/agent/ask-user.ts";
 
 type Block = {
   type: string;
@@ -28,6 +31,8 @@ export type ClaudeRecord = {
   is_error?: boolean;
   result?: string;
   errors?: string[];
+  request_id?: string;
+  request?: { subtype: string; tool_name?: string; input?: Record<string, unknown> };
 };
 
 export type PiRecord = { type: string; [field: string]: unknown };
@@ -46,6 +51,8 @@ export function claudeChat(effort?: string) {
   let block = 0;
   /** Stop was clicked, so the run ending early isn't an error. */
   let aborted = false;
+  /** The AskUserQuestion call that ends this turn: its refusal is how it stops, not a failure. */
+  let question: string | undefined;
 
   return {
     /** What to write to Claude Code for one of Pi's commands, and what the page hears right away. */
@@ -55,6 +62,7 @@ export function claudeChat(effort?: string) {
     } {
       if (record.type === "prompt") {
         aborted = false;
+        question = undefined;
         const images = (record.images ?? []).map(({ data, mimeType }) => ({
           type: "image",
           source: { type: "base64", media_type: mimeType, data },
@@ -79,50 +87,70 @@ export function claudeChat(effort?: string) {
       return { write: [], emit: [] };
     },
 
-    record(record: ClaudeRecord): PiRecord[] {
-      // Subagents' work stays inside the tool call that started them.
-      if (record.parent_tool_use_id) return [];
-      switch (record.type) {
-        case "system":
-          if (record.subtype !== "init") return [];
-          return [
-            {
-              type: "response",
-              command: "get_state",
-              success: true,
-              data: { model: { name: record.model }, thinkingLevel: effort ?? "default" },
-            },
-          ];
-        case "stream_event":
-          return stream(record.event!);
-        // One record per finished block, before the stream says the block stopped.
-        case "assistant": {
-          const out: PiRecord[] = [];
-          for (const each of record.message!.content as Block[]) {
-            const piece = part(each);
-            if (piece.type === "toolCall")
-              out.push(update({ type: "toolcall_end", contentIndex: block, toolCall: piece }));
-            while (parts.length <= block) parts.push({ type: "thinking" });
-            parts[block] = piece;
-          }
-          return out;
-        }
-        case "user":
-          return user(record.message!.content).flatMap((message) => [
-            { type: "message_start", message },
-            { type: "message_end", message },
-          ]);
-        case "result": {
-          const settled = { type: "agent_settled" };
-          if (!record.is_error || aborted) return [settled];
-          const error = record.result ?? record.errors?.join("; ") ?? "Claude Code failed";
-          return [{ type: "response", command: "prompt", success: false, error }, settled];
-        }
-        default:
-          return [];
-      }
+    /** What the page hears for one of Claude Code's records, and what to write back to it. */
+    record(record: ClaudeRecord): { write: object[]; emit: PiRecord[] } {
+      if (record.type === "control_request") return { write: [permit(record)], emit: [] };
+      return { write: [], emit: translate(record) };
     },
   };
+
+  function translate(record: ClaudeRecord): PiRecord[] {
+    // Subagents' work stays inside the tool call that started them.
+    if (record.parent_tool_use_id) return [];
+    switch (record.type) {
+      case "system":
+        if (record.subtype !== "init") return [];
+        return [
+          {
+            type: "response",
+            command: "get_state",
+            success: true,
+            data: { model: { name: record.model }, thinkingLevel: effort ?? "default" },
+          },
+        ];
+      case "stream_event":
+        return stream(record.event!);
+      // One record per finished block, before the stream says the block stopped.
+      case "assistant": {
+        const out: PiRecord[] = [];
+        for (const each of record.message!.content as Block[]) {
+          const piece = part(each);
+          if (piece.name === "ask_user") question = piece.id as string;
+          if (piece.type === "toolCall")
+            out.push(update({ type: "toolcall_end", contentIndex: block, toolCall: piece }));
+          while (parts.length <= block) parts.push({ type: "thinking" });
+          parts[block] = piece;
+        }
+        return out;
+      }
+      case "user":
+        return user(record.message!.content, question).flatMap((message) => [
+          { type: "message_start", message },
+          { type: "message_end", message },
+        ]);
+      case "result": {
+        const settled = { type: "agent_settled" };
+        if (!record.is_error || aborted || question) return [settled];
+        const error = record.result ?? record.errors?.join("; ") ?? "Claude Code failed";
+        return [{ type: "response", command: "prompt", success: false, error }, settled];
+      }
+      default:
+        return [];
+    }
+  }
+
+  /** Under bypassPermissions only questions ask; any other tool may run. */
+  function permit({ request_id, request }: ClaudeRecord): object {
+    const response =
+      request?.tool_name === "AskUserQuestion"
+        ? {
+            behavior: "deny",
+            message: "Shown to the user as buttons. Their answer comes as their next message.",
+            interrupt: true,
+          }
+        : { behavior: "allow", updatedInput: request?.input };
+    return { type: "control_response", response: { subtype: "success", request_id, response } };
+  }
 
   /** Pi's stream events for one of the Messages API's. */
   function stream(event: NonNullable<ClaudeRecord["event"]>): PiRecord[] {
@@ -173,7 +201,12 @@ function part(block: Block): { type: string; [field: string]: unknown } {
       type: "toolCall",
       id: block.id,
       name: toolName(block.name!),
-      arguments: path === undefined ? input : { ...input, path },
+      arguments:
+        block.name === "AskUserQuestion"
+          ? card(input)
+          : path === undefined
+            ? input
+            : { ...input, path },
     };
   }
   // Thinking and search results aren't shown, but keep their place in the message.
@@ -190,15 +223,56 @@ const TOOLS: { [name: string]: string } = {
   Write: "write",
   Grep: "grep",
   Glob: "find",
+  AskUserQuestion: "ask_user",
 };
 
 const toolName = (name: string) => TOOLS[name] ?? name;
 
-/** A user message as Pi messages: the prompt, or the results of the tools the reply called. */
-function user(content: string | Block[]): object[] {
+type Asked = {
+  question?: string;
+  multiSelect?: boolean;
+  options?: { label?: string; description?: string }[];
+};
+
+const RECOMMENDED = /\s*\(Recommended\)$/;
+const recommended = ({ label }: { label?: string }) => RECOMMENDED.test(String(label));
+
+/**
+ * AskUserQuestion's questions as ask_user's one card: the first single choice as buttons with the
+ * recommended one first, multi-select options as checkboxes, and other questions in the text, for
+ * the user to answer by typing.
+ */
+function card(input: Record<string, unknown>): AgentQuestion {
+  const questions = (Array.isArray(input.questions) ? input.questions : []) as Asked[];
+  const choice = questions.find((each) => !each.multiSelect) ?? questions[0];
+  const rest = questions.filter((each) => each !== choice);
+  const options = choice?.options ?? [];
+  return {
+    question: [choice, ...rest.filter((each) => !each.multiSelect)]
+      .flatMap((each) => each?.question ?? [])
+      .join(" "),
+    options: [...options.filter(recommended), ...options.filter((each) => !recommended(each))].map(
+      ({ label, description }) => ({ label: String(label).replace(RECOMMENDED, ""), description }),
+    ),
+    extras: rest
+      .filter((each) => each.multiSelect)
+      .flatMap((each) => each.options ?? [])
+      .map(({ label }) => ({ label: String(label).replace(RECOMMENDED, "") })),
+  };
+}
+
+/**
+ * A user message as Pi messages: the prompt, or the results of the tools the reply called. The
+ * refused `question` and the interruption it causes are how a question ends the turn, so neither
+ * shows as a failure.
+ */
+function user(content: string | Block[], question: string | undefined): object[] {
   if (typeof content === "string") return [{ role: "user", content }];
-  if (!content.some((block) => block.type === "tool_result"))
+  if (!content.some((block) => block.type === "tool_result")) {
+    if (question && content.every((block) => block.text?.startsWith("[Request interrupted")))
+      return [];
     return [{ role: "user", content: content.map(promptPart) }];
+  }
   return content
     .filter((block) => block.type === "tool_result")
     .map((result) => ({
@@ -208,12 +282,14 @@ function user(content: string | Block[]): object[] {
         {
           type: "text",
           text:
-            typeof result.content === "string"
-              ? result.content
-              : (result.content ?? []).flatMap((block) => block.text ?? []).join("\n"),
+            result.tool_use_id === question
+              ? "Shown to the user."
+              : typeof result.content === "string"
+                ? result.content
+                : (result.content ?? []).flatMap((block) => block.text ?? []).join("\n"),
         },
       ],
-      isError: result.is_error === true,
+      isError: result.is_error === true && result.tool_use_id !== question,
     }));
 }
 

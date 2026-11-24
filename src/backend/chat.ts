@@ -17,16 +17,19 @@ import { chatAgent } from "./agents.ts";
 import { claudeChat, type PiImage, type PiRecord } from "./claude.ts";
 import { readSettings } from "./state.ts";
 
-/** Speaks one agent's protocol: what to write for each of Pi's commands, and its output as Pi's records. */
+/**
+ * Speaks one agent's protocol: what to write for each of Pi's commands, and its output as Pi's
+ * records, with any answer the agent waits on.
+ */
 type Protocol = {
   command(record: PiRecord): { write: object[]; emit: PiRecord[] };
-  record(record: PiRecord): PiRecord[];
+  record(record: PiRecord): { write: object[]; emit: PiRecord[] };
 };
 
 /** Pi speaks the page's protocol already. */
 const pi: Protocol = {
   command: (record) => ({ write: [record], emit: [] }),
-  record: (record: PiRecord) => [record],
+  record: (record) => ({ write: [], emit: [record] }),
 };
 
 /** A Live Agent chat, kept under chats/<id>.jsonl. It stays with the agent it started with. */
@@ -116,8 +119,10 @@ export function chat(state: string, address: () => string) {
     });
     createInterface({ input: child.stdout }).on("line", (line) => {
       // Only JSON records are for the page, and nothing from an agent that was let go.
-      if (line.startsWith("{") && session?.child === child)
-        for (const record of protocol.record(JSON.parse(line))) emit(record);
+      if (!line.startsWith("{") || session?.child !== child) return;
+      const { write, emit: heard } = protocol.record(JSON.parse(line));
+      for (const each of write) child.stdin.write(`${JSON.stringify(each)}\n`);
+      for (const each of heard) emit(each);
     });
     // An agent that failed to start or died breaks the pipe; its error and exit handlers say why.
     child.stdin.on("error", () => {});

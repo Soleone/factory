@@ -14,6 +14,10 @@ const LIMITS: Record<string, RegExp> = {
   pi: /usage limit|usage_limit_reached|usage_not_included|rate_limit_exceeded/i,
 };
 
+/** askUser.prompt for Claude Code, whose questions take two to four options while the page shows one. */
+const CLAUDE_ASK =
+  "When the next step is the user's decision, such as whether to go ahead, which of a few approaches to take or what to include, end your turn with AskUserQuestion instead of asking in prose. Ask one single-choice question with the recommended option first, and put optional additions in a second, multiSelect question. The user can still type a different answer.";
+
 export const AGENT_NAMES = Object.keys(LIMITS);
 
 /** What each agent takes for effort: claude's --effort, pi's --thinking. */
@@ -106,10 +110,13 @@ export function chatAgent(
         session.id,
         "--permission-mode",
         "bypassPermissions",
+        // AskUserQuestion is only offered when a host answers it, here claude.ts.
+        "--permission-prompt-tool",
+        "stdio",
         "--tools",
-        "Read,Write,Bash,Grep,Glob",
+        "Read,Write,Bash,Grep,Glob,AskUserQuestion",
         "--append-system-prompt",
-        context,
+        `${context}\n\n${CLAUDE_ASK}`,
         ...pick,
         ...(effort ? ["--effort", effort] : []),
       ],
