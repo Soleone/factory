@@ -30,7 +30,7 @@ import { clock, minutesSince, repoName } from "@/format";
 import { AttemptFile } from "@/AttemptFile";
 import { Answer, Outcome } from "@/JobNotes";
 import { MARKDOWN } from "@/PrReview";
-import { PrLine, TrainLine } from "@/ResultsView";
+import { PrLine, TrainLine } from "@/PullRequest";
 import { TierBadge } from "@/TierBadge";
 
 /** From `workwork --help`. */
