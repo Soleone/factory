@@ -19,7 +19,7 @@ export function useRowKeys() {
       const onRow = target === current;
       if (event.key === "Enter" && onRow) {
         event.preventDefault();
-        current.querySelector<HTMLElement>('[data-slot="item-title"] :is(button, a)')?.click();
+        openRow(current);
         return;
       }
       const arrow = event.key.startsWith("Arrow") || event.key === "Home" || event.key === "End";
@@ -44,6 +44,11 @@ export function useRowKeys() {
     window.addEventListener("keydown", listen);
     return () => window.removeEventListener("keydown", listen);
   }, []);
+}
+
+/** Opens a row the way clicking its title would, if the title opens anything. */
+export function openRow(row: HTMLElement) {
+  row.querySelector<HTMLElement>('[data-slot="item-title"] :is(button, a)')?.click();
 }
 
 /** Keys that belong to a field or to a widget with its own keys, like a menu or a select. */

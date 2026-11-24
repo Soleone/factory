@@ -7,10 +7,12 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { RowItem } from "@/components/variants/item";
+import { openRow } from "./rowKeys";
 
 /**
  * One line in a list: a title, a muted line under it, and buttons on the right. A filled card,
  * deeper on hover; focusable for the list keys in `useRowKeys`, which find it by `data-row`.
+ * A click on its empty space opens it like its title does.
  */
 export function Row({
   leading,
@@ -33,7 +35,21 @@ export function Row({
   children?: ReactNode;
 }) {
   return (
-    <RowItem size="sm" tabIndex={-1} data-row className="relative overflow-hidden">
+    <RowItem
+      size="sm"
+      tabIndex={-1}
+      data-row
+      className="relative overflow-hidden has-[[data-slot=item-title]_:is(button,a)]:cursor-pointer"
+      onClick={(event) => {
+        const row = event.currentTarget;
+        const target = event.target as HTMLElement;
+        // React bubbles clicks from portals, like the dialog a title opens, through the row too.
+        if (!row.contains(target)) return;
+        const control = target.closest("a, button, input, label, select, textarea, form, [role]");
+        if (control && row.contains(control)) return;
+        openRow(row);
+      }}
+    >
       {progress !== undefined && (
         <span
           aria-hidden
