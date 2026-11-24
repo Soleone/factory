@@ -14,7 +14,7 @@ import type { ServerResponse } from "node:http";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { chatAgent } from "./agents.ts";
-import { claudeChat, type PiRecord } from "./claude.ts";
+import { claudeChat, type PiImage, type PiRecord } from "./claude.ts";
 import { readSettings } from "./state.ts";
 
 /** Speaks one agent's protocol: what to write for each of Pi's commands, and its output as Pi's records. */
@@ -176,20 +176,24 @@ export function chat(state: string, address: () => string) {
       pages.add(response);
       response.on("close", () => pages.delete(response));
     },
-    prompt(message: string): void {
+    prompt(message: string, images: Omit<PiImage, "type">[] = []): void {
       let entry = chats.find((each) => each.id === current);
       if (!entry) {
         entry = {
           id: randomUUID(),
           agent: readSettings(state).chat.agent,
-          title: titleOf(message),
+          title: titleOf(message || "Image"),
           lastActive: 0,
           prompted: false,
         };
         chats.push(entry);
         current = entry.id;
       }
-      send({ type: "prompt", message });
+      send({
+        type: "prompt",
+        message,
+        images: images.map(({ data, mimeType }) => ({ type: "image", data, mimeType })),
+      });
       Object.assign(entry, { prompted: true, lastActive: Date.now() });
       save();
     },
@@ -249,6 +253,8 @@ function context(): string {
 - The current folder is factory's state. candidates.json holds every repo's workwork candidates; jobs.jsonl is the queue and results, one event per line; runs/ holds each attempt's prompt.md and agent.log.
 - Attention: none needs no review, skim a quick look, decide needs the user's judgment. Prefer a few jobs that fit together over many that touch the same files, since those conflict when merged.
 - For work that isn't a candidate, write a prompt file in this folder and queue it with \`add --prompt\`. For a goal, work out a brief with the user first: what done looks like, constraints, links to specs, and the commands that prove it works.
+- When you mention a job or goal, link it as \`[short title](factory:job/<id>)\` with its id from the CLI; the page shows it as a chip that opens the job. Never write a bare id.
+- Markdown renders, including tables; use one to compare several jobs.
 - When reviewing results, read each PR with \`gh pr view\` and \`gh pr diff\`, and say what you'd merge, what you'd close and why.
 
 Propose, briefly, and act once the user agrees: queue, reorder, pin, retry, merge, rebase, close, remove, answer or verify only what the user agreed to. Never approve a goal's plan, never start or stop the factory, and never change files or git state other than through factory's CLI.`;

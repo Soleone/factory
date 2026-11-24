@@ -475,7 +475,13 @@ function demoChat() {
       pages.add(page);
       page.on("close", () => pages.delete(page));
     },
-    say(text: string) {
+    say({
+      message: text,
+      images = [],
+    }: {
+      message: string;
+      images?: { data: string; mimeType: string }[];
+    }) {
       if (!current) {
         current = randomUUID();
         chats.unshift({
@@ -489,10 +495,22 @@ function demoChat() {
       const chat = chats.find((each) => each.id === current)!;
       chat.lastActive = Date.now();
       chat.messages.push(
-        ...exchange(
-          text,
-          "This is the demo, so no agent runs here. In the real factory I'd look into it, and run `factory merge` once you agree.",
-        ),
+        {
+          role: "user",
+          content: [
+            { type: "text", text },
+            ...images.map((image) => ({ type: "image" as const, ...image })),
+          ],
+        },
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "text",
+              text: "This is the demo, so no agent runs here. In the real factory I'd start with [the first result](factory:job/result1), then compare:\n\n| Job | State | Next |\n|---|---|---|\n| [First result](factory:job/result1) | review | merge |\n| [Failed run](factory:job/result3) | failed | retry |\n\nI'd run `factory merge` once you agree.",
+            },
+          ],
+        },
       );
       return show(current);
     },
@@ -693,7 +711,7 @@ function dispatch(snapshot: Snapshot, route: string, body: unknown): unknown {
       for (const id of (body as { ids: string[] }).ids) snapshot.train[id] = { step: "queued" };
       return null;
     case "POST /api/chat":
-      return chat.say((body as { message: string }).message);
+      return chat.say(body as { message: string; images?: { data: string; mimeType: string }[] });
     case "POST /api/chat/new":
       return chat.fresh();
     case "POST /api/chat/open":

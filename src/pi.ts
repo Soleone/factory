@@ -6,7 +6,8 @@ import { piStep, type AgentMessage, type AgentTool } from "@/components/soleone/
 type Part =
   | { type: "text"; text: string }
   | { type: "toolCall"; id: string; name: string; arguments: Record<string, unknown> }
-  | { type: "thinking" | "image" };
+  | { type: "image"; data: string; mimeType: string }
+  | { type: "thinking" };
 
 type PiMessage =
   | { role: "user"; content: string | Part[] }
@@ -134,7 +135,13 @@ export function agentMessages({ messages, busy }: Transcript): AgentMessage[] {
 
   return messages.flatMap((message, index): AgentMessage[] => {
     const id = String(index);
-    if (message.role === "user") return [{ id, role: "user", text: textOf(message.content) }];
+    if (message.role === "user") {
+      const images =
+        typeof message.content === "string"
+          ? []
+          : message.content.flatMap((part) => (part.type === "image" ? [part] : []));
+      return [{ id, role: "user", text: textOf(message.content), images }];
+    }
     if (message.role !== "assistant") return [];
     const tools = message.content.flatMap((part) =>
       part.type === "toolCall" ? [toolOf(part, results.get(part.id), busy)] : [],

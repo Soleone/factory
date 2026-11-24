@@ -6,6 +6,7 @@ import { dirname, extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AGENT_NAMES } from "./agents.ts";
 import { chat } from "./chat.ts";
+import type { PiImage } from "./claude.ts";
 import { githubIdentity } from "./github.ts";
 import { clonableRepos, cloneRepo, createRepo, localRepos, sourceRoot } from "./repos.ts";
 import { agentModels } from "./models.ts";
@@ -277,7 +278,8 @@ export function serve(
     },
     "POST /api/train": (body: { ids: string[] }) =>
       train.start(body.ids.map((id) => ({ id, url: jobPr(id) }))),
-    "POST /api/chat": (body: { message: string }) => planner.prompt(body.message),
+    "POST /api/chat": (body: { message: string; images?: Omit<PiImage, "type">[] }) =>
+      planner.prompt(body.message, body.images),
     "POST /api/chat/abort": () => planner.abort(),
     "POST /api/chat/answer": (body: { id: string }) => planner.answer(body),
     "POST /api/chat/new": () => planner.fresh(),

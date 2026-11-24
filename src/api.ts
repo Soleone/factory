@@ -11,6 +11,7 @@ import type {
   Tier,
 } from "./backend/types.ts";
 import type { clonableRepos } from "./backend/repos.ts";
+import type { AgentImage } from "./components/soleone/agent";
 import type { DialogAnswer } from "./pi";
 
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -94,7 +95,7 @@ export const api = {
   githubProfile: () => call<CommitIdentity>("GET", "/api/github-profile"),
   turnOn: (run: RunRequest) => call("POST", "/api/on", run),
   turnOff: () => call("POST", "/api/off"),
-  chat: (message: string) => call("POST", "/api/chat", { message }),
+  chat: (message: string, images: AgentImage[]) => call("POST", "/api/chat", { message, images }),
   abortChat: () => call("POST", "/api/chat/abort"),
   answerChat: (answer: { id: string } & DialogAnswer) => call("POST", "/api/chat/answer", answer),
   newChat: () => call("POST", "/api/chat/new"),

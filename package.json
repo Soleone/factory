@@ -37,6 +37,9 @@
     "release": "release-it",
     "prepublishOnly": "vp run build"
   },
+  "dependencies": {
+    "remark-gfm": "^4.0.1"
+  },
   "devDependencies": {
     "@base-ui/react": "^1.9.0",
     "@fontsource-variable/geist": "^5.3.0",

@@ -24,7 +24,8 @@ import { CandidatesView } from "@/CandidatesView";
 import { Controls } from "@/Controls";
 import { GoalsView } from "@/GoalsView";
 import { Logo } from "@/Logo";
-import { ChatSwitcher, PlanView, useChat } from "@/PlanView";
+import { JobDetails } from "@/JobDetails";
+import { ChatSwitcher, jobReferences, PlanView, useChat } from "@/PlanView";
 import { QueueView, queued } from "@/QueueView";
 import { ResultsView } from "@/ResultsView";
 import { SettingsDialog } from "@/SettingsDialog";
@@ -50,6 +51,8 @@ export function App() {
   /** The Live Agent draft, here so the Results tab can fill it with a question. */
   const [plan, setPlan] = useState("");
   const chat = useChat();
+  /** The job a chip in the Live Agent's reply opened. */
+  const [shownJob, setShownJob] = useState<string>();
 
   if (!snapshot)
     return (
@@ -62,6 +65,7 @@ export function App() {
       </div>
     );
 
+  const shown = snapshot.jobs.find((job) => job.id === shownJob);
   return (
     // The agent sits beside every tab, and stays mounted so a reply keeps streaming while it's closed.
     <AgentSidebar
@@ -69,10 +73,23 @@ export function App() {
       header={<ChatSwitcher chat={chat} />}
       busy={chat.transcript.busy}
       agent={
-        <PlanView chat={chat} settings={snapshot.settings} prompt={plan} onPromptChange={setPlan} />
+        <PlanView
+          chat={chat}
+          settings={snapshot.settings}
+          prompt={plan}
+          onPromptChange={setPlan}
+          references={jobReferences(snapshot, setShownJob)}
+        />
       }
     >
       <Factory snapshot={snapshot} error={error} act={act} onAsk={setPlan} />
+      <Dialog open={shown !== undefined} onOpenChange={(open) => !open && setShownJob(undefined)}>
+        {shown && (
+          <TabbedDialogContent className="h-[min(48rem,calc(100dvh-8rem))] sm:max-w-5xl">
+            <JobDetails item={shown.item} job={shown} snapshot={snapshot} act={act} />
+          </TabbedDialogContent>
+        )}
+      </Dialog>
     </AgentSidebar>
   );
 }

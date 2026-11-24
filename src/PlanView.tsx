@@ -3,10 +3,11 @@ import { AgentDialog } from "@/AgentDialog";
 import { api } from "@/api";
 import type { ChatEntry } from "@/backend/chat.ts";
 import type { Snapshot } from "@/backend/types.ts";
-import { AgentPanel, AgentSessionSwitcher } from "@/components/soleone/agent";
-import { agentName } from "@/format";
+import { AgentPanel, AgentSessionSwitcher, type AgentReferences } from "@/components/soleone/agent";
+import { agentName, itemTitle } from "@/format";
 import { agentMessages, applyRecord, emptyTranscript } from "@/pi";
 import { ChatAgentFields } from "@/RunFields";
+import { StateIcon, taskState } from "@/TaskDetails";
 
 /** The Live Agent's chats and the current one's transcript, as serve streams them. */
 export function useChat() {
@@ -75,11 +76,13 @@ export function PlanView({
   settings,
   prompt,
   onPromptChange,
+  references,
 }: {
   chat: Chat;
   settings: Snapshot["settings"];
   prompt: string;
   onPromptChange: Dispatch<SetStateAction<string>>;
+  references: AgentReferences;
 }) {
   const { transcript, run } = chat;
   const agent = chat.chats.find((entry) => entry.id === chat.current)?.agent ?? settings.chat.agent;
@@ -117,9 +120,26 @@ export function PlanView({
         emptyTitle="Plan the queue"
         emptyDescription={`${agentName(agent)} looks through the candidates and queues jobs once you agree. It never turns the factory on.`}
         suggestions={suggestions}
-        onSend={(text) => run(() => api.chat(text))}
+        onSend={(text, images) => run(() => api.chat(text, images))}
         onStop={() => void run(api.abortChat)}
+        acceptImages
+        references={references}
       />
     </>
   );
+}
+
+/** The `factory:job/<id>` links the Live Agent writes, as chips that open the job's pop-up. */
+export function jobReferences(snapshot: Snapshot, open: (id: string) => void): AgentReferences {
+  return (href) => {
+    const id = href.match(/^factory:job\/(\w+)$/)?.[1];
+    const job = snapshot.jobs.find((each) => each.id === id);
+    if (!job) return undefined;
+    const state = taskState(job, snapshot.prs);
+    return {
+      title: `${itemTitle(job.item)} · ${state}`,
+      icon: <StateIcon state={state} />,
+      onOpen: () => open(job.id),
+    };
+  };
 }

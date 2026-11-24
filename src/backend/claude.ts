@@ -4,6 +4,7 @@
 type Block = {
   type: string;
   text?: string;
+  source?: { media_type: string; data: string };
   id?: string;
   name?: string;
   input?: Record<string, unknown>;
@@ -31,6 +32,9 @@ export type ClaudeRecord = {
 
 export type PiRecord = { type: string; [field: string]: unknown };
 
+/** An image as Pi's prompt command and user messages carry it. */
+export type PiImage = { type: "image"; data: string; mimeType: string };
+
 const update = (event: object): PiRecord => ({
   type: "message_update",
   assistantMessageEvent: event,
@@ -45,11 +49,21 @@ export function claudeChat(effort?: string) {
 
   return {
     /** What to write to Claude Code for one of Pi's commands, and what the page hears right away. */
-    command(record: { type: string; message?: string }): { write: object[]; emit: PiRecord[] } {
+    command(record: { type: string; message?: string; images?: PiImage[] }): {
+      write: object[];
+      emit: PiRecord[];
+    } {
       if (record.type === "prompt") {
         aborted = false;
+        const images = (record.images ?? []).map(({ data, mimeType }) => ({
+          type: "image",
+          source: { type: "base64", media_type: mimeType, data },
+        }));
+        const content = images.length
+          ? [...(record.message ? [{ type: "text", text: record.message }] : []), ...images]
+          : record.message;
         return {
-          write: [{ type: "user", message: { role: "user", content: record.message } }],
+          write: [{ type: "user", message: { role: "user", content } }],
           emit: [{ type: "agent_start" }],
         };
       }
@@ -183,6 +197,8 @@ const toolName = (name: string) => TOOLS[name] ?? name;
 /** A user message as Pi messages: the prompt, or the results of the tools the reply called. */
 function user(content: string | Block[]): object[] {
   if (typeof content === "string") return [{ role: "user", content }];
+  if (!content.some((block) => block.type === "tool_result"))
+    return [{ role: "user", content: content.map(promptPart) }];
   return content
     .filter((block) => block.type === "tool_result")
     .map((result) => ({
@@ -200,3 +216,9 @@ function user(content: string | Block[]): object[] {
       isError: result.is_error === true,
     }));
 }
+
+/** A block of a prompt with images, as Pi's user message parts. */
+const promptPart = (block: Block): object =>
+  block.type === "image"
+    ? { type: "image", data: block.source!.data, mimeType: block.source!.media_type }
+    : { type: "text", text: block.text ?? "" };
