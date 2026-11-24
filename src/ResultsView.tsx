@@ -1,5 +1,5 @@
 import { ChevronDownIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api, type Act } from "@/api";
 import { dayOf } from "@/ActivityView";
 import type { Job, Snapshot } from "@/backend/types.ts";
@@ -26,6 +26,7 @@ function sectionOf(state: TaskState) {
 }
 
 const SEEN = "factory.results.seen";
+const FINISHED_BATCH_SIZE = 25;
 
 /** When the user last looked at the results, in this browser; empty the first time. */
 function useLastSeen(): string {
@@ -74,9 +75,13 @@ export function ResultsView({
   const seen = useLastSeen();
   const [project, setProject] = useState<string | null>(null);
   const { prs, train } = snapshot;
-  const results = snapshot.jobs
-    .filter((job) => job.state !== "removed" && job.attempts.length > 0)
-    .sort((a, b) => b.attempts.at(-1)!.start.localeCompare(a.attempts.at(-1)!.start));
+  const results = useMemo(
+    () =>
+      snapshot.jobs
+        .filter((job) => job.state !== "removed" && job.attempts.length > 0)
+        .sort((a, b) => b.attempts.at(-1)!.start.localeCompare(a.attempts.at(-1)!.start)),
+    [snapshot.jobs],
+  );
   const repos = [...new Set(results.map((job) => job.item.repo))].sort((a, b) =>
     repoName(a).localeCompare(repoName(b)),
   );
@@ -84,6 +89,29 @@ export function ResultsView({
   const shownRepo = project && repos.includes(project) ? project : null;
   const jobs = shownRepo ? results.filter((job) => job.item.repo === shownRepo) : results;
   const [finishedOpen, setFinishedOpen] = useState(true);
+  const [finishedLimit, setFinishedLimit] = useState(FINISHED_BATCH_SIZE);
+  const more = useRef<HTMLButtonElement>(null);
+  const sections = { running: [] as Job[], finished: [] as Job[] };
+  for (const job of jobs) sections[sectionOf(taskState(job, prs))].push(job);
+  const finished = sections.finished.slice(0, finishedLimit);
+  const hasMore = finished.length < sections.finished.length;
+
+  useEffect(() => {
+    if (!finishedOpen || !hasMore || !more.current || typeof IntersectionObserver === "undefined")
+      return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          observer.disconnect();
+          setFinishedLimit(finishedLimit + FINISHED_BATCH_SIZE);
+        }
+      },
+      { rootMargin: "0px 0px 240px 0px" },
+    );
+    observer.observe(more.current);
+    return () => observer.disconnect();
+  }, [finishedOpen, hasMore, finishedLimit, shownRepo]);
+
   if (jobs.length === 0)
     return (
       <Empty>
@@ -96,9 +124,9 @@ export function ResultsView({
       </Empty>
     );
 
-  const sections = { running: [] as Job[], finished: [] as Job[] };
-  for (const job of jobs) sections[sectionOf(taskState(job, prs))].push(job);
-  const selection = jobs.filter((job) => canDismiss(job) && selected.has(job.id));
+  const selection = [...sections.running, ...finished].filter(
+    (job) => canDismiss(job) && selected.has(job.id),
+  );
   const boarding = selection.filter((job) => canBoard(job, prs, train));
 
   const select = (ids: string[], checked: boolean) => {
@@ -140,7 +168,9 @@ export function ResultsView({
     const days = new Map<string, Job[]>();
     for (const job of shown) {
       const day = dayLabel(lastEnd(job));
-      days.set(day, [...(days.get(day) ?? []), job]);
+      const dayJobs = days.get(day);
+      if (dayJobs) dayJobs.push(job);
+      else days.set(day, [job]);
     }
     return [...days].map(([day, dayJobs]) => (
       <div key={day} className="flex flex-col gap-2">
@@ -175,22 +205,26 @@ export function ResultsView({
     ));
   };
 
-  /** A section's title with a checkbox that selects all of its dismissible results. */
-  const heading = (title: string, shown: Job[]) => {
+  /** A section's title with a checkbox that selects its visible dismissible results. */
+  const heading = (title: string, shown: Job[], total = shown.length) => {
     const ids = shown.filter(canDismiss).map((job) => job.id);
     const all = ids.length > 0 && ids.every((id) => selected.has(id));
     return (
       <span className="flex items-center gap-3">
         {ids.length > 0 && (
           <NeutralCheckbox
-            aria-label={all ? `Clear ${title}` : `Select all in ${title}`}
+            aria-label={
+              all
+                ? `Clear ${title}`
+                : `Select ${shown.length < total ? "shown" : "all"} in ${title}`
+            }
             checked={all}
             disabled={dismissing}
             onCheckedChange={(checked) => select(ids, checked)}
           />
         )}
         <h2 className="text-sm font-medium">
-          {title} <span className="font-normal text-muted-foreground">{shown.length}</span>
+          {title} <span className="font-normal text-muted-foreground">{total}</span>
         </h2>
       </span>
     );
@@ -205,7 +239,14 @@ export function ResultsView({
     <div className="flex flex-col gap-6 pt-2">
       {repos.length > 1 && (
         <div className="px-3">
-          <Select items={projects} value={shownRepo} onValueChange={setProject}>
+          <Select
+            items={projects}
+            value={shownRepo}
+            onValueChange={(repo) => {
+              setProject(repo);
+              setFinishedLimit(FINISHED_BATCH_SIZE);
+            }}
+          >
             <SelectTrigger aria-label="Project" size="sm">
               <SelectValue />
             </SelectTrigger>
@@ -253,7 +294,7 @@ export function ResultsView({
         <Collapsible open={finishedOpen} onOpenChange={setFinishedOpen}>
           <section className="flex flex-col gap-3">
             <div className="flex min-h-8 items-center gap-2 px-3">
-              {heading("Finished", sections.finished)}
+              {heading("Finished", finished, sections.finished.length)}
               <CollapsibleTrigger
                 render={<Button variant="ghost" size="icon-sm" />}
                 aria-label={finishedOpen ? "Hide finished" : "Show finished"}
@@ -265,7 +306,20 @@ export function ResultsView({
               </CollapsibleTrigger>
             </div>
             <CollapsibleContent>
-              <div className="flex flex-col gap-3">{list(sections.finished)}</div>
+              <div className="flex flex-col gap-3">
+                {list(finished)}
+                {hasMore && (
+                  <Button
+                    ref={more}
+                    variant="outline"
+                    size="sm"
+                    className="self-center"
+                    onClick={() => setFinishedLimit(finishedLimit + FINISHED_BATCH_SIZE)}
+                  >
+                    Load more results
+                  </Button>
+                )}
+              </div>
             </CollapsibleContent>
           </section>
         </Collapsible>
