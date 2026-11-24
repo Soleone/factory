@@ -29,8 +29,15 @@ import {
   startJob,
 } from "./jobs.ts";
 import { findPr } from "./review.ts";
-import { alive, compactAt, readCandidates, readSettings, refreshCandidates } from "./state.ts";
-import { noFacts, readStream, type Facts } from "./stream.ts";
+import {
+  alive,
+  compactAt,
+  output,
+  readCandidates,
+  readSettings,
+  refreshCandidates,
+} from "./state.ts";
+import { claudeStartupRejected, noFacts, readStream, type Facts } from "./stream.ts";
 import { fiveHour } from "./usage.ts";
 import { watch } from "./triggers.ts";
 import {
@@ -289,13 +296,12 @@ export async function run(options: RunOptions): Promise<string> {
     if (added.length) log(`auto mode queued ${added.length}`);
   }
 
+  const available = (worker: Worker, self: Worker) => {
+    const pool = pools.get(worker.pool)!;
+    return !pool.until && !pool.stopped && (worker === self || worker.state === "idle");
+  };
   const free = (preset: string, self: Worker) =>
-    slots.some(
-      ({ worker }) =>
-        worker.preset === preset &&
-        (worker === self || worker.state === "idle") &&
-        !pools.get(worker.pool)!.until,
-    );
+    slots.some(({ worker }) => worker.preset === preset && available(worker, self));
   const usable = (preset: string) =>
     slots.some(({ worker }) => worker.preset === preset && !pools.get(worker.pool)!.stopped);
 
@@ -344,12 +350,8 @@ export async function run(options: RunOptions): Promise<string> {
    * when it names one. A pin on a preset this run has no worker for lands here, on the pin's tuning.
    */
   const firstFree = (agent: string | undefined, self: Worker) =>
-    slots.find(
-      ({ worker }) =>
-        (agent ?? worker.agent) === worker.agent &&
-        (worker === self || worker.state === "idle") &&
-        !pools.get(worker.pool)!.until,
-    )?.worker;
+    slots.find(({ worker }) => (agent ?? worker.agent) === worker.agent && available(worker, self))
+      ?.worker;
 
   async function work(slot: Slot, handed?: Handed): Promise<void> {
     const { worker } = slot;
@@ -358,12 +360,14 @@ export async function run(options: RunOptions): Promise<string> {
       topUp();
       lookOut();
       moveOnFromAsks();
+      if (!pool.stopped && !handed) await keepReserve(pool);
+      // Another worker can stop this pool while we await the usage read.
       if (pool.stopped) return set(worker, { state: "stopped", reason: pool.stopped });
-      if (!handed) await keepReserve(pool);
       if (pool.until) {
-        set(worker, { state: "sleeping", until: pool.until });
-        await (options.sleep ?? nap)(Math.max(0, Date.parse(pool.until) - Date.now()));
-        Object.assign(pool, { until: undefined, reserved: undefined });
+        const until = pool.until;
+        set(worker, { state: "sleeping", until });
+        await (options.sleep ?? nap)(Math.max(0, Date.parse(until) - Date.now()));
+        if (pool.until === until) Object.assign(pool, { until: undefined, reserved: undefined });
         continue;
       }
       let job: Job | undefined;
@@ -396,7 +400,22 @@ export async function run(options: RunOptions): Promise<string> {
         if (!live?.pid) record(state, { type: "requeue", id: job.id });
         break;
       }
-      if (result.paused) {
+      // Hold the pool before putting the job back where any eligible worker can see it.
+      if (result.paused === "limited") hitLimit(pool, result.text);
+      if (result.paused && result.rejected) {
+        const worktree = readLive(state, job.id)!.worktree;
+        await release(worktree).catch((error: Error) =>
+          log(`can't release ${worktree}: ${error.message.trim().split("\n")[0]}`),
+        );
+        rmSync(livePath(state, job.id), { force: true });
+        record(state, {
+          type: "attempt",
+          id: job.id,
+          attempt: result.rejected,
+          startupRejected: true,
+        });
+        log(`${worker.id} ${job.id} was limited before starting work; queued again`);
+      } else if (result.paused) {
         record(state, { type: "pause", id: job.id, reason: result.paused });
         log(`${worker.id} ${job.id} waits: ${result.paused}`);
       } else {
@@ -426,26 +445,27 @@ export async function run(options: RunOptions): Promise<string> {
             reason: `3 failures in a row under a minute; last: ${result.attempt.error?.split("\n")[0] ?? "see its log"}`,
           });
       }
-      if (result.paused !== "limited") {
-        set(worker, { state: "idle" });
-        continue;
-      }
-      // Other workers of the pool hit the same limit meanwhile; that's one hit, not several.
-      if (pool.until) continue;
-      pool.limits++;
-      if (options.limit !== null && pool.limits >= options.limit) {
-        pool.stopped = `limit ${pool.limits} of ${options.limit}`;
-        continue;
-      }
-      const reset = resetTime(result.text, Date.now());
+      if (result.paused !== "limited") set(worker, { state: "idle" });
+    }
+    set(worker, { state: "stopped", reason: ended() });
+  }
+
+  function hitLimit(pool: Pool, text: string): void {
+    // Other workers of the pool hit the same limit meanwhile; that's one hit, not several.
+    if (pool.until || pool.stopped) return;
+    pool.limits++;
+    if (options.limit !== null && pool.limits >= options.limit) {
+      pool.stopped = `limit ${pool.limits} of ${options.limit}`;
+    } else {
+      const reset = resetTime(text, Date.now());
       const wake = Math.min(
         reset === undefined ? Date.now() + 30 * MINUTE : reset + 2 * MINUTE,
         options.until ?? Infinity,
       );
       pool.until = new Date(wake).toISOString();
-      log(`${worker.pool} hit limit ${pool.limits}, sleeps until ${pool.until}`);
+      log(`${pool.name} hit limit ${pool.limits}, sleeps until ${pool.until}`);
     }
-    set(worker, { state: "stopped", reason: ended() });
+    writeStatus();
   }
 
   /**
@@ -504,7 +524,33 @@ export async function run(options: RunOptions): Promise<string> {
       if (killing) return { attempt: await end(job, live, "stopped", facts), text };
       if (timedOut) return { attempt: await end(job, live, "timeout", facts), text };
       const outcome = classify(makeAgent(worker.agent, live.begun), code, text, facts.error);
-      if (outcome === "limited") return pause(job, live, "limited", text);
+      if (outcome === "limited") {
+        if (
+          live.turns === 1 &&
+          live.begun.agent === "claude" &&
+          facts.error &&
+          claudeStartupRejected(text, facts.error) &&
+          (await cleanWorktree(live.worktree)) &&
+          !readJobs(state)
+            .find((each) => each.id === job.id)!
+            .notes.some((note) => note.attempt === job.attempts.length + 1)
+        ) {
+          return {
+            paused: "limited",
+            text,
+            rejected: {
+              ...live.begun,
+              end: new Date().toISOString(),
+              outcome: "limited",
+              error: facts.error.slice(0, 2000),
+              session: facts.session ?? live.session,
+              turns: 1,
+              tokens: facts.tokens,
+            },
+          };
+        }
+        return pause(job, live, "limited", text);
+      }
       // Once: an agent that saves no session at all would start over at every follow-up.
       if (outcome === "failed" && live.turns > 1 && !live.sessionTurn && LOST_SESSION.test(text)) {
         live = restart(job, live);
@@ -797,8 +843,17 @@ export async function run(options: RunOptions): Promise<string> {
 type Handed = { job: Job; live: Live };
 type Turned =
   | { paused?: undefined; attempt: Attempt; text: string }
-  | { paused: Paused; text: string };
+  | { paused: Paused; text: string; rejected?: Attempt };
 type Paused = "asked" | "limited" | "alone";
+
+async function cleanWorktree(worktree: string): Promise<boolean> {
+  try {
+    return !(await output("git", ["status", "--porcelain"], worktree)).trim();
+  } catch {
+    // If we can't tell whether anything changed, keep the session and worktree.
+    return false;
+  }
+}
 
 /** Each preset's workers with the preset it runs, with the run's counts over the settings'. */
 export function makeSlots(settings: Settings, counts: Record<string, number> = {}): Slot[] {

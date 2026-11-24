@@ -439,6 +439,32 @@ describe("the factory", () => {
   /** A shell line reporting a result for the job, from its worktree under state/worktrees/<repo>/<n>. */
   const RESULT = `echo '{"at":"2026-11-16T04:00:00Z","type":"note","id":"'$FACTORY_JOB'","note":{"kind":"result","text":"did it"}}' >> ../../../jobs.jsonl`;
   const OK = `${RESULT}; echo 'opened https://github.com/o/r/pull/7'`;
+  const LIMIT_ERROR = "You've hit your monthly spend limit · try again in 1 hour";
+  const ZERO_USAGE = {
+    input_tokens: 0,
+    output_tokens: 0,
+    cache_read_input_tokens: 0,
+    cache_creation_input_tokens: 0,
+  };
+  const STARTUP_LIMIT = `
+cat <<'JSON'
+${[
+  { type: "system", subtype: "init", session_id: "startup" },
+  { type: "rate_limit_event", rate_limit_info: { status: "rejected" } },
+  {
+    type: "assistant",
+    message: {
+      model: "<synthetic>",
+      usage: ZERO_USAGE,
+      content: [{ type: "text", text: LIMIT_ERROR }],
+    },
+  },
+  { type: "result", subtype: "success", is_error: true, result: LIMIT_ERROR, usage: ZERO_USAGE },
+]
+  .map((event) => JSON.stringify(event))
+  .join("\n")}
+JSON
+exit 0`;
   const OPEN_PR = {
     state: "OPEN",
     isDraft: false,
@@ -748,6 +774,121 @@ ${lines
     expect(job.attempts[0]).toMatchObject({ model: "opus", effort: "low", outcome: "done" });
     expect(readFileSync(job.attempts[0].log, "utf8")).toContain("--model opus --effort low");
   });
+
+  test.each([
+    { limit: 2, claude: 1, poolState: "sleeping" },
+    { limit: 1, claude: 2, poolState: "stopped" },
+  ])(
+    "Pi takes a startup-rejected job while Claude's pool is $poolState",
+    async ({ limit, claude, poolState }) => {
+      const base = setup(["a"]);
+      agents({ claude: STARTUP_LIMIT, pi: `echo '{"type":"session","id":"pi-new"}'; ${OK}` });
+      const added = base.pick("a");
+      // Never simulate the reset before Pi finishes. The deadline lets a broken scheduler shut down.
+      let wake!: () => void;
+      const cooldown = new Promise<void>((resolve) => (wake = resolve));
+      const sleeps: number[] = [];
+      const deadline = Date.now() + 3000;
+      let claudeStates: string[] = [];
+      const [job] = await work(
+        {
+          ...options(base, { claude, pi: 1 }),
+          limit,
+          sleep: (ms) => {
+            sleeps.push(ms);
+            return cooldown;
+          },
+        },
+        ([job]) => {
+          if (job.state !== "done" && Date.now() < deadline) return false;
+          claudeStates = status(base.state)
+            .workers.filter((worker) => worker.agent === "claude")
+            .map((worker) => worker.state);
+          wake();
+          return true;
+        },
+      );
+      expect(claudeStates).toEqual(Array(claude).fill(poolState));
+      if (poolState === "sleeping") {
+        expect(sleeps).toHaveLength(1);
+        expect(sleeps[0]).toBeGreaterThan(60 * MINUTE);
+      } else expect(sleeps).toEqual([]);
+      expect(job).toMatchObject({ id: added.id, state: "done", open: false, agent: "pi" });
+      expect(job.attempts).toMatchObject([
+        {
+          agent: "claude",
+          outcome: "limited",
+          turns: 1,
+          session: "startup",
+          error: LIMIT_ERROR,
+          tokens: { input: 0, cached: 0, output: 0 },
+        },
+        { agent: "pi", outcome: "done", turns: 1, session: "pi-new" },
+      ]);
+      expect(status(base.state).pools.find((pool) => pool.name === "claude")?.limits).toBe(1);
+      expect(readFileSync(job.attempts[0].log, "utf8")).toContain('"model":"<synthetic>"');
+      expect(existsSync(join(base.state, "running", `${job.id}.json`))).toBe(false);
+    },
+  );
+
+  test.each([{ agent: "claude" }, { preset: "claude" }])(
+    "a startup rejection preserves an explicit Claude pin %j",
+    async (pin) => {
+      const base = setup(["a", "b"]);
+      agents({ claude: STARTUP_LIMIT, pi: OK });
+      base.pick("a", pin);
+      let added = false;
+      const deadline = Date.now() + 3000;
+      const [held, done] = await work({ ...options(base, {}), limit: 1 }, ([held, other]) => {
+        if (!added && held.attempts.length) {
+          base.pick("b");
+          added = true;
+        }
+        return other?.state === "done" || Date.now() >= deadline;
+      });
+      expect(held).toMatchObject({
+        ...pin,
+        agent: pin.agent,
+        state: "queued",
+        open: false,
+        attempts: [{ agent: "claude", outcome: "limited" }],
+      });
+      expect(done?.attempts).toMatchObject([{ agent: "pi", outcome: "done" }]);
+    },
+  );
+
+  test.each(["same turn", "earlier turn"])(
+    "a limit after progress in the %s keeps the session",
+    async (when) => {
+      const base = setup(["a"]);
+      const progress = `echo '{"type":"assistant","message":{"model":"claude-sonnet","content":[{"type":"tool_use","name":"Read","input":{"file_path":"README.md"}}]}}'`;
+      agents({
+        claude:
+          when === "same turn"
+            ? `${progress}\n${STARTUP_LIMIT}`
+            : `case "$*" in *--resume*) ;; *) ${progress}; exit 1 ;; esac\n${STARTUP_LIMIT}`,
+        pi: OK,
+      });
+      const added = base.pick("a");
+      const deadline = Date.now() + 3000;
+      const [paused] = await work(
+        { ...options(base, {}), limit: 1 },
+        () =>
+          status(base.state).workers.some((worker) => worker.reason === "limit 1 of 1") ||
+          Date.now() >= deadline,
+      );
+      expect(paused).toMatchObject({ state: "queued", open: true, agent: "claude", attempts: [] });
+      const live = JSON.parse(
+        readFileSync(join(base.state, "running", `${added.id}.json`), "utf8"),
+      );
+      const turns = when === "same turn" ? 1 : 2;
+      expect(live).toMatchObject({ waiting: "limited", turns });
+      agents({ claude: `echo "$*"; ${OK}` });
+      const [done] = await work(options(base, {}));
+      expect(done.attempts).toMatchObject([{ agent: "claude", outcome: "done", turns: turns + 1 }]);
+      expect(readFileSync(done.attempts[0].log, "utf8")).toContain(`--resume ${live.session}`);
+    },
+  );
 
   test("limit 1: a pool stops at its first limit hit and the factory turns off with no worker left", async () => {
     const base = setup(["a"]);
