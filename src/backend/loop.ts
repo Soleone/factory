@@ -386,36 +386,33 @@ export async function run(options: RunOptions): Promise<string> {
         if (pool.until === until) Object.assign(pool, { until: undefined, reserved: undefined });
         continue;
       }
-      let job: Job | undefined;
-      let result: Turned | undefined;
+      let job: Job;
+      let live: Live | undefined;
       if (handed) {
-        ({ job } = handed);
-        set(worker, { state: "working", job: job.id });
-        log(`${worker.id} takes over ${job.id} from run ${handed.live.begun.run}`);
-        const taken = job;
-        result = await attempt(slot, job, handed.live).catch((error: Error) => broke(taken, error));
+        ({ job, live } = handed);
         handed = undefined;
+        set(worker, { state: "working", job: job.id });
+        log(`${worker.id} takes over ${job.id} from run ${live.begun.run}`);
       } else {
-        job = pick(slot);
-        if (!job) {
+        const picked = pick(slot);
+        if (!picked) {
           if (worker.state !== "idle") set(worker, { state: "idle" });
           await nap(options.pollMs ?? 3000);
           continue;
         }
+        job = picked;
         startJob(state, job.id, worker.agent, worker.preset);
         set(worker, { state: "working", job: job.id });
         log(`${worker.id} starts ${job.id}: ${job.item.label} ${job.item.id}`);
-        const taken = job;
-        result = job.image
-          ? await imageAttempt(slot, job)
-          : await attempt(slot, job, readLive(state, job.id)).catch((error: Error) =>
-              broke(taken, error),
-            );
+        if (!job.image) live = readLive(state, job.id);
       }
+      const result =
+        job.image && !live
+          ? await imageAttempt(slot, job)
+          : await attempt(slot, job, live).catch((error: Error) => broke(job, error));
       if (!result) {
         // The run stopped: before the agent started the job goes back; a running agent is handed off.
-        const live = readLive(state, job.id);
-        if (!live?.pid) record(state, { type: "requeue", id: job.id });
+        if (!readLive(state, job.id)?.pid) record(state, { type: "requeue", id: job.id });
         break;
       }
       // Hold the pool before putting the job back where any eligible worker can see it.
