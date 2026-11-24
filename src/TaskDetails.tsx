@@ -3,6 +3,7 @@ import {
   CircleDashedIcon,
   CircleHelpIcon,
   CircleIcon,
+  CircleMinusIcon,
   CircleXIcon,
   GitMergeIcon,
   GitPullRequestClosedIcon,
@@ -41,7 +42,7 @@ export const ATTENTION: Record<string, string> = {
 };
 
 /** Where a task is in its life, from a workwork candidate to a merged PR. */
-export type TaskState = Job["state"] | "candidate" | "review" | "merged" | "closed";
+export type TaskState = Job["state"] | "candidate" | "review" | "merged" | "closed" | "unchanged";
 
 const STATES = {
   candidate: {
@@ -67,6 +68,11 @@ const STATES = {
   // Neutral, so yellow stays for what blocks work: a question waiting for you.
   review: { Icon: GitPullRequestIcon, icon: "text-foreground", pill: "bg-muted text-foreground" },
   done: { Icon: CircleCheckIcon, icon: "text-success", pill: "bg-success/15 text-success" },
+  unchanged: {
+    Icon: CircleMinusIcon,
+    icon: "text-muted-foreground",
+    pill: "bg-muted text-muted-foreground",
+  },
   merged: { Icon: GitMergeIcon, icon: "text-success", pill: "bg-success/15 text-success" },
   failed: {
     Icon: CircleXIcon,
@@ -88,6 +94,7 @@ const STATES = {
 const LABELS: Partial<Record<TaskState, string>> = {
   blocked: "waiting for you",
   review: "needs review",
+  unchanged: "no change",
 };
 
 /** The same mark for a task's state on every tab. */
@@ -107,11 +114,15 @@ export function StatePill({ state, label }: { state: TaskState; label?: string }
   );
 }
 
-/** A PR not fetched yet counts as open, so a finished job reads as waiting for review. */
+/**
+ * A PR not fetched yet counts as open, so a finished job reads as waiting for review. A done job
+ * with no PR and no kept branch changed nothing; goals and their nodes merge without one, so they stay done.
+ */
 export function taskState(job: Job | undefined, prs: Snapshot["prs"]): TaskState {
   if (!job) return "candidate";
+  if (job.state !== "done") return job.state;
   const url = prUrl(job);
-  if (!url || job.state !== "done") return job.state;
+  if (!url) return job.goal || job.of || job.attempts.at(-1)?.branch ? "done" : "unchanged";
   const pr = prs[url]?.state;
   return pr === "MERGED" ? "merged" : pr === "CLOSED" ? "closed" : "review";
 }
