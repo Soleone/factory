@@ -14,7 +14,13 @@ import {
 } from "lucide-react";
 import type { ReactNode } from "react";
 import type { Act } from "@/api";
-import type { Attempt, Job, Note, Snapshot } from "@/backend/types.ts";
+import {
+  ACTIVITY_LIMIT,
+  type Attempt,
+  type Job,
+  type Note,
+  type Snapshot,
+} from "@/backend/types.ts";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { clock } from "@/format";
 import { KIND } from "@/JobNotes";
@@ -44,8 +50,6 @@ const NOTE_ICONS: Record<Exclude<Note["kind"], "step">, ReactNode> = {
   factory: <FactoryIcon className="text-muted-foreground" />,
   alone: <LockIcon className="text-muted-foreground" />,
 };
-
-const SHOWN = 200;
 
 /** Turns, follow-ups, peak context and compactions, as far as the runner reported them. */
 function attemptNumbers(attempt: Attempt): string {
@@ -132,7 +136,7 @@ function entries(jobs: Job[]): Entry[] {
     .filter((job) => job.state !== "removed")
     .flatMap(jobEntries)
     .sort((a, b) => b.at.localeCompare(a.at))
-    .slice(0, SHOWN);
+    .slice(0, ACTIVITY_LIMIT);
 }
 
 /** A step's number within its attempt, as a small pill before its text. */

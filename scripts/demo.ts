@@ -7,6 +7,7 @@ import {
   canRebase,
   presetWorkers,
   prUrl,
+  RESULTS_BATCH_SIZE,
   type Item,
   type Job,
   type Pin,
@@ -14,6 +15,7 @@ import {
   type Settings,
   type Snapshot,
 } from "../src/backend/types.ts";
+import { jobContext, liveJobs, resultsPage } from "../src/backend/webHistory.ts";
 import type { PiRecord } from "../src/pi.ts";
 
 const DEMO_NOTES: Record<number, Omit<Job["notes"][number], "at" | "attempt">[]> = {
@@ -194,7 +196,9 @@ function demoGoal(at: string, run: string): Job[] {
   ];
 }
 
-function seed(): Snapshot {
+type DemoState = Omit<Snapshot, "reviewed" | "queuedFollowups">;
+
+function seed(): DemoState {
   const at = new Date().toISOString();
   const run = at.slice(0, 19).replaceAll(":", "");
   const jobs: Job[] = [
@@ -512,7 +516,7 @@ export function demoApi(): Plugin {
     configureServer(server) {
       const snapshot = seed();
       server.middlewares.use(async (request, response, next) => {
-        const path = new URL(request.url ?? "/", "http://localhost").pathname;
+        const { pathname: path, searchParams } = new URL(request.url ?? "/", "http://localhost");
         if (path.startsWith("/runs/")) {
           const attempt = snapshot.jobs
             .flatMap((job) => job.attempts)
@@ -538,6 +542,7 @@ export function demoApi(): Plugin {
             snapshot,
             `${request.method} ${path}`,
             text ? JSON.parse(text) : undefined,
+            searchParams,
           );
           response.writeHead(result === undefined ? 404 : 200, {
             "content-type": "application/json",
@@ -555,11 +560,30 @@ export function demoApi(): Plugin {
   };
 }
 
-function dispatch(snapshot: Snapshot, route: string, body: unknown): unknown {
+function dispatch(
+  snapshot: DemoState,
+  route: string,
+  body: unknown,
+  query: URLSearchParams,
+): unknown {
   const { jobs } = snapshot;
   switch (route) {
-    case "GET /api/state":
-      return snapshot;
+    case "GET /api/state": {
+      const shown = liveJobs(jobs, snapshot.prs, items, snapshot.status);
+      return { ...snapshot, jobs: shown, ...jobContext(jobs, shown) };
+    }
+    case "GET /api/results":
+      return resultsPage(
+        process.cwd(),
+        jobs,
+        query.get("repo"),
+        Number(query.get("limit") ?? RESULTS_BATCH_SIZE),
+        (urls) =>
+          Object.fromEntries(
+            urls.flatMap((url) => (snapshot.prs[url] ? [[url, snapshot.prs[url]]] : [])),
+          ),
+        snapshot.train,
+      );
     case "GET /api/candidates":
       return {
         at: snapshot.candidates.at,

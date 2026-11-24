@@ -1,8 +1,8 @@
 import { ChevronDownIcon } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, type Act } from "@/api";
 import { dayOf } from "@/ActivityView";
-import type { Job, Snapshot } from "@/backend/types.ts";
+import { RESULTS_BATCH_SIZE, type Job, type ResultsPage, type Snapshot } from "@/backend/types.ts";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { NeutralCheckbox } from "@/components/variants/checkbox";
@@ -18,15 +18,51 @@ import {
 import { itemTitle, repoName } from "@/format";
 import { canBoard, MergeButton, mergeTrain } from "@/PullRequest";
 import { canDismiss, hasBranch, Result, reviewerOf } from "@/Result";
-import { taskState, type TaskState } from "@/TaskDetails";
+import { Spinner } from "@/components/ui/spinner";
 
-/** What waits on the user is in the Inbox; here everything is history, running or finished. */
-function sectionOf(state: TaskState) {
-  return state === "queued" || state === "running" || state === "blocked" ? "running" : "finished";
+/** Keep the previous window while appending; never apply a response from an old filter. */
+function useResults(project: string | null, limit: number, refresh: number) {
+  const [loaded, setLoaded] = useState<{
+    project: string | null;
+    limit: number;
+    page: ResultsPage;
+  }>();
+  const [failure, setFailure] = useState<{ project: string | null; text: string }>();
+  useEffect(() => {
+    const controller = new AbortController();
+    let loading = false;
+    const load = async () => {
+      if (loading) return;
+      loading = true;
+      try {
+        const page = await api.results(project, limit, controller.signal);
+        if (!controller.signal.aborted) {
+          setLoaded({ project, limit, page });
+          setFailure(undefined);
+        }
+      } catch (error) {
+        if (!controller.signal.aborted) setFailure({ project, text: (error as Error).message });
+      } finally {
+        loading = false;
+      }
+    };
+    void load();
+    const timer = setInterval(load, 3000);
+    return () => {
+      controller.abort();
+      clearInterval(timer);
+    };
+  }, [project, limit, refresh]);
+
+  const current = loaded?.project === project ? loaded : undefined;
+  return {
+    page: current?.page,
+    appending: current?.limit !== limit,
+    error: failure?.project === project ? failure.text : undefined,
+  };
 }
 
 const SEEN = "factory.results.seen";
-const FINISHED_BATCH_SIZE = 250;
 
 /** When the user last looked at the results, in this browser; empty the first time. */
 function useLastSeen(): string {
@@ -60,10 +96,21 @@ function dayLabel(iso: string) {
 
 const lastEnd = (job: Job) => job.attempts.at(-1)!.end;
 
+function byDay(jobs: readonly Job[]) {
+  const days = new Map<string, Job[]>();
+  for (const job of jobs) {
+    const day = dayLabel(lastEnd(job));
+    const dayJobs = days.get(day);
+    if (dayJobs) dayJobs.push(job);
+    else days.set(day, [job]);
+  }
+  return [...days];
+}
+
 /** Running results, then finished ones, each by day. */
 export function ResultsView({
-  snapshot,
-  act,
+  snapshot: live,
+  act: change,
   onAsk,
 }: {
   snapshot: Snapshot;
@@ -74,45 +121,60 @@ export function ResultsView({
   const [dismissing, setDismissing] = useState(false);
   const seen = useLastSeen();
   const [project, setProject] = useState<string | null>(null);
-  const { prs, train } = snapshot;
-  const results = useMemo(
-    () =>
-      snapshot.jobs
-        .filter((job) => job.state !== "removed" && job.attempts.length > 0)
-        .sort((a, b) => b.attempts.at(-1)!.start.localeCompare(a.attempts.at(-1)!.start)),
-    [snapshot.jobs],
-  );
-  const repos = [...new Set(results.map((job) => job.item.repo))].sort((a, b) =>
-    repoName(a).localeCompare(repoName(b)),
-  );
-  // A project whose results were all dismissed falls back to showing everything.
-  const shownRepo = project && repos.includes(project) ? project : null;
-  const jobs = shownRepo ? results.filter((job) => job.item.repo === shownRepo) : results;
   const [finishedOpen, setFinishedOpen] = useState(true);
-  const [finishedLimit, setFinishedLimit] = useState(FINISHED_BATCH_SIZE);
+  const [limit, setLimit] = useState(RESULTS_BATCH_SIZE);
+  const [refresh, setRefresh] = useState(0);
+  const { page, appending, error } = useResults(project, limit, refresh);
   const more = useRef<HTMLButtonElement>(null);
-  const sections = { running: [] as Job[], finished: [] as Job[] };
-  for (const job of jobs) sections[sectionOf(taskState(job, prs))].push(job);
-  const finished = sections.finished.slice(0, finishedLimit);
-  const hasMore = finished.length < sections.finished.length;
+  const hasMore = page !== undefined && page.finished.length < page.total;
+  const act: Act = async (action) => {
+    await change(action);
+    setRefresh((current) => current + 1);
+  };
 
   useEffect(() => {
-    if (!finishedOpen || !hasMore || !more.current || typeof IntersectionObserver === "undefined")
+    if (
+      !finishedOpen ||
+      !hasMore ||
+      appending ||
+      error ||
+      !more.current ||
+      typeof IntersectionObserver === "undefined"
+    )
       return;
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries.some((entry) => entry.isIntersecting)) {
           observer.disconnect();
-          setFinishedLimit(finishedLimit + FINISHED_BATCH_SIZE);
+          setLimit(limit + RESULTS_BATCH_SIZE);
         }
       },
       { rootMargin: "0px 0px 240px 0px" },
     );
     observer.observe(more.current);
     return () => observer.disconnect();
-  }, [finishedOpen, hasMore, finishedLimit, shownRepo]);
+  }, [finishedOpen, hasMore, appending, error, limit, page?.repo]);
 
-  if (jobs.length === 0)
+  const problem = error && (
+    <p role="alert" className="text-sm text-destructive">
+      Can't load results: {error}
+    </p>
+  );
+  if (!page)
+    return (
+      <div className="flex gap-2 p-3" role="status">
+        {problem || (
+          <>
+            <Spinner /> Loading results…
+          </>
+        )}
+      </div>
+    );
+
+  const { running, finished, total, prs, train, reviewed, queuedFollowups } = page;
+  const snapshot = { ...live, prs, train, reviewed, queuedFollowups };
+  const repos = page.repos.toSorted((a, b) => repoName(a).localeCompare(repoName(b)));
+  if (running.length === 0 && total === 0)
     return (
       <Empty>
         <EmptyHeader>
@@ -124,7 +186,7 @@ export function ResultsView({
       </Empty>
     );
 
-  const selection = [...sections.running, ...finished].filter(
+  const selection = [...running, ...finished].filter(
     (job) => canDismiss(job) && selected.has(job.id),
   );
   const boarding = selection.filter((job) => canBoard(job, prs, train));
@@ -164,15 +226,8 @@ export function ResultsView({
     if (mergeTrain(merging, act)) setSelected(new Set());
   };
 
-  const list = (shown: Job[]) => {
-    const days = new Map<string, Job[]>();
-    for (const job of shown) {
-      const day = dayLabel(lastEnd(job));
-      const dayJobs = days.get(day);
-      if (dayJobs) dayJobs.push(job);
-      else days.set(day, [job]);
-    }
-    return [...days].map(([day, dayJobs]) => (
+  const list = (shown: readonly Job[]) =>
+    byDay(shown).map(([day, dayJobs]) => (
       <div key={day} className="flex flex-col gap-2">
         <h3 className="px-3 text-xs text-muted-foreground">{day}</h3>
         <RowGroup>
@@ -203,10 +258,9 @@ export function ResultsView({
         </RowGroup>
       </div>
     ));
-  };
 
-  /** A section's title with a checkbox that selects its visible dismissible results. */
-  const heading = (title: string, shown: Job[], total = shown.length) => {
+  /** A section's title with a checkbox that selects its loaded dismissible results. */
+  const heading = (title: string, shown: Job[], count = shown.length) => {
     const ids = shown.filter(canDismiss).map((job) => job.id);
     const all = ids.length > 0 && ids.every((id) => selected.has(id));
     return (
@@ -216,7 +270,7 @@ export function ResultsView({
             aria-label={
               all
                 ? `Clear ${title}`
-                : `Select ${shown.length < total ? "shown" : "all"} in ${title}`
+                : `Select ${shown.length < count ? "shown" : "all"} in ${title}`
             }
             checked={all}
             disabled={dismissing}
@@ -224,7 +278,7 @@ export function ResultsView({
           />
         )}
         <h2 className="text-sm font-medium">
-          {title} <span className="font-normal text-muted-foreground">{total}</span>
+          {title} <span className="font-normal text-muted-foreground">{count}</span>
         </h2>
       </span>
     );
@@ -237,14 +291,16 @@ export function ResultsView({
 
   return (
     <div className="flex flex-col gap-6 pt-2">
+      {problem}
       {repos.length > 1 && (
         <div className="px-3">
           <Select
             items={projects}
-            value={shownRepo}
+            value={page.repo}
             onValueChange={(repo) => {
               setProject(repo);
-              setFinishedLimit(FINISHED_BATCH_SIZE);
+              setLimit(RESULTS_BATCH_SIZE);
+              setSelected(new Set());
             }}
           >
             <SelectTrigger aria-label="Project" size="sm">
@@ -282,19 +338,17 @@ export function ResultsView({
           </div>
         </div>
       )}
-      {sections.running.length > 0 && (
+      {running.length > 0 && (
         <section className="flex flex-col gap-3">
-          <div className="flex min-h-8 items-center px-3">
-            {heading("In progress", sections.running)}
-          </div>
-          {list(sections.running)}
+          <div className="flex min-h-8 items-center px-3">{heading("In progress", running)}</div>
+          {list(running)}
         </section>
       )}
-      {sections.finished.length > 0 && (
+      {total > 0 && (
         <Collapsible open={finishedOpen} onOpenChange={setFinishedOpen}>
           <section className="flex flex-col gap-3">
             <div className="flex min-h-8 items-center gap-2 px-3">
-              {heading("Finished", finished, sections.finished.length)}
+              {heading("Finished", finished, total)}
               <CollapsibleTrigger
                 render={<Button variant="ghost" size="icon-sm" />}
                 aria-label={finishedOpen ? "Hide finished" : "Show finished"}
@@ -314,9 +368,13 @@ export function ResultsView({
                     variant="outline"
                     size="sm"
                     className="self-center"
-                    onClick={() => setFinishedLimit(finishedLimit + FINISHED_BATCH_SIZE)}
+                    aria-disabled={appending && !error}
+                    onClick={() => {
+                      if (error) setRefresh((current) => current + 1);
+                      else if (!appending) setLimit(limit + RESULTS_BATCH_SIZE);
+                    }}
                   >
-                    Load more results
+                    {appending && !error ? "Loading results…" : "Load more results"}
                   </Button>
                 )}
               </div>

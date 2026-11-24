@@ -6,6 +6,7 @@ import type {
   Job,
   Model,
   Pin,
+  ResultsPage,
   RunRequest,
   Snapshot,
   Tier,
@@ -13,9 +14,15 @@ import type {
 import type { clonableRepos } from "./backend/repos.ts";
 import type { DialogAnswer } from "./pi";
 
-async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
+async function call<T>(
+  method: string,
+  path: string,
+  body?: unknown,
+  signal?: AbortSignal,
+): Promise<T> {
   const response = await fetch(path, {
     method,
+    signal,
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const result = await response.json();
@@ -24,6 +31,11 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
 }
 
 export const api = {
+  results: (repo: string | null, limit: number, signal: AbortSignal) => {
+    const query = new URLSearchParams({ limit: String(limit) });
+    if (repo) query.set("repo", repo);
+    return call<ResultsPage>("GET", `/api/results?${query}`, undefined, signal);
+  },
   candidates: () =>
     call<{ at: string | null; items: Candidates["items"]; repos: string[]; root: string }>(
       "GET",

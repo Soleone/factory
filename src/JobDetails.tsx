@@ -130,11 +130,7 @@ function Count({ children }: { children: ReactNode }) {
 function Summary({ job, snapshot, act }: { job: Job; snapshot: Snapshot; act: Act }) {
   const { status, prs, train } = snapshot;
   const last = job.attempts.at(-1);
-  const queued = new Set(
-    snapshot.jobs
-      .filter((each) => each.state !== "removed" && each.item.blueprint === "followup")
-      .map((each) => each.item.title),
-  );
+  const queued = new Set(snapshot.queuedFollowups);
   const worker = status?.workers.find((each) => each.job === job.id);
   const step = job.notes.findLast(
     (note) => note.kind === "step" && note.attempt === job.attempts.length + 1,
