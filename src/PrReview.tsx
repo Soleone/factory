@@ -1,8 +1,18 @@
+import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import Markdown, { type MarkdownToJSX } from "markdown-to-jsx/react";
-import { useEffect, useRef, useState } from "react";
+import { Children, isValidElement, useEffect, useRef, useState, type ComponentProps } from "react";
 import { api } from "@/api";
-import { diffRows } from "@/diff";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogTitle } from "@/components/ui/dialog";
 import { Spinner } from "@/components/ui/spinner";
+import { TabbedDialogContent } from "@/components/variants/dialog";
+import { diffRows } from "@/diff";
+
+const LINK_PROPS = {
+  className: "underline underline-offset-4",
+  target: "_blank",
+  rel: "noreferrer",
+};
 
 /** GitHub-flavored PR bodies, styled with the theme since the page has no prose styles. */
 export const MARKDOWN: MarkdownToJSX.Options = {
@@ -14,9 +24,7 @@ export const MARKDOWN: MarkdownToJSX.Options = {
     h3: { props: { className: "mt-2 font-medium first:mt-0" } },
     ul: { props: { className: "list-disc pl-5" } },
     ol: { props: { className: "list-decimal pl-5" } },
-    a: {
-      props: { className: "underline underline-offset-4", target: "_blank", rel: "noreferrer" },
-    },
+    a: { props: LINK_PROPS },
     code: { props: { className: "rounded bg-muted px-1 font-mono text-xs" } },
     pre: { props: { className: "overflow-auto rounded-md bg-muted p-2" } },
     blockquote: { props: { className: "border-l-2 pl-3 text-muted-foreground" } },
@@ -60,16 +68,145 @@ function Loading({ error }: { error?: string }) {
   );
 }
 
+function DescriptionImage(props: ComponentProps<"img">) {
+  if (!props.src) return <img {...props} />;
+  return (
+    <button
+      type="button"
+      data-description-image
+      aria-label={props.alt ? `Enlarge image: ${props.alt}` : "Enlarge image"}
+      className="max-w-full cursor-zoom-in rounded-sm align-middle focus-visible:outline-2 focus-visible:outline-ring"
+    >
+      <img {...props} />
+    </button>
+  );
+}
+
+/** Keep image buttons outside links, without removing linked text alongside an image. */
+function DescriptionLink({ children, ...props }: ComponentProps<"a">) {
+  const parts = Children.toArray(children);
+  const isImage = (part: (typeof parts)[number]) =>
+    isValidElement(part) && part.type === DescriptionImage;
+  if (!parts.some(isImage)) return <a {...props}>{children}</a>;
+
+  const groups: (typeof parts)[] = [];
+  for (const part of parts) {
+    const last = groups.at(-1);
+    if (last && !isImage(last[0]!) && !isImage(part)) last.push(part);
+    else groups.push([part]);
+  }
+  return groups.map((group, index) =>
+    isImage(group[0]!) ? (
+      group[0]
+    ) : (
+      <a key={index} {...props}>
+        {group}
+      </a>
+    ),
+  );
+}
+
+const DESCRIPTION_MARKDOWN: MarkdownToJSX.Options = {
+  ...MARKDOWN,
+  overrides: {
+    ...MARKDOWN.overrides,
+    a: { props: LINK_PROPS, component: DescriptionLink },
+    img: { component: DescriptionImage },
+  },
+};
+
 export function PrBody({ details }: { details: PrDetails }) {
+  const description = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const [open, setOpen] = useState(false);
+  const [images, setImages] = useState<{ src: string; alt: string }[]>([]);
+  const [index, setIndex] = useState(0);
+  const current = images[index];
+  const move = (by: number) => setIndex((i) => (i + by + images.length) % images.length);
+
+  function show(button: HTMLButtonElement) {
+    // Read the rendered order, including images in lists, tables, and raw HTML.
+    const thumbnails = Array.from(
+      description.current!.querySelectorAll<HTMLImageElement>("[data-description-image] > img"),
+    );
+    const clicked = thumbnails.findIndex((image) => image.parentElement === button);
+    if (clicked < 0) return;
+    trigger.current = button;
+    setImages(thumbnails.map(({ src, currentSrc, alt }) => ({ src: currentSrc || src, alt })));
+    setIndex(clicked);
+    setOpen(true);
+  }
+
   if (details.body === undefined) return <Loading error={details.error} />;
   return (
-    <div className="flex max-w-prose flex-col gap-2 text-sm leading-relaxed wrap-anywhere">
-      {details.body.trim() ? (
-        <Markdown options={MARKDOWN}>{details.body}</Markdown>
-      ) : (
-        <p className="text-muted-foreground">This PR has no description.</p>
-      )}
-    </div>
+    <>
+      <div
+        ref={description}
+        className="flex max-w-prose flex-col gap-2 text-sm leading-relaxed wrap-anywhere"
+        onClick={(event) => {
+          const button = (event.target as HTMLElement).closest<HTMLButtonElement>(
+            "button[data-description-image]",
+          );
+          if (button) show(button);
+        }}
+      >
+        {details.body.trim() ? (
+          <Markdown options={DESCRIPTION_MARKDOWN}>{details.body}</Markdown>
+        ) : (
+          <p className="text-muted-foreground">This PR has no description.</p>
+        )}
+      </div>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <TabbedDialogContent
+          className="top-4 h-[calc(100dvh-2rem)] max-h-none sm:max-w-[calc(100%-2rem)]"
+          finalFocus={trigger}
+          onKeyDown={(event) => {
+            if (event.altKey || event.ctrlKey || event.metaKey) return;
+            // The details dialog listens for number keys on the document to switch tabs.
+            if (/^[1-9]$/.test(event.key)) event.stopPropagation();
+            if (event.key.toLowerCase() === "x") {
+              event.preventDefault();
+              setOpen(false);
+            } else if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+              event.preventDefault();
+              move(event.key === "ArrowLeft" ? -1 : 1);
+            }
+          }}
+        >
+          <DialogTitle className="sr-only">Description images</DialogTitle>
+          {current && (
+            <img
+              src={current.src}
+              alt={current.alt}
+              className="mt-6 min-h-0 w-full flex-1 object-contain"
+            />
+          )}
+          <div className="flex items-center justify-center gap-3">
+            <Button
+              variant="outline"
+              size="icon-sm"
+              aria-label="Previous image"
+              disabled={images.length < 2}
+              onClick={() => move(-1)}
+            >
+              <ChevronLeftIcon />
+            </Button>
+            <span role="status" className="tabular-nums">
+              {index + 1} / {images.length}
+            </span>
+            <Button
+              variant="outline"
+              size="icon-sm"
+              aria-label="Next image"
+              disabled={images.length < 2}
+              onClick={() => move(1)}
+            >
+              <ChevronRightIcon />
+            </Button>
+          </div>
+        </TabbedDialogContent>
+      </Dialog>
+    </>
   );
 }
 

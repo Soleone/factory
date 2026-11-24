@@ -15,6 +15,7 @@ import {
   type TrainCar,
 } from "@/backend/types.ts";
 import { Button } from "@/components/ui/button";
+import { DialogClose } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/tooltip/tooltip";
 import { agentName, clock, itemTitle } from "@/format";
 import { Answer } from "@/JobNotes";
@@ -98,17 +99,27 @@ export function Result({
 
   const pendingLabel = { merge: "Merging…", rebase: "Rebasing…", close: "Closing…" };
   // Filled in the details footer, where it's the one thing to do; outlined in the busy row.
-  const primaryButton = (variant: "default" | "outline") =>
-    primary && (
-      <Button variant={variant} size="sm" disabled={disabled} onClick={() => changePr(primary)}>
+  const primaryButton = (variant: "default" | "outline") => {
+    if (!primary) return null;
+    const label = (
+      <>
         {primary === "rebase" ? (
           <GitBranchIcon data-icon="inline-start" />
         ) : (
           <GitMergeIcon data-icon="inline-start" />
         )}
         {pending ? pendingLabel[pending] : primary === "rebase" ? "Rebase" : "Merge"}
-      </Button>
+      </>
     );
+    const props = { variant, size: "sm" as const, disabled, onClick: () => changePr(primary) };
+    return variant === "default" && primary === "merge" ? (
+      <DialogClose disabled={disabled} render={<Button {...props} />}>
+        {label}
+      </DialogClose>
+    ) : (
+      <Button {...props}>{label}</Button>
+    );
+  };
   const retry = job.state === "failed" && (
     <Button
       variant="outline"
