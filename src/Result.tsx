@@ -100,11 +100,13 @@ export function Result({
   }
 
   const pendingLabel = { merge: "Merging…", rebase: "Rebasing…", close: "Closing…" };
-  const primaryButton = primary && (
-    <Button variant="outline" size="sm" disabled={disabled} onClick={() => changePr(primary)}>
-      {pending ? pendingLabel[pending] : primary === "rebase" ? "Rebase" : "Merge"}
-    </Button>
-  );
+  // Filled in the details footer, where it's the one thing to do; outlined in the busy row.
+  const primaryButton = (variant: "default" | "outline") =>
+    primary && (
+      <Button variant={variant} size="sm" disabled={disabled} onClick={() => changePr(primary)}>
+        {pending ? pendingLabel[pending] : primary === "rebase" ? "Rebase" : "Merge"}
+      </Button>
+    );
   const retry = job.state === "failed" && (
     <Button
       variant="outline"
@@ -174,7 +176,7 @@ export function Result({
                   </Button>
                 )}
                 {retry}
-                {primaryButton}
+                {primaryButton("default")}
               </>
             }
           />
@@ -198,7 +200,7 @@ export function Result({
       }
       below={ask && <Answer job={job} question={ask} act={act} />}
     >
-      {primaryButton}
+      {primaryButton("outline")}
       {retry}
       {canDismiss(job) && (
         <Tooltip>

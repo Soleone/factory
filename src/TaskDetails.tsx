@@ -13,8 +13,7 @@ import {
 import Markdown from "markdown-to-jsx/react";
 import { useEffect, useState, type ReactNode } from "react";
 import { api, type Act } from "@/api";
-import { dayOf, EntryMark, jobEntries, StepNumber } from "@/ActivityView";
-import { openAssumptions, prUrl, type Item, type Job, type Snapshot } from "@/backend/types.ts";
+import { prUrl, type Item, type Job, type Snapshot } from "@/backend/types.ts";
 import {
   Dialog,
   DialogDescription,
@@ -23,16 +22,13 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { AnchoredDialogContent } from "@/components/variants/dialog";
+import { AnchoredDialogContent, TabbedDialogContent } from "@/components/variants/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
-import { clock, minutesSince, repoName } from "@/format";
-import { AttemptFile } from "@/AttemptFile";
-import { Answer, Outcome } from "@/JobNotes";
+import { repoName } from "@/format";
+import { JobDetails } from "@/JobDetails";
 import { MARKDOWN } from "@/PrReview";
-import { PrLine, TrainLine } from "@/PullRequest";
-import { TierBadge } from "@/TierBadge";
 
 /** From `workwork --help`. */
 export const ATTENTION: Record<string, string> = {
@@ -160,7 +156,6 @@ export function TaskDetails({
   act: Act;
   actions?: ReactNode;
 }) {
-  const state = taskState(job, snapshot.prs);
   return (
     <Dialog>
       <DialogTrigger
@@ -173,50 +168,67 @@ export function TaskDetails({
       >
         <TaskTitle item={item} bare={bare} />
       </DialogTrigger>
-      <AnchoredDialogContent className={job ? "sm:max-w-5xl" : "sm:max-w-3xl"}>
-        <DialogHeader className="mr-8">
-          <div className="flex items-start gap-3">
-            <span className="mt-0.5">
-              <StateIcon state={state} />
-            </span>
-            <div className="flex min-w-0 flex-col gap-2">
-              <DialogTitle>
-                <TaskTitle item={item} />
-              </DialogTitle>
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground">
-                <StatePill state={state} />
-                <DialogDescription>
-                  {item.label} · {item.blueprint} · {item.attention}
-                </DialogDescription>
-              </div>
-            </div>
-          </div>
-        </DialogHeader>
-        {job ? (
-          <div className="-mx-4 -mb-4 grid border-t md:max-h-[65dvh] md:grid-cols-[3fr_2fr]">
-            <div className="flex min-w-0 flex-col gap-3 overflow-auto p-4">
-              <Label>The task</Label>
-              <Task item={item} jobId={job.id} />
-              <About item={item} blueprint={blueprint} />
-            </div>
-            <div className="flex min-w-0 flex-col gap-3 overflow-auto bg-muted/30 p-4 md:border-l">
-              <Story job={job} snapshot={snapshot} act={act} />
-            </div>
-          </div>
-        ) : (
+      {job ? (
+        // A fixed height, so switching tabs doesn't make the dialog jump.
+        <TabbedDialogContent className="h-[min(48rem,calc(100dvh-8rem))] sm:max-w-5xl">
+          <JobDetails
+            item={item}
+            job={job}
+            blueprint={blueprint}
+            snapshot={snapshot}
+            act={act}
+            actions={actions}
+          />
+        </TabbedDialogContent>
+      ) : (
+        <AnchoredDialogContent className="sm:max-w-3xl">
+          <TaskHeader item={item} state="candidate" />
           <div className="flex max-h-[65dvh] flex-col gap-3 overflow-auto">
             <Task item={item} />
             <About item={item} blueprint={blueprint} />
           </div>
-        )}
-        {actions && <DialogFooter>{actions}</DialogFooter>}
-      </AnchoredDialogContent>
+          {actions && <DialogFooter>{actions}</DialogFooter>}
+        </AnchoredDialogContent>
+      )}
     </Dialog>
   );
 }
 
+/** The state, title and what kind of task it is; `children` go at the end of the facts line. */
+export function TaskHeader({
+  item,
+  state,
+  children,
+}: {
+  item: Item;
+  state: TaskState;
+  children?: ReactNode;
+}) {
+  return (
+    <DialogHeader className="mr-8">
+      <div className="flex items-start gap-3">
+        <span className="mt-0.5">
+          <StateIcon state={state} />
+        </span>
+        <div className="flex min-w-0 flex-1 flex-col gap-2">
+          <DialogTitle>
+            <TaskTitle item={item} />
+          </DialogTitle>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground">
+            <StatePill state={state} />
+            <DialogDescription>
+              {item.label} · {item.blueprint} · {item.attention}
+            </DialogDescription>
+            {children}
+          </div>
+        </div>
+      </div>
+    </DialogHeader>
+  );
+}
+
 /** The job's prompt, or the one workwork writes for the candidate. */
-function Task({ item, jobId }: { item: Item; jobId?: string }) {
+export function Task({ item, jobId }: { item: Item; jobId?: string }) {
   const [prompt, setPrompt] = useState<string>();
   const [error, setError] = useState<string>();
 
@@ -254,147 +266,6 @@ function Task({ item, jobId }: { item: Item; jobId?: string }) {
   );
 }
 
-/** What needs attention now, if anything, over everything that happened, newest first. */
-function Story({ job, snapshot, act }: { job: Job; snapshot: Snapshot; act: Act }) {
-  const { status, prs, train } = snapshot;
-  const last = job.attempts.at(-1);
-  const queued = new Set(
-    snapshot.jobs
-      .filter((each) => each.state !== "removed" && each.item.blueprint === "followup")
-      .map((each) => each.item.title),
-  );
-  const worker = status?.workers.find((each) => each.job === job.id);
-  const step = job.notes.findLast(
-    (note) => note.kind === "step" && note.attempt === job.attempts.length + 1,
-  );
-  const question =
-    job.state === "blocked" ? job.notes.findLast((note) => note.kind === "ask") : undefined;
-  const url = prUrl(job);
-  const entries = jobEntries(job).sort((a, b) => b.at.localeCompare(a.at));
-  const days = new Map<string, typeof entries>();
-  for (const entry of entries) {
-    const day = dayOf(entry.at);
-    days.set(day, [...(days.get(day) ?? []), entry]);
-  }
-
-  return (
-    <>
-      {worker && status && (
-        <Now className="border-primary/40">
-          <span className="flex items-center gap-2 font-medium">
-            <StateIcon state="running" />
-            {worker.id} working, {minutesSince(worker.since)} min
-          </span>
-          {step && (
-            <span>
-              {step.text}
-              {step.of ? ` (${step.done ?? 0}/${step.of})` : ""}
-            </span>
-          )}
-          <span className="text-muted-foreground">
-            {[worker.activity, worker.context && `${Math.round(worker.context / 1000)}k context`]
-              .filter(Boolean)
-              .join(" · ")}
-          </span>
-        </Now>
-      )}
-      <Facts job={job} act={act} />
-      {question && <Answer job={job} question={question} act={act} />}
-      {last?.error && (
-        <Now className="border-destructive/40 text-destructive">{last.error.split("\n")[0]}</Now>
-      )}
-      {url && (
-        <Now className={prs[url]?.state === "MERGED" ? "border-success/40" : ""}>
-          <PrLine jobId={job.id} url={url} pr={prs[url]} />
-          <TrainLine car={train[job.id]} />
-        </Now>
-      )}
-      <Outcome job={job} act={act} queued={queued} />
-      <Label>Log</Label>
-      <div className="flex flex-col gap-3 text-sm">
-        {[...days].map(([day, dayEntries]) => (
-          <section key={day} className="flex flex-col gap-1.5">
-            <h4 className="text-xs text-muted-foreground">{day}</h4>
-            <ol className="flex flex-col">
-              {dayEntries.map((entry) => (
-                <li
-                  key={`${entry.at} ${entry.text}`}
-                  className="group grid grid-cols-[4.5rem_1rem_1fr] gap-x-2"
-                >
-                  <time
-                    dateTime={entry.at}
-                    className="text-right whitespace-nowrap text-muted-foreground tabular-nums"
-                  >
-                    {clock(entry.at)}
-                  </time>
-                  {/* The rail runs from under each mark to the next one, and stops at the day's last. */}
-                  <span className="relative flex justify-center pt-0.5 before:absolute before:top-5.5 before:bottom-0.5 before:w-px before:bg-border group-last:before:hidden">
-                    <EntryMark entry={entry} />
-                  </span>
-                  <span className={`pb-3 wrap-anywhere ${entry.tone ?? ""}`}>
-                    {entry.step && <StepNumber step={entry.step} />}
-                    {entry.text}{" "}
-                    {entry.ended && (
-                      <AttemptFile log={entry.ended.log} agent={entry.ended.agent} kind="log" />
-                    )}
-                  </span>
-                </li>
-              ))}
-            </ol>
-          </section>
-        ))}
-      </div>
-    </>
-  );
-}
-
-/** What the job is held to and what's left for the user to check, for jobs that have any. */
-function Facts({ job, act }: { job: Job; act: Act }) {
-  const assumed = openAssumptions(job);
-  const facts = [
-    job.escalations && `moved up a tier ${job.escalations}×`,
-    job.gates.length > 0 && `gates ${job.gates.map((gate) => `\`${gate}\``).join(", ")}`,
-    job.touches && `touches ${job.touches.length ? job.touches.join(", ") : "anything"}`,
-    job.needs.length > 0 && `needs ${job.needs.join(", ")}`,
-  ].filter(Boolean);
-  if (!job.tier && facts.length === 0 && job.unverified.length === 0 && assumed.length === 0)
-    return null;
-  return (
-    <div className="flex flex-col gap-2 text-sm">
-      {(job.tier || facts.length > 0) && (
-        <p className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-          {job.tier && <TierBadge tier={job.tier} />}
-          {facts.join(" · ")}
-        </p>
-      )}
-      {job.unverified.map((need) => (
-        <Now key={need} className="border-warning/40">
-          <span className="flex flex-wrap items-center gap-2">
-            <span className="flex-1">Not verified: {need}</span>
-            <Button size="sm" variant="outline" onClick={() => act(() => api.verify(job.id, need))}>
-              Checked
-            </Button>
-          </span>
-        </Now>
-      ))}
-      {assumed.map((note) => (
-        <Now key={note.at} className="border-warning/40">
-          <span>
-            Assumed <strong>{note.assumed}</strong>, asked: {note.text}
-          </span>
-          <span className="flex gap-2">
-            <Button size="sm" onClick={() => act(() => api.answer(job.id, "fine", note.index))}>
-              Fine
-            </Button>
-            <span className="text-xs text-muted-foreground">or answer below to queue a change</span>
-          </span>
-          <AssumeAnswer job={job} index={note.index} act={act} />
-        </Now>
-      ))}
-    </div>
-  );
-}
-
 /** Answers the assumption at index among the job's notes. */
 export function AssumeAnswer({ job, index, act }: { job: Job; index: number; act: Act }) {
   const [text, setText] = useState("");
@@ -418,20 +289,8 @@ export function AssumeAnswer({ job, index, act }: { job: Job; index: number; act
   );
 }
 
-function Now({ className, children }: { className: string; children: ReactNode }) {
-  return (
-    <div className={`flex flex-col gap-2 rounded-md border bg-popover p-2 text-sm ${className}`}>
-      {children}
-    </div>
-  );
-}
-
-function Label({ children }: { children: ReactNode }) {
-  return <h3 className="text-xs font-medium text-muted-foreground">{children}</h3>;
-}
-
 /** What the blueprint and the review attention mean, for whoever decides on the result. */
-function About({ item, blueprint }: { item: Item; blueprint?: string }) {
+export function About({ item, blueprint }: { item: Item; blueprint?: string }) {
   return (
     <p className="text-xs text-muted-foreground">
       {blueprint && (

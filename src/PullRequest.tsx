@@ -17,7 +17,6 @@ import {
 } from "@/backend/types.ts";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/tooltip/tooltip";
-import { PrReview } from "@/PrReview";
 
 type Prs = Snapshot["prs"];
 
@@ -97,7 +96,7 @@ export function TrainLine({ car }: { car?: TrainCar }) {
   return car && TRAIN_STEP[car.step] ? <span>{TRAIN_STEP[car.step]}</span> : null;
 }
 
-export function PrLine({ jobId, url, pr }: { jobId: string; url: string; pr?: Pr }) {
+export function PrLine({ url, pr }: { url: string; pr?: Pr }) {
   const checks = pr?.state === "OPEN" && CHECKS[pr.checks];
   return (
     <span className="flex flex-wrap items-center gap-x-3">
@@ -125,7 +124,6 @@ export function PrLine({ jobId, url, pr }: { jobId: string; url: string; pr?: Pr
             <span className="text-destructive">−{pr.deletions}</span> in {pr.files.length}{" "}
             {pr.files.length === 1 ? "file" : "files"}
           </span>
-          <PrReview jobId={jobId} url={url} pr={pr} />
         </>
       ) : (
         <span>asking GitHub…</span>
