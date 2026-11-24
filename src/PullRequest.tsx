@@ -3,6 +3,7 @@ import {
   CircleDashedIcon,
   CircleIcon,
   CircleXIcon,
+  GitMergeIcon,
   GitPullRequestIcon,
 } from "lucide-react";
 import type { ReactNode } from "react";
@@ -69,6 +70,7 @@ export function MergeButton({
       {/* A disabled button ignores the pointer, so the wrapper shows the hint. */}
       <TooltipTrigger render={<span className={className} />}>
         <Button variant="outline" size="sm" disabled={disabled} onClick={onClick}>
+          <GitMergeIcon data-icon="inline-start" />
           {children}
         </Button>
       </TooltipTrigger>

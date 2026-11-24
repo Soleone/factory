@@ -1,3 +1,4 @@
+import { CheckCheckIcon, CheckIcon } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { api, type Act } from "@/api";
 import { dayOf, EntryMark, jobEntries, StepNumber } from "@/ActivityView";
@@ -247,6 +248,7 @@ function Facts({ job, act }: { job: Job; act: Act }) {
           <span className="flex flex-wrap items-center gap-2">
             <span className="flex-1">Not verified: {need}</span>
             <Button size="sm" variant="outline" onClick={() => act(() => api.verify(job.id, need))}>
+              <CheckCheckIcon data-icon="inline-start" />
               Checked
             </Button>
           </span>
@@ -259,6 +261,7 @@ function Facts({ job, act }: { job: Job; act: Act }) {
           </span>
           <span className="flex gap-2">
             <Button size="sm" onClick={() => act(() => api.answer(job.id, "fine", note.index))}>
+              <CheckIcon data-icon="inline-start" />
               Fine
             </Button>
             <span className="text-xs text-muted-foreground">or answer below to queue a change</span>

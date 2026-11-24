@@ -23,11 +23,10 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { AnchoredDialogContent, TabbedDialogContent } from "@/components/variants/dialog";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { repoName } from "@/format";
 import { JobDetails } from "@/JobDetails";
+import { Reply } from "@/JobNotes";
 import { MARKDOWN } from "@/PrReview";
 
 /** From `workwork --help`. */
@@ -268,24 +267,11 @@ export function Task({ item, jobId }: { item: Item; jobId?: string }) {
 
 /** Answers the assumption at index among the job's notes. */
 export function AssumeAnswer({ job, index, act }: { job: Job; index: number; act: Act }) {
-  const [text, setText] = useState("");
   return (
-    <form
-      className="flex gap-2"
-      onSubmit={(event) => {
-        event.preventDefault();
-        void act(() => api.answer(job.id, text, index));
-      }}
-    >
-      <Input
-        value={text}
-        onChange={(event) => setText(event.target.value)}
-        placeholder="Your answer"
-      />
-      <Button type="submit" size="sm" variant="outline" disabled={!text.trim()}>
-        Answer
-      </Button>
-    </form>
+    <Reply
+      placeholder="Answer, or keep the assumption"
+      send={(text) => act(() => api.answer(job.id, text, index))}
+    />
   );
 }
 

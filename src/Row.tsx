@@ -23,7 +23,7 @@ export function Row({
 }: {
   leading?: ReactNode;
   title: ReactNode;
-  meta: ReactNode;
+  meta?: ReactNode;
   /** Blocks that can't sit in the description's paragraph, like a form. */
   below?: ReactNode;
   /** How much of its time a running job has used, from 0 to 1, as a bar along the bottom. */
@@ -47,10 +47,13 @@ export function Row({
       {/* min-w-0 lets long text truncate instead of wrapping the content under the icon. */}
       <ItemContent className="min-w-0">
         <ItemTitle>{title}</ItemTitle>
-        <ItemDescription>{meta}</ItemDescription>
+        {meta && <ItemDescription>{meta}</ItemDescription>}
         {below}
       </ItemContent>
-      {children && <ItemActions>{children}</ItemActions>}
+      {/* A form below would center the actions on it; keep them on the title line. */}
+      {children && (
+        <ItemActions className={below ? "self-start" : undefined}>{children}</ItemActions>
+      )}
     </RowItem>
   );
 }

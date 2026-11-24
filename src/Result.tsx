@@ -1,4 +1,4 @@
-import { XIcon } from "lucide-react";
+import { GitBranchIcon, GitMergeIcon, RotateCcwIcon, XIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { api, type Act } from "@/api";
 import {
@@ -104,6 +104,11 @@ export function Result({
   const primaryButton = (variant: "default" | "outline") =>
     primary && (
       <Button variant={variant} size="sm" disabled={disabled} onClick={() => changePr(primary)}>
+        {primary === "rebase" ? (
+          <GitBranchIcon data-icon="inline-start" />
+        ) : (
+          <GitMergeIcon data-icon="inline-start" />
+        )}
         {pending ? pendingLabel[pending] : primary === "rebase" ? "Rebase" : "Merge"}
       </Button>
     );
@@ -114,6 +119,7 @@ export function Result({
       disabled={disabled}
       onClick={() => act(() => api.retry(job.id))}
     >
+      <RotateCcwIcon data-icon="inline-start" />
       Retry
     </Button>
   );

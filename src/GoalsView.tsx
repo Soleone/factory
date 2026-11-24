@@ -2,6 +2,8 @@ import { useState, type ReactNode } from "react";
 import Markdown from "markdown-to-jsx/react";
 import {
   ArrowLeftIcon,
+  CheckCheckIcon,
+  CheckIcon,
   ChevronRightIcon,
   FlameIcon,
   GitBranchIcon,
@@ -244,6 +246,7 @@ function GoalView({
             {node.item.title}: {need}
           </span>
           <Button size="sm" variant="outline" onClick={() => act(() => api.verify(node.id, need))}>
+            <CheckCheckIcon data-icon="inline-start" />
             Checked
           </Button>
         </li>
@@ -725,6 +728,7 @@ function Assumption({
           size="sm"
           onClick={() => act(() => api.answer(node.id, "fine", index))}
         >
+          <CheckIcon data-icon="inline-start" />
           Fine
         </Button>
       </form>

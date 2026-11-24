@@ -1,4 +1,6 @@
 import {
+  CheckCheckIcon,
+  CheckIcon,
   CircleXIcon,
   EyeIcon,
   FlagIcon,
@@ -16,6 +18,7 @@ import { Result, reviewerOf } from "@/Result";
 import { Row } from "@/Row";
 import { RowGroup } from "@/components/variants/item";
 import { AssumeAnswer, TaskDetails } from "@/TaskDetails";
+import { Said } from "@/JobNotes";
 
 const ICON = {
   ask: <MessageCircleQuestionIcon className="size-4 text-warning" />,
@@ -162,15 +165,15 @@ function InboxRow({
         <Row
           leading={ICON.assume}
           title={title}
-          meta={
+          below={
             <>
-              Assumed <strong className="text-foreground">{item.note.assumed}</strong>, asked:{" "}
-              {item.note.text}
+              <Said label={`assumed ${item.note.assumed}`}>{item.note.text}</Said>
+              <AssumeAnswer job={job} index={item.note.index} act={act} />
             </>
           }
-          below={<AssumeAnswer job={job} index={item.note.index} act={act} />}
         >
           <Button size="sm" onClick={() => act(() => api.answer(job.id, "fine", item.note.index))}>
+            <CheckIcon data-icon="inline-start" />
             Fine
           </Button>
         </Row>
@@ -183,6 +186,7 @@ function InboxRow({
             size="sm"
             onClick={() => act(() => api.verify(job.id, item.need))}
           >
+            <CheckCheckIcon data-icon="inline-start" />
             Checked
           </Button>
         </Row>

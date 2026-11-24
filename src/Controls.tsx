@@ -1,3 +1,4 @@
+import { PowerIcon } from "lucide-react";
 import { useState } from "react";
 import { api, type Act } from "@/api";
 import {
@@ -64,6 +65,7 @@ export function Controls({ snapshot, act }: { snapshot: Snapshot; act: Act }) {
             />
           }
         >
+          <PowerIcon data-icon="inline-start" />
           {on ? "Turn off" : "Turn on"}
         </TooltipTrigger>
         <TooltipContent>Shift-click to turn on with your defaults</TooltipContent>
