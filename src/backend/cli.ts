@@ -8,6 +8,9 @@ import {
   addOwnJob,
   addNote,
   answer,
+  moveJob,
+  pinJob,
+  queueFollowup,
   queueReview,
   readJobs,
   record,
@@ -19,6 +22,7 @@ import {
   approveGoal,
   cancelGoal,
   checkPlan,
+  dropNode,
   findGoal,
   importPlan,
   newGoal,
@@ -26,6 +30,7 @@ import {
   queueReplan,
   readPlan,
   resumeGoal,
+  retierNode,
   showGoal,
   type Plan,
 } from "./goals.ts";
@@ -40,49 +45,82 @@ import {
   type Confidence,
   type Item,
   type Job,
+  type Pin,
   type Status,
   presetId,
   type Tier,
+  TIERS,
 } from "./types.ts";
 import { serve } from "./web.ts";
 // Bundled into dist, so it works from source and from the package alike.
 import packageJson from "../../package.json" with { type: "json" };
 
-const USAGE = `factory: works workwork candidates and long goals with headless coding agents
+/** `factory` alone: enough to start, and where the rest is. Each topic is `factory help TOPIC`. */
+const OVERVIEW = `factory: works coding jobs with headless agents, from workwork candidates and long goals
 
-  factory start [run options]  turn the factory on, in the background
-  factory run [run options]    the same, in the foreground
-  factory stop [--kill]        turn it off; agents at work finish, and the next start records them;
-                               --kill stops them too and puts their jobs back in the queue
-  factory status               on or off, what each agent is doing, the queue
-  factory add <id>... [--repo DIR] [--agent NAME] [--model M] [--effort E] [--after JOB]...
-                               queue workwork candidates from DIR (default: here), ahead of auto jobs;
-                               --after: start once that job is done
+  factory status               on or off, what each worker does, questions waiting, the queue
+  factory report [--all]       results of the last run (or all): outcome, PR, what waits on the user
+  factory add <id>... --repo DIR
+                               queue workwork candidates; --prompt FILE --tier T for a job of your own
+
+More, one topic at a time:
+  factory help add       queue work: candidates, blueprints, your own prompt, order and pins
+  factory help results   PRs: review, merge train, rebase, close; follow-ups, retry, remove
+  factory help inbox     answer questions and assumptions, mark work verified
+  factory help goals     one large task as a graph of jobs
+  factory help run       turn the factory on and off, auto mode, serve
+  factory help job       for the agent working a job: step, note, ask, result
+  factory help all       everything
+
+State: ${STATE}`;
+
+const HELP: Record<string, string> = {
+  add: `Queue work (picks go ahead of auto jobs):
+  factory add <id>... [--repo DIR] [pin] [--after JOB]...
+                               workwork candidates from DIR (default: here); \`workwork --json\` in a
+                               repo lists them, \`workwork prompt <id>\` shows one in full
   factory add --blueprint NAME [--repo DIR] [<id>...]
-                               queue what a blueprint finds in DIR, on-request ones too; ids pick some
-  factory add --prompt FILE --tier T [--repo DIR] [--title TEXT]
-                               one job of your own, without workwork, for a tier
+                               what a blueprint finds in DIR, on-request ones too; ids pick some;
+                               \`workwork blueprints\` lists them
+  factory add --prompt FILE --tier T [--repo DIR] [--title TEXT] [--after JOB]...
+                               one job of your own, without workwork
+  pin: --tier communicator|builder|grunt, or --preset ID, or --agent NAME [--model M] [--effort E]
+  --after JOB                  start once that job is done
+
+Change the queue:
+  factory move <job> <N>       put a queued pick at position N (1 is next) among the picks
+  factory pin <job> [pin]      change what a queued job runs on; no pin: any free worker
+  factory remove <job>...      take jobs out of the queue or the results, with their kept branches
+  factory wait <job> [--timeout MIN]
+                               block until the job is done, failed or blocked; exits 1 at the timeout
+  factory tail                 follow what happens to every job, one line each`,
+
+  results: `Results (factory report --all lists them, with each job's PR):
+  gh pr view <url>, gh pr diff <url>
+                               read a PR
+  factory merge <job>...       put the jobs' PRs on the merge train: merged one at a time per repo,
+                               rebasing as it goes; a real conflict queues a job to resolve it
+  factory rebase <job>         rebase the job's PR onto its base now
+  factory close <job>          close the job's PR without merging
   factory review <job> [--agent NAME]
                                queue a review of the job's PR once it's done, by another role than
                                the author's or by that agent; its findings queue a fix on the PR
-  factory merge <job>...       put the jobs' PRs on the merge train of the running factory serve
-                               (at $FACTORY_URL, default http://127.0.0.1:7040)
-  factory wait <job> [--timeout MIN]
-                               block until the job is done, failed or blocked; exits 1 at the timeout
-  factory tail                 follow what happens to every job, one line each
-  factory remove <job>         take a job out of the queue or the results, with its kept branches
-  factory retry <job>          queue a failed job again, with the same agent
-  factory answer <job> "<text>" [--assumption N]
-                               answer the question a blocked job asked, and queue it again; or
-                               an assumption it made (N, else the oldest): anything but "fine"
-                               queues a change
-  factory verify <job> [NEED]  you checked what the job couldn't (all of it, or one need)
-  factory auto on|off          let auto mode keep the queue topped up from workwork, or not
-  factory report [--all]       the last run (or every run): outcome, agent, job, PR/issue link or log
-  factory serve [--port 7040] [--host 127.0.0.1]
-                               a web page to watch, browse candidates, queue them and turn it on or off
+  factory followup <job> "<task>"
+                               queue a follow-up the job reported, as its own job
+  factory retry <job>...       queue failed jobs again
+  factory remove <job>...      clean up: out of the results, with their kept branches
+merge, rebase and close go through the running factory serve ($FACTORY_URL, default
+http://127.0.0.1:7040), like the page.`,
 
-Goals: one large task as a graph of jobs on its own integration branch
+  inbox: `What waits on the user (factory status shows questions, factory report the rest):
+  factory answer <job> "<text>"
+                               answer the question a blocked job asked; it goes on in the same session
+  factory answer <job> "<text>" --assumption N
+                               answer an assumption it made (N, else the oldest): "fine" closes it,
+                               anything else queues a job to change it
+  factory verify <job> [NEED]  the user checked what the job couldn't (all of it, or one need)`,
+
+  goals: `Goals: one large task as a graph of jobs on its own integration branch
   factory goal new "<title>" --repo DIR|--project NAME [--brief FILE]
                                queue a decomposer; the goal waits for approval once its plan is in;
                                --project creates $SRC/NAME and a private GitHub repo for it
@@ -92,11 +130,29 @@ Goals: one large task as a graph of jobs on its own integration branch
                                the graph: layers, states, tiers, the critical path, unverified work
   factory goal approve|pause|resume|cancel GOAL
   factory goal replan GOAL "<why>"
+  factory goal tier <node> <tier>
+                               move a node that hasn't started to another tier
+  factory goal drop <node>     drop a node that hasn't started; what waited on it waits on its deps
   factory goal export GOAL [--out FILE]
                                zip everything about the goal (jobs, events, prompts, agent logs,
-                               memory, plan, PRs) for an agent to review how it went
+                               memory, plan, PRs) for an agent to review how it went`,
 
-For the agent working a job (the job is $FACTORY_JOB, or --job ID):
+  run: `Running:
+  factory start [run options]  turn the factory on, in the background
+  factory run [run options]    the same, in the foreground
+  factory stop [--kill]        turn it off; agents at work finish, and the next start records them;
+                               --kill stops them too and puts their jobs back in the queue
+  factory auto on|off          let auto mode keep the queue topped up from workwork, or not
+  factory serve [--port 7040] [--host 127.0.0.1]
+                               a web page to watch, browse candidates, queue them and turn it on or off
+
+Run options (defaults from settings.json):
+  --workers ID=N               this run's count for a worker, e.g. --workers claude=0; repeat per worker
+  --limit N|none               usage-limit hits per provider before its workers stop; none: wait for each reset
+  --until HH:MM                start nothing new after this local time
+  --idle MIN                   minutes without a sign of life before an attempt times out`,
+
+  job: `For the agent working a job (the job is $FACTORY_JOB, or --job ID):
   factory step "<what>" [--done N --of M]
                                progress in your own words; the job shows the latest
   factory note "<text>"        something worth knowing later
@@ -106,15 +162,16 @@ For the agent working a job (the job is $FACTORY_JOB, or --job ID):
   factory result "<summary>" [--confidence low|medium|high] [--url LINK] [--followup "<task>"]...
                  [--unverified "<what>"]...
                                what the job delivered, tasks that deserve their own job, and what
-                               you couldn't check
+                               you couldn't check`,
+};
 
-Run options (defaults from settings.json):
-  --workers ID=N               this run's count for a worker, e.g. --workers claude=0; repeat per worker
-  --limit N|none               usage-limit hits per provider before its workers stop; none: wait for each reset
-  --until HH:MM                start nothing new after this local time
-  --idle MIN                   minutes without a sign of life before an attempt times out
-
-State: ${STATE}`;
+function help(topic: string | undefined): string {
+  if (topic === undefined) return OVERVIEW;
+  if (topic === "all") return [OVERVIEW, ...Object.values(HELP)].join("\n\n");
+  const found = HELP[topic];
+  if (!found) throw new Error(`no help on ${topic}; topics: ${Object.keys(HELP).join(", ")}, all`);
+  return found;
+}
 
 async function main(): Promise<void> {
   const { values, positionals } = parseArgs({
@@ -132,6 +189,7 @@ async function main(): Promise<void> {
       prompt: { type: "string" },
       blueprint: { type: "string" },
       tier: { type: "string" },
+      preset: { type: "string" },
       title: { type: "string" },
       brief: { type: "string" },
       out: { type: "string" },
@@ -156,7 +214,8 @@ async function main(): Promise<void> {
     },
   });
   const [command, ...args] = positionals;
-  if (values.help || command === undefined) return console.log(USAGE);
+  if (values.help || command === undefined || command === "help")
+    return console.log(help(command === "help" ? args[0] : undefined));
   if (values.version) return console.log(packageJson.version);
   mkdirSync(STATE, { recursive: true });
   if (command === "status") return status();
@@ -188,6 +247,15 @@ async function main(): Promise<void> {
   if (command === "result") return result(args[0], values);
   if (command === "review") return review(args[0], values.agent);
   if (command === "merge") return merge(args);
+  if (command === "rebase" || command === "close") return prAction(command, args[0]);
+  if (command === "followup") {
+    const job = queueFollowup(STATE, need(args[0], "a job"), text(args[1]));
+    return console.log(job ? `queued ${job.id}: ${job.item.title}` : "already queued");
+  }
+  if (command === "move") {
+    return moveJob(STATE, need(args[0], "a job"), count(args[1] ?? "", "the position") - 1);
+  }
+  if (command === "pin") return pinJob(STATE, need(args[0], "a job"), pinOf(values));
   if (command === "wait") return wait(args[0], values.timeout);
   if (command === "tail") return tail();
   if (command === "add") return add(args, values);
@@ -197,7 +265,7 @@ async function main(): Promise<void> {
     return console.log(pid ? `turned off (pid ${pid})` : "already off");
   }
   if (command !== "start" && command !== "run")
-    throw new Error(`unknown command ${command}\n\n${USAGE}`);
+    throw new Error(`unknown command ${command}\n\n${OVERVIEW}`);
 
   const options = runOptions(values);
   if (command === "start") {
@@ -262,6 +330,7 @@ async function add(
     after?: string[];
     prompt?: string;
     tier?: string;
+    preset?: string;
     title?: string;
   },
 ): Promise<void> {
@@ -278,17 +347,10 @@ async function add(
     if (!item) throw new Error(`workwork has no candidate ${id} in ${repo}`);
     return item;
   });
-  if (values.agent) agent(values.agent);
   for (const after of values.after ?? [])
     if (!readJobs(STATE).some((job) => job.id === after))
       throw new Error(`--after names no job ${after}; factory status lists them`);
-  const pin = {
-    agent: values.agent,
-    model: values.model?.[0],
-    effort: values.effort?.[0],
-    after: values.after,
-  };
-  const added = addJobs(STATE, items, "pick", pin);
+  const added = addJobs(STATE, items, "pick", { ...pinOf(values), after: values.after });
   for (const job of added) console.log(`queued ${job.id}: ${job.item.label} ${job.item.id}`);
   for (const item of items.filter((item) => !added.some((job) => job.item === item)))
     console.log(`already queued: ${item.label} ${item.id}`);
@@ -374,6 +436,8 @@ async function goal(
       return console.log("no goals; factory goal new or factory goal import starts one");
     return console.log(goals.map((each) => showGoal(jobs, each)).join("\n\n"));
   }
+  if (sub === "tier") return retierNode(STATE, need(target, "a node"), why as Tier);
+  if (sub === "drop") return dropNode(STATE, need(target, "a node"));
   if (!target) throw new Error(`factory goal ${sub} wants a goal`);
   const id = findGoal(STATE, target).id;
   if (sub === "export") {
@@ -390,7 +454,7 @@ async function goal(
     const job = queueReplan(STATE, findGoal(STATE, id), text(why));
     return console.log(job ? `queued replan ${job.id}` : "a replan is already waiting");
   }
-  throw new Error(`unknown goal command ${sub}\n\n${USAGE}`);
+  throw new Error(`unknown goal command ${sub}\n\n${HELP.goals}`);
 }
 
 function review(id: string | undefined, name: string | undefined): void {
@@ -403,15 +467,48 @@ function review(id: string | undefined, name: string | undefined): void {
 /** The train lives in serve, which merges and rebases as the page does. */
 async function merge(ids: string[]): Promise<void> {
   if (ids.length === 0) throw new Error("factory merge wants a job");
+  await callServe("/api/train", { ids });
+  console.log(`on the merge train: ${ids.join(", ")}; factory report --all shows how each ends`);
+}
+
+/** Rebases or closes a job's PR through serve, which checks it with GitHub and keeps the page's copy fresh. */
+async function prAction(action: "rebase" | "close", id: string | undefined): Promise<void> {
+  await callServe(`/api/jobs/${need(id, "a job")}/${action}`, {});
+  console.log(action === "rebase" ? `rebased ${id}'s PR` : `closed ${id}'s PR`);
+}
+
+async function callServe(path: string, body: object): Promise<void> {
   const serve = process.env.FACTORY_URL ?? "http://127.0.0.1:7040";
-  const response = await fetch(`${serve}/api/train`, {
+  const response = await fetch(`${serve}${path}`, {
     method: "POST",
-    body: JSON.stringify({ ids }),
+    body: JSON.stringify(body),
   }).catch(() => {
-    throw new Error(`no factory serve at ${serve}: the merge train runs there`);
+    throw new Error(`no factory serve at ${serve}: factory serve does this`);
   });
   if (!response.ok) throw new Error(((await response.json()) as { error: string }).error);
-  console.log(`on the merge train: ${ids.join(", ")}; factory report --all shows how each ends`);
+}
+
+/** What a job runs on, from the flags: a tier, a preset, or an agent with its model and effort. */
+function pinOf(values: {
+  agent?: string;
+  model?: string[];
+  effort?: string[];
+  preset?: string;
+  tier?: string;
+}): Pin {
+  if (values.agent) agent(values.agent);
+  if (values.tier && !(TIERS as readonly string[]).includes(values.tier))
+    throw new Error(`--tier wants ${TIERS.join(", ")}, got ${values.tier}`);
+  const presets = readSettings(STATE).presets.map(presetId);
+  if (values.preset && !presets.includes(values.preset))
+    throw new Error(`--preset wants one of ${presets.join(", ")}, got ${values.preset}`);
+  return {
+    agent: values.agent,
+    model: values.model?.[0],
+    effort: values.effort?.[0],
+    preset: values.preset,
+    tier: values.tier as Tier | undefined,
+  };
 }
 
 const SETTLED: Job["state"][] = ["done", "failed", "blocked", "removed"];
@@ -490,6 +587,11 @@ function eventLine(event: Event, jobs: Map<string, Job>): string {
 function ownJob(job = process.env.FACTORY_JOB): string {
   if (!job) throw new Error("runs inside a job, which sets FACTORY_JOB; elsewhere pass --job ID");
   return job;
+}
+
+function need(value: string | undefined, what: string): string {
+  if (!value) throw new Error(`wants ${what}; factory help lists the commands`);
+  return value;
 }
 
 function text(value: string | undefined): string {

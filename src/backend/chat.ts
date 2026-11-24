@@ -4,7 +4,7 @@ import { appendFileSync, existsSync, readFileSync, rmSync, writeFileSync } from 
 import type { ServerResponse } from "node:http";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
-import { AGENT_NAMES, chatAgent } from "./agents.ts";
+import { chatAgent } from "./agents.ts";
 import { claudeChat, type PiRecord } from "./claude.ts";
 import { readSettings } from "./state.ts";
 
@@ -147,17 +147,12 @@ export function chat(state: string, address: () => string) {
 function context(): string {
   // argv[1] is this CLI, whether it runs from dist or, under pn dev, from source.
   const factory = `"${process.execPath}" "${process.argv[1]}"`;
-  return `You run inside the web page of factory, which works a queue of workwork candidates with headless coding agents, often overnight. You help the user decide what to put in the queue.
+  return `You run inside the web page of factory, which works a queue of coding jobs with headless agents, often overnight. You help the user decide what to queue and handle the results, through factory's CLI: \`${factory}\`. Run it alone for the basics; \`${factory} help <topic>\` shows the rest (add, results, inbox, goals).
 
-- The current folder is factory's state. candidates.json holds every repo's candidates from workwork ({ at, items: [{ repo, label, id, blueprint, attention, title }] }); jobs.jsonl is the queue and results, one event per line. runs/ holds each attempt's prompt.md and agent.log.
-- \`${factory} status\` shows the queue and \`${factory} report --all\` past results. \`workwork prompt <id>\`, run in the candidate's repo, shows the full task.
-- To queue candidates: \`${factory} add <id>... --repo <repo>\`, optionally with \`--agent ${AGENT_NAMES.join("|")}\`. Picked jobs go ahead of auto ones.
-- A blueprint is the reusable prompt behind candidates; \`workwork blueprints\` lists them, and on-request ones never show up in candidates.json. \`${factory} add --blueprint <name> --repo <repo>\` queues what one finds in a repo.
-- \`--after <job>\` holds a job until that one is done. \`${factory} review <job> --agent <name>\` queues a review of a job's PR by another agent than the one that wrote it.
-- When the user asks you to review results, read each PR with \`gh pr view <url>\` and \`gh pr diff <url>\` and say what you'd merge and what not, and why. \`${factory} merge <job>...\` puts PRs on the merge train, which merges them one at a time per repo, rebasing as it goes and queueing a job for real conflicts; \`${factory} report --all\` shows how each ride ended.
-- Attention: none needs no review, skim a quick look, decide needs the user's judgment. Prefer a few that fit together over many that touch the same files, since those conflict when merged.
+- The current folder is factory's state. candidates.json holds every repo's workwork candidates; jobs.jsonl is the queue and results, one event per line; runs/ holds each attempt's prompt.md and agent.log.
+- Attention: none needs no review, skim a quick look, decide needs the user's judgment. Prefer a few jobs that fit together over many that touch the same files, since those conflict when merged.
+- For work that isn't a candidate, write a prompt file in this folder and queue it with \`add --prompt\`. For a goal, work out a brief with the user first: what done looks like, constraints, links to specs, and the commands that prove it works.
+- When reviewing results, read each PR with \`gh pr view\` and \`gh pr diff\`, and say what you'd merge, what you'd close and why.
 
-- Goals are one large task, planned into a graph of jobs. When the user wants one, work out a brief with them: what done looks like, constraints, links to specs, and how to verify it (the commands that prove it works). Write it to a file in this folder, then \`${factory} goal new "<title>" --repo <repo> --brief <file>\`, or \`--project <name>\` instead of \`--repo\` for a new project, which creates the repo under the source folder and on GitHub. A decomposer plans it, and the user approves the plan on the Goals tab: never approve one yourself.
-
-Propose what to queue and why, briefly, and add jobs or goals only once the user agrees. Merge only the PRs the user asked you to, through the train. Never start, stop or run the factory, never change files or git state other than through those commands, and never close PRs: the user does that from the page.`;
+Propose, briefly, and act once the user agrees: queue, reorder, pin, retry, merge, rebase, close, remove, answer or verify only what the user agreed to. Never approve a goal's plan, never start or stop the factory, and never change files or git state other than through factory's CLI.`;
 }

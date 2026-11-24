@@ -67,28 +67,30 @@ On the page, everything that waits on you collects in the **Inbox**, which the p
 
 ## Live Agent
 
-Live Agent, the robot button right of the tabs, is a chat with an agent about what to queue. It reads the candidates, the queue and past results, proposes a few jobs that won't step on each other, and adds them through the CLI once you agree. Ask it to review results and it reads their PRs, says what it would merge, and puts the ones you agree on on the merge train (`factory merge <job>...`). It never turns the factory on, closes PRs, or changes your repos. That is an instruction to the agent, not a sandbox: it has a shell, like the agents doing jobs. Results that failed, or that the train skipped, have an **Ask** button that starts the chat with the question already written.
+Live Agent, the robot button right of the tabs, is a chat with an agent about what to queue and what to do with the results. It reads the candidates, the queue and past results, proposes a few jobs that won't step on each other, and adds them through the CLI once you agree, candidates or a prompt of its own. Ask it to review results and it reads their PRs and says what it would merge and what it would close; once you agree it puts them on the merge train, rebases, closes, queues follow-ups, retries and cleans up. It can reorder and pin the queue and answer the Inbox as you tell it. It never approves a goal's plan, turns the factory on or off, or changes your repos other than through the CLI. That is an instruction to the agent, not a sandbox: it has a shell, like the agents doing jobs. Results that failed, or that the train skipped, have an **Ask** button that starts the chat with the question already written.
 
 Settings > Live Agent picks the agent (Claude Code or Pi), its model and effort. Model choices are short lists: Pi's scoped models (`enabledModels` in Pi's settings) and Claude Code's current models. The chat survives a restart of `factory serve`.
 
 ## Commands
 
-The page and the CLI do the same things on the same state; `serve` is only an interface, and the factory runs without it.
+The page and the CLI do the same things on the same state; `serve` is only an interface, and the factory runs without it. `factory` alone prints the basics, and `factory help <topic>` the rest, one topic at a time.
 
 ```sh
 factory start [run options]   # turn on, in the background (factory run: in the foreground)
 factory stop [--kill]         # turn off; agents at work finish their turn, the next start records it
 factory status                # on or off, each pool and its workers, the queue
-factory add <id>... [--repo DIR] [--agent NAME] [--model M] [--effort E] [--after JOB]...
+factory add <id>... [--repo DIR] [--tier T | --preset ID | --agent NAME --model M --effort E] [--after JOB]...
 factory add --prompt FILE --tier grunt [--repo DIR]   # a job of your own, without workwork
+factory move <job> <N> | pin <job> [--tier T | --preset ID | --agent NAME]
 factory remove <job> | retry <job> | answer <job> "<text>" | verify <job> [NEED]
 factory review <job> [--agent pi] # another role (or agent) reviews the PR; findings queue a fix
 factory merge <job>...           # put their PRs on the merge train of the running serve
+factory rebase <job> | close <job> | followup <job> "<task>"
 factory wait <job> [--timeout MIN]
 factory tail                      # follow every job event, one line each
 factory auto on|off
 factory report [--all]            # the last run (or every run), then what waits on you
-factory goal new|import|check|show|approve|pause|resume|cancel|replan ...
+factory goal new|import|check|show|approve|pause|resume|cancel|replan|tier|drop|export ...
 factory serve [--port 7040] [--host 127.0.0.1]
 ```
 

@@ -1,5 +1,12 @@
 import { execFile, execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { once } from "node:events";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -1623,6 +1630,26 @@ esac`;
     } finally {
       server.close();
     }
+  });
+
+  test("the CLI reorders and pins the queue, as the Live Agent does", async () => {
+    const data = mkdtempSync(join(scratch, "data-"));
+    const base = setup(["a", "b"]);
+    const state = join(data, "apps", "factory");
+    mkdirSync(state, { recursive: true });
+    const [a, b] = base.items.map((each) => addJobs(state, [each], "pick")[0]);
+    const cli = (...args: string[]) =>
+      promisify(execFile)(process.execPath, ["src/backend/cli.ts", ...args], {
+        env: { ...process.env, DATA: data },
+      });
+    await cli("move", b.id, "1");
+    await cli("pin", a.id, "--tier", "grunt");
+    const queued = readJobs(state).filter((job) => job.state === "queued");
+    expect(queued.map((job) => [job.id, job.tier])).toEqual([
+      [b.id, undefined],
+      [a.id, "grunt"],
+    ]);
+    await expect(cli("pin", a.id, "--tier", "boss")).rejects.toThrow(/--tier wants/);
   });
 
   /** Starts serve with a fake agent on PATH; `page` opens the Plan chat's event stream. */
