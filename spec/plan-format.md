@@ -61,9 +61,9 @@ A plan describes one goal as a graph of nodes, for `factory goal import` (or `fa
 | `machine`    | Optional: `true` when the node must change things outside its worktree, like global installs, home config, services or devices. It runs while no other job does.        |
 | `checkpoint` | Optional: once this node merges, the goal waits for the user's approval.                                                                                                |
 | `parent`     | Optional key: makes the parent a milestone. A milestone done rebases the integration branch onto main and queues a replan.                                              |
+| `review`     | Optional tier: before the node merges, an agent of that tier reviews its branch; findings become a fix on it.                                                           |
 
 A milestone (a node some other node names as `parent`) never runs itself, so it needs only `key`, `title` and `after`; `tier`, `prompt`, `touches` and `gates` are for nodes that run.
-| `review` | Optional tier: before the node merges, an agent of that tier reviews its branch; findings become a fix on it. |
 
 ## Tiers
 
