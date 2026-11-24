@@ -33,6 +33,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ago, itemTitle, repoName } from "@/format";
 import { PinMenuItems } from "@/PinMenu";
 import { Row, Section } from "@/Row";
+import { NeutralCheckbox } from "@/components/variants/checkbox";
 import { RowGroup } from "@/components/variants/item";
 import { StateIcon, StatePill, TaskDetails, taskState } from "@/TaskDetails";
 
@@ -53,6 +54,8 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
   const [attention, setAttention] = useState(["none", "skim", "decide"]);
   const [search, setSearch] = useState("");
   const [shown, setShown] = useState(PAGE);
+  /** Kept across filters, so one batch can take candidates from several blueprints. */
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
   /** What each blueprint does, by name; empty until workwork answers. */
   const [described, setDescribed] = useState(new Map<string, string>());
   const { at, count, refreshing } = snapshot.candidates;
@@ -110,6 +113,19 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
   );
   const queue = (wanted: Item[], pin?: Pin) => act(() => api.queue(wanted, pin));
   const open = matches.filter((item) => !jobs.has(key(item)));
+  const selection = items.filter((item) => selected.has(key(item)) && !jobs.has(key(item)));
+  const allOpenSelected = open.length > 0 && open.every((item) => selected.has(key(item)));
+
+  const select = (wanted: Item[], checked: boolean) => {
+    setSelected((current) => {
+      const next = new Set(current);
+      for (const item of wanted) {
+        if (checked) next.add(key(item));
+        else next.delete(key(item));
+      }
+      return next;
+    });
+  };
 
   const empty = (
     <Empty>
@@ -219,6 +235,29 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
         </span>
       </div>
 
+      {selection.length > 0 && (
+        <div
+          role="group"
+          aria-label="Batch actions"
+          className="flex flex-wrap items-center gap-2 rounded-lg border bg-background px-3 py-2"
+        >
+          <span className="text-sm font-medium">{selection.length} selected</span>
+          <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
+            Clear
+          </Button>
+          <span className="sm:ml-auto">
+            <QueueButton
+              label={`Queue ${selection.length}`}
+              settings={snapshot.settings}
+              onQueue={async (pin) => {
+                await queue(selection, pin);
+                setSelected(new Set());
+              }}
+            />
+          </span>
+        </div>
+      )}
+
       {inRepo.length === 0 ? (
         empty
       ) : (
@@ -250,17 +289,21 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
           <div className="-m-1 min-w-0 flex-1 overflow-y-auto p-1 [scrollbar-gutter:stable]">
             <Section
               title={
-                <span className="flex items-center gap-2">
-                  <span className="flex-1">
-                    {matches.length} matching, {open.length} not queued yet
-                  </span>
-                  {open.length > 0 && open.length <= 20 && (
-                    <QueueButton
-                      label={`Queue all ${open.length}`}
-                      settings={snapshot.settings}
-                      onQueue={(pin) => queue(open, pin)}
+                <span className="flex min-h-8 items-center gap-3 px-3">
+                  {open.length > 0 && (
+                    <NeutralCheckbox
+                      aria-label={
+                        allOpenSelected
+                          ? `Clear all ${open.length} not queued`
+                          : `Select all ${open.length} not queued`
+                      }
+                      checked={allOpenSelected}
+                      onCheckedChange={(checked) => select(open, checked)}
                     />
                   )}
+                  <span>
+                    {matches.length} matching, {open.length} not queued yet
+                  </span>
                 </span>
               }
             >
@@ -277,7 +320,17 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
                   return (
                     <Row
                       key={key(item)}
-                      leading={<StateIcon state={taskState(job, snapshot.prs)} />}
+                      leading={
+                        job ? (
+                          <StateIcon state={taskState(job, snapshot.prs)} />
+                        ) : (
+                          <NeutralCheckbox
+                            aria-label={`Select ${itemTitle(item)}`}
+                            checked={selected.has(key(item))}
+                            onCheckedChange={(checked) => select([item], checked)}
+                          />
+                        )
+                      }
                       title={
                         <TaskDetails
                           item={item}
