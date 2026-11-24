@@ -215,7 +215,7 @@ function Factory({
           <QueueView snapshot={snapshot} act={act} onAdd={setAdding} />
         </TabsContent>
         <TabsContent value="goals">
-          <GoalsView snapshot={snapshot} act={act} onNew={() => setAdding("goal")} />
+          <GoalsView snapshot={snapshot} act={act} />
         </TabsContent>
         <TabsContent value="results">
           <div className="pt-2">

@@ -8,7 +8,6 @@ import {
   ChevronRightIcon,
   FlameIcon,
   GitBranchIcon,
-  PlusIcon,
   XIcon,
 } from "lucide-react";
 import { api, type Act } from "@/api";
@@ -27,13 +26,7 @@ import { Badge } from "@/components/ui/badge";
 import { TierBadge } from "@/TierBadge";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import {
-  Empty,
-  EmptyContent,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyTitle,
-} from "@/components/ui/empty";
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -96,39 +89,24 @@ function lastActivity(nodes: Job[], goal: Job): string {
 }
 
 /** Goals: large tasks as graphs of jobs, each on its own integration branch. */
-export function GoalsView({
-  snapshot,
-  act,
-  onNew,
-}: {
-  snapshot: Snapshot;
-  act: Act;
-  onNew: () => void;
-}) {
+export function GoalsView({ snapshot, act }: { snapshot: Snapshot; act: Act }) {
   const [open, setOpen] = useQueryParam("goal", "");
   const goals = snapshot.jobs.filter((job) => job.goal && job.state !== "removed");
   const shown = goals.find((goal) => goal.id === open);
   if (shown)
     return <GoalView goal={shown} snapshot={snapshot} act={act} onBack={() => setOpen("")} />;
-  return <GoalList goals={goals} snapshot={snapshot} onNew={onNew} onOpen={setOpen} />;
+  return <GoalList goals={goals} snapshot={snapshot} onOpen={setOpen} />;
 }
 
 function GoalList({
   goals,
   snapshot,
-  onNew,
   onOpen,
 }: {
   goals: Job[];
   snapshot: Snapshot;
-  onNew: () => void;
   onOpen: (id: string) => void;
 }) {
-  const newGoal = (
-    <Button variant="outline" onClick={onNew}>
-      <PlusIcon /> New goal
-    </Button>
-  );
   const active = goals.filter((goal) => goal.state !== "done");
   const finished = goals.filter((goal) => goal.state === "done");
   if (goals.length === 0)
@@ -140,12 +118,10 @@ function GoalList({
             A goal is one large task, planned into jobs that run on their own branch.
           </EmptyDescription>
         </EmptyHeader>
-        <EmptyContent>{newGoal}</EmptyContent>
       </Empty>
     );
   return (
     <div className="flex flex-col gap-4 pt-2">
-      <div className="flex justify-end">{newGoal}</div>
       {active.length > 0 && (
         <RowGroup>
           {active.map((goal) => (
