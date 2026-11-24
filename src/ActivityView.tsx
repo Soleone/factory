@@ -139,8 +139,12 @@ function entries(jobs: Job[]): Entry[] {
     .slice(0, ACTIVITY_LIMIT);
 }
 
-/** A step's number within its attempt, as a small pill before its text. */
+/** A single-digit step number fits in its mark instead of the dot. */
+const fitsMark = (step: string) => step.length === 1;
+
+/** A step's number within its attempt, as a small pill before its text, when its mark can't hold it. */
 export function StepNumber({ step }: { step: string }) {
+  if (fitsMark(step)) return null;
   return (
     <span className="mr-2 inline-flex min-w-5 justify-center rounded-full bg-primary/15 px-1.5 text-xs font-medium text-primary tabular-nums">
       {step}
@@ -148,8 +152,14 @@ export function StepNumber({ step }: { step: string }) {
   );
 }
 
-/** An entry's icon, or for a step a dot in the accent color. */
+/** An entry's icon, or for a step its number in an accent circle, or a dot when the number is too long. */
 export function EntryMark({ entry }: { entry: Entry }) {
+  if (!entry.icon && entry.step && fitsMark(entry.step))
+    return (
+      <span className="flex size-4 items-center justify-center rounded-full bg-primary text-3xs font-semibold text-primary-foreground tabular-nums">
+        {entry.step}
+      </span>
+    );
   return (
     <span aria-hidden className="flex size-4 items-center justify-center [&_svg]:size-3.5">
       {entry.icon ?? <span className="size-2 rounded-full bg-primary" />}
