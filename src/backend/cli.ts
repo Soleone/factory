@@ -38,7 +38,15 @@ import { run, type RunOptions } from "./loop.ts";
 import { createRepo } from "./repos.ts";
 import { exportGoal } from "./goalExport.ts";
 import { logPath, turnOff, turnOn } from "./power.ts";
-import { output, pidPath, readSettings, runningPid, STATE, writeSettings } from "./state.ts";
+import {
+  output,
+  pidPath,
+  readCandidates,
+  readSettings,
+  runningPid,
+  STATE,
+  writeSettings,
+} from "./state.ts";
 import {
   openAssumptions,
   prUrl,
@@ -79,6 +87,7 @@ const HELP: Record<string, string> = {
   factory add <id>... [--repo DIR] [pin] [--after JOB]...
                                workwork candidates from DIR (default: here); \`workwork --json\` in a
                                repo lists them, \`workwork prompt <id>\` shows one in full
+                               use candidates factory lists; ask workwork only for missing ids
   factory add --blueprint NAME [--repo DIR] [<id>...]
                                what a blueprint finds in DIR, on-request ones too; ids pick some;
                                \`workwork blueprints\` lists them
@@ -345,27 +354,72 @@ async function add(
   if (values.prompt) return addOwn(values);
   if (ids.length === 0 && !values.blueprint)
     throw new Error("factory add wants workwork ids, --blueprint NAME or --prompt FILE");
-  const repo = resolve(values.repo ?? ".");
-  const listing = values.blueprint ? ["--blueprint", values.blueprint, "--json"] : ["--json"];
-  const candidates: Item[] = JSON.parse(await output("workwork", listing, repo));
-  if (values.blueprint && candidates.length === 0)
-    throw new Error(`${values.blueprint} finds nothing to do in ${repo}`);
-  const items = (ids.length ? ids : candidates.map((each) => each.id)).map((id) => {
-    const item = candidates.find((candidate) => candidate.id === id);
-    if (!item) throw new Error(`workwork has no candidate ${id} in ${repo}`);
-    return item;
-  });
+  // Checked first: nothing is queued unless every id and flag holds.
+  const pin = pinOf(values);
   for (const after of values.after ?? [])
     if (!readJobs(STATE).some((job) => job.id === after))
       throw new Error(`--after names no job ${after}; factory status lists them`);
+  const repo = resolve(values.repo ?? ".");
+  const uniqueIds = [...new Set(ids)];
+  const items = values.blueprint
+    ? await blueprintItems(values.blueprint, uniqueIds, repo)
+    : await candidateItems(uniqueIds, repo);
   const added = addJobs(STATE, items, "pick", {
-    ...pinOf(values),
+    ...pin,
     after: values.after,
     machine: values.machine,
   });
   for (const job of added) console.log(`queued ${job.id}: ${job.item.label} ${job.item.id}`);
   for (const item of items.filter((item) => !added.some((job) => job.item === item)))
     console.log(`already queued: ${item.label} ${item.id}`);
+}
+
+/** What a blueprint finds in `repo`, or the given ids of it. */
+async function blueprintItems(blueprint: string, ids: string[], repo: string): Promise<Item[]> {
+  const found: Item[] = JSON.parse(
+    await output("workwork", ["--blueprint", blueprint, "--json"], repo),
+  );
+  if (found.length === 0) throw new Error(`${blueprint} finds nothing to do in ${repo}`);
+  if (ids.length === 0) return found;
+  const missing = ids.filter((id) => !found.some((item) => item.id === id));
+  if (missing.length)
+    throw new Error(`${blueprint} finds no ${missing.join(", ")} in ${repo}; nothing queued`);
+  return ids.map((id) => found.find((item) => item.id === id)!);
+}
+
+/**
+ * The candidates with these ids in `repo`, from the ones factory keeps (the page's) where it has
+ * them. Listing a repo with workwork syncs its decisions with GitHub and commits them, which is
+ * slow and wants a git identity, so it only runs for ids factory hasn't seen: new ones.
+ */
+async function candidateItems(ids: string[], repo: string): Promise<Item[]> {
+  // workwork names a repo by its top folder.
+  const top = await output("git", ["rev-parse", "--show-toplevel"], repo).catch(() => repo);
+  const roots = new Set([repo, top.trim()]);
+  const known = (readCandidates(STATE)?.items ?? []).filter((item) => roots.has(item.repo));
+  const unseen = ids.filter((id) => !known.some((item) => item.id === id));
+  if (unseen.length) {
+    let listed: Item[];
+    try {
+      listed = JSON.parse(await output("workwork", ["--json"], repo));
+    } catch (error) {
+      const message = (error as Error).message.trim();
+      const identity = /Author identity unknown|empty ident/i.test(message)
+        ? "\nworkwork commits its decisions, so set user.name and user.email in git, or ask for candidates factory already lists."
+        : "";
+      throw new Error(
+        `factory lists no ${unseen.join(", ")} in ${repo}, and asking workwork failed; nothing queued:\n${message}${identity}`,
+      );
+    }
+    known.push(...listed);
+    const missing = unseen.filter((id) => !listed.some((item) => item.id === id));
+    if (missing.length)
+      throw new Error(
+        `workwork has no candidate ${missing.join(", ")} in ${repo}; nothing queued. ` +
+          "It may be done, decided or have an open PR: workwork --all-history in that repo lists them all.",
+      );
+  }
+  return ids.map((id) => known.find((item) => item.id === id)!);
 }
 
 /** A job from a prompt file, for a tier, without workwork. */

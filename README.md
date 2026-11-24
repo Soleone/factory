@@ -81,6 +81,7 @@ factory start [run options]   # turn on, in the background (factory run: in the 
 factory stop [--kill]         # turn off; agents at work finish their turn, the next start records it
 factory status                # on or off, each pool and its workers, the queue
 factory add <id>... [--repo DIR] [--tier T | --preset ID | --agent NAME --model M --effort E] [--after JOB]...
+                              # use the candidates the page lists; ask workwork only for missing ids
 factory add --prompt FILE --tier grunt [--repo DIR]   # a job of your own, without workwork
 factory move <job> <N> | pin <job> [--tier T | --preset ID | --agent NAME]
 factory remove <job> | retry <job> | answer <job> "<text>" | verify <job> [NEED]
