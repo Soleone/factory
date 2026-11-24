@@ -765,6 +765,7 @@ function dispatch(
   if (!job) throw new Error(`No demo job ${id}`);
   switch (action) {
     case "remove":
+    case "cancel":
       job.state = "removed";
       break;
     case "pin":
@@ -780,9 +781,6 @@ function dispatch(
     case "pause":
       job.state = "blocked";
       job.blocked = "paused";
-      break;
-    case "cancel":
-      job.state = "removed";
       break;
     case "replan":
       job.notes.push({
