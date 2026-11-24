@@ -10,11 +10,11 @@ import { api, type Act } from "@/api";
 import type { Snapshot } from "@/backend/types.ts";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
-import { ItemGroup } from "@/components/ui/item";
 import { holds, inbox, type InboxItem } from "@/inbox";
 import { canBoard, MergeButton, mergeTrain } from "@/PullRequest";
 import { Result, reviewerOf } from "@/Result";
 import { Row } from "@/Row";
+import { RowGroup } from "@/components/variants/item";
 import { AssumeAnswer, TaskDetails } from "@/TaskDetails";
 
 const ICON = {
@@ -73,7 +73,7 @@ export function InboxView({
             Work stopped until you act{" "}
             <span className="font-normal text-muted-foreground">{stopped.length}</span>
           </h2>
-          <ItemGroup>{stopped.map(row)}</ItemGroup>
+          <RowGroup>{stopped.map(row)}</RowGroup>
         </section>
       )}
       {ready.length > 0 && (
@@ -93,7 +93,7 @@ export function InboxView({
               </MergeButton>
             )}
           </div>
-          <ItemGroup>{ready.map(row)}</ItemGroup>
+          <RowGroup>{ready.map(row)}</RowGroup>
         </section>
       )}
     </div>

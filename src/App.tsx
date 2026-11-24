@@ -6,6 +6,7 @@ import { useFactory, type Act } from "@/api";
 import type { Snapshot, UsageWindow as Used } from "@/backend/types.ts";
 import { AgentSidebar } from "@/components/soleone/agent";
 import { isInteractiveTarget } from "@/components/soleone/theme";
+import { useRowKeys } from "@/rowKeys";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/tooltip/tooltip";
 import { ThemePicker } from "@/components/soleone/theme-picker";
 import { UsageRing, type UsageWindow } from "@/components/soleone/usage-ring/usage-ring";
@@ -91,6 +92,7 @@ function Factory({
   const [view, setView] = useQueryParam("view", "results");
   const [adding, setAdding] = useQueryParam("add", "");
   useGoKeys(setTab);
+  useRowKeys();
   const { isMobile, setOpen, setOpenMobile } = useSidebar();
   /** Starts the Live Agent chat with a question about a result. */
   const ask = (question: string) => {

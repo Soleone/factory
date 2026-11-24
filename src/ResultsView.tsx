@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { NeutralCheckbox } from "@/components/variants/checkbox";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
-import { ItemGroup } from "@/components/ui/item";
+import { RowGroup } from "@/components/variants/item";
 import {
   Select,
   SelectContent,
@@ -145,7 +145,7 @@ export function ResultsView({
     return [...days].map(([day, dayJobs]) => (
       <div key={day} className="flex flex-col gap-2">
         <h3 className="px-3 text-xs text-muted-foreground">{day}</h3>
-        <ItemGroup>
+        <RowGroup>
           {dayJobs.map((job) => (
             <Result
               key={job.id}
@@ -170,7 +170,7 @@ export function ResultsView({
               }
             />
           ))}
-        </ItemGroup>
+        </RowGroup>
       </div>
     ));
   };

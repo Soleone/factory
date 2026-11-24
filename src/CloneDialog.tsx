@@ -5,9 +5,9 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AnchoredDialogContent } from "@/components/variants/dialog";
 import { Input } from "@/components/ui/input";
-import { ItemGroup } from "@/components/ui/item";
 import { Spinner } from "@/components/ui/spinner";
 import { Row } from "@/Row";
+import { RowGroup } from "@/components/variants/item";
 
 export function CloneDialog({
   act,
@@ -82,7 +82,7 @@ function RepoList({ act, onCloned }: { act: Act; onCloned: () => void }) {
         value={search}
         onChange={(event) => setSearch(event.target.value)}
       />
-      <ItemGroup className="max-h-[50svh] overflow-y-auto">
+      <RowGroup className="max-h-[50svh] overflow-y-auto">
         {shown.map((repo) => (
           <Row
             key={repo.name}
@@ -106,7 +106,7 @@ function RepoList({ act, onCloned }: { act: Act; onCloned: () => void }) {
             {listing.repos.length ? "No repo matches." : "Every repo of yours is cloned."}
           </p>
         )}
-      </ItemGroup>
+      </RowGroup>
     </div>
   );
 }

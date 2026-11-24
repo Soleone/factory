@@ -20,7 +20,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { ItemGroup } from "@/components/ui/item";
 import {
   Select,
   SelectContent,
@@ -32,6 +31,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { repoName } from "@/format";
 import { Row, Section } from "@/Row";
+import { RowGroup } from "@/components/variants/item";
 
 const FINDERS = [
   { value: "scan", label: "The whole repo, searched by the agent" },
@@ -136,13 +136,13 @@ export function BlueprintsView({ act }: { act: Act }) {
           </Button>
         </div>
         {yours.length ? (
-          <ItemGroup>{yours.map(row)}</ItemGroup>
+          <RowGroup>{yours.map(row)}</RowGroup>
         ) : (
           <p className="text-sm text-muted-foreground">None yet.</p>
         )}
       </section>
       <Section title="Built in">
-        <ItemGroup>{blueprints.filter((blueprint) => !blueprint.custom).map(row)}</ItemGroup>
+        <RowGroup>{blueprints.filter((blueprint) => !blueprint.custom).map(row)}</RowGroup>
       </Section>
       {editing && (
         <BlueprintDialog

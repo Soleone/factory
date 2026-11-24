@@ -17,12 +17,12 @@ import {
   EmptyHeader,
   EmptyTitle,
 } from "@/components/ui/empty";
-import { ItemGroup } from "@/components/ui/item";
 import { clock, itemTitle, minutesSince } from "@/format";
 import { PinChip } from "@/PinMenu";
 import { ProviderLogo, providerOf, WorkerName } from "@/WorkerName";
 import { TierBadge } from "@/TierBadge";
 import { Row, Section } from "@/Row";
+import { RowGroup } from "@/components/variants/item";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/tooltip/tooltip";
 import { StateIcon, StatePill, TaskDetails } from "@/TaskDetails";
 
@@ -266,7 +266,7 @@ export function QueueView({
       <div className="flex min-w-0 flex-col gap-8 lg:row-start-1">
         {running.length > 0 && (
           <Section title={`Running (${running.length})`}>
-            <ItemGroup>
+            <RowGroup>
               {running.map((worker) => {
                 const job = byId.get(worker.job!);
                 return (
@@ -280,7 +280,7 @@ export function QueueView({
                   )
                 );
               })}
-            </ItemGroup>
+            </RowGroup>
           </Section>
         )}
         <Section title={`Your picks (${picks.length})`}>
@@ -304,7 +304,7 @@ export function QueueView({
             </Empty>
           ) : (
             <>
-              <ItemGroup>
+              <RowGroup>
                 <AnimatePresence mode="popLayout" initial={false}>
                   {picks.map((job, index) => (
                     <Glide key={job.id}>
@@ -353,14 +353,14 @@ export function QueueView({
                     </Glide>
                   ))}
                 </AnimatePresence>
-              </ItemGroup>
+              </RowGroup>
             </>
           )}
         </Section>
 
         {fromGoals.length > 0 && (
           <Section title={`From goals (${fromGoals.length})`}>
-            <ItemGroup>
+            <RowGroup>
               <AnimatePresence mode="popLayout" initial={false}>
                 {fromGoals.map((job) => (
                   <Glide key={job.id}>
@@ -377,7 +377,7 @@ export function QueueView({
                   </Glide>
                 ))}
               </AnimatePresence>
-            </ItemGroup>
+            </RowGroup>
           </Section>
         )}
 
@@ -389,7 +389,7 @@ export function QueueView({
                 : "Auto mode is off. Turn it on to keep the queue topped up from workwork."}
             </p>
           ) : (
-            <ItemGroup>
+            <RowGroup>
               <AnimatePresence mode="popLayout" initial={false}>
                 {auto.map((job) => (
                   <Glide key={job.id}>
@@ -403,7 +403,7 @@ export function QueueView({
                   </Glide>
                 ))}
               </AnimatePresence>
-            </ItemGroup>
+            </RowGroup>
           )}
         </Section>
       </div>

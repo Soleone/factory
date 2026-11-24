@@ -17,7 +17,6 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
-import { ItemGroup } from "@/components/ui/item";
 import {
   Select,
   SelectContent,
@@ -34,6 +33,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ago, itemTitle, repoName } from "@/format";
 import { PinMenuItems } from "@/PinMenu";
 import { Row, Section } from "@/Row";
+import { RowGroup } from "@/components/variants/item";
 import { StateIcon, StatePill, TaskDetails, taskState } from "@/TaskDetails";
 
 const ALL = "";
@@ -264,7 +264,7 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
                 </span>
               }
             >
-              <ItemGroup>
+              <RowGroup>
                 {matches.slice(0, shown).map((item) => {
                   const job = jobs.get(key(item));
                   const queueButton = (
@@ -299,7 +299,7 @@ export function CandidatesView({ snapshot, act }: { snapshot: Snapshot; act: Act
                     </Row>
                   );
                 })}
-              </ItemGroup>
+              </RowGroup>
               {matches.length > shown && (
                 <Button variant="ghost" onClick={() => setShown(shown + PAGE)}>
                   Show {Math.min(PAGE, matches.length - shown)} more

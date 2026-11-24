@@ -39,12 +39,12 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import { ItemGroup } from "@/components/ui/item";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/tooltip/tooltip";
 import { ago, minutesSince, repoName } from "@/format";
 import { useQueryParam } from "@/hooks/use-query-param";
 import { MARKDOWN } from "@/PrReview";
 import { Row, Section } from "@/Row";
+import { RowGroup } from "@/components/variants/item";
 import { StateIcon, StatePill, TaskDetails } from "@/TaskDetails";
 
 /** How a goal's own state reads: planning until its plan is in, then working, not queued. */
@@ -144,19 +144,19 @@ function GoalList({
     <div className="flex flex-col gap-4 pt-2">
       <div className="flex justify-end">{newGoal}</div>
       {active.length > 0 && (
-        <ItemGroup>
+        <RowGroup>
           {active.map((goal) => (
             <GoalRow key={goal.id} goal={goal} snapshot={snapshot} onOpen={onOpen} />
           ))}
-        </ItemGroup>
+        </RowGroup>
       )}
       {finished.length > 0 && (
         <Section title={`Done (${finished.length})`}>
-          <ItemGroup>
+          <RowGroup>
             {finished.map((goal) => (
               <GoalRow key={goal.id} goal={goal} snapshot={snapshot} onOpen={onOpen} />
             ))}
-          </ItemGroup>
+          </RowGroup>
         </Section>
       )}
     </div>
@@ -447,7 +447,7 @@ function PlanList({
     depth.set(helper.id, (depth.get(helper.branchOf!) ?? 0) + 0.5);
   const sorted = nodes.toSorted((a, b) => depth.get(a.id)! - depth.get(b.id)!);
   return (
-    <ItemGroup>
+    <RowGroup>
       {sorted.map((node) => {
         const members = all.filter((each) => each.parent === node.id);
         return members.length > 0 ? (
@@ -471,7 +471,7 @@ function PlanList({
           />
         );
       })}
-    </ItemGroup>
+    </RowGroup>
   );
 }
 

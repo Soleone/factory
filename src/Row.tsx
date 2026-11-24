@@ -1,14 +1,17 @@
 import type { CSSProperties, ReactNode } from "react";
 import {
-  Item,
   ItemActions,
   ItemContent,
   ItemDescription,
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
+import { RowItem } from "@/components/variants/item";
 
-/** One line in a list: a title, a muted line under it, and buttons on the right. */
+/**
+ * One line in a list: a title, a muted line under it, and buttons on the right. Flat, filled on
+ * hover; focusable for the list keys in `useRowKeys`, which find it by `data-row`.
+ */
 export function Row({
   leading,
   title,
@@ -27,7 +30,7 @@ export function Row({
   children?: ReactNode;
 }) {
   return (
-    <Item variant="outline" size="sm" className="relative overflow-hidden">
+    <RowItem size="sm" tabIndex={-1} data-row className="relative overflow-hidden">
       {progress !== undefined && (
         <span
           aria-hidden
@@ -43,7 +46,7 @@ export function Row({
         {below}
       </ItemContent>
       {children && <ItemActions>{children}</ItemActions>}
-    </Item>
+    </RowItem>
   );
 }
 
