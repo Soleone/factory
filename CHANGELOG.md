@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.7.0](https://github.com/Soleone/factory/compare/v0.6.0...v0.7.0) (2026-11-24)
+
+### Features
+
+* **activity:** show single-digit step numbers in entry mark ([bb3e1f1](https://github.com/Soleone/factory/commit/bb3e1f105d89d458656d8b5210769cd97dc4e3f1))
+* **agent:** chat links jobs as chips that open them, accepts pasted images and renders tables ([e219dc4](https://github.com/Soleone/factory/commit/e219dc42e056c6abd838b75c6d2b7c610ab01882))
+* **chat:** Claude Code asks with one-click questions too ([d2f083b](https://github.com/Soleone/factory/commit/d2f083b1996d4a9f0c6398aa4ecd8e6b7427bb28))
+* **chat:** Pi can ask how to continue with one-click answers ([0515d77](https://github.com/Soleone/factory/commit/0515d77ac218504aa499c1917dfe2e7ece872add))
+* **cli:** factory inbox lists the page's Inbox ([#23](https://github.com/Soleone/factory/issues/23)) ([1417f17](https://github.com/Soleone/factory/commit/1417f17c067beec6445883d9f7040fe073cf4f7a))
+* configure Git identity for Factory worktrees ([#20](https://github.com/Soleone/factory/issues/20)) ([f67a179](https://github.com/Soleone/factory/commit/f67a179cf5cd3780d77dae46fc029967d82fe593))
+* dismissable error message below the header ([532c1ac](https://github.com/Soleone/factory/commit/532c1ac4be3295c47c6234182af5cefeee328d2b))
+* **queue:** picks reorder live while dragged, neighbours ease aside ([7a9e78a](https://github.com/Soleone/factory/commit/7a9e78a5325f7f3329aec762d46d93939bb999b4))
+* reassign a paused job after a warning that it starts fresh ([6ce4fc0](https://github.com/Soleone/factory/commit/6ce4fc03c55d36b8122485ff8321525ac24976a5))
+* **results:** dismiss details on merge and enlarge description images ([#25](https://github.com/Soleone/factory/issues/25)) ([070d366](https://github.com/Soleone/factory/commit/070d3669ac544884d5e3ae1a0639afa25de8415e))
+* **web:** share project filtering and make Clone app-wide ([#27](https://github.com/Soleone/factory/issues/27)) ([9bd8f62](https://github.com/Soleone/factory/commit/9bd8f62d7cf6579ad077d33b6613e00140a9f0b9))
+
+### Bug Fixes
+
+* clear release check warnings ([2c32e27](https://github.com/Soleone/factory/commit/2c32e27550b2d3dbc65d89a7ebb06b4a1e16b0ee))
+* **cli:** factory add queues listed candidates without asking workwork ([#16](https://github.com/Soleone/factory/issues/16)) ([50f0249](https://github.com/Soleone/factory/commit/50f0249140aee264beef442e5c48ba75c52f43cc))
+* **goals:** keep canceled goals from accepting late work ([#10](https://github.com/Soleone/factory/issues/10)) ([7512ec1](https://github.com/Soleone/factory/commit/7512ec1a6a74b3295a392077a991651844ca5773))
+* **goals:** return validation feedback for malformed plans ([#14](https://github.com/Soleone/factory/issues/14)) ([cf8c59a](https://github.com/Soleone/factory/commit/cf8c59a8c31aff94eca54034cd4bb314e4ceb22f))
+* make job and merge-train errors actionable ([#8](https://github.com/Soleone/factory/issues/8)) ([082b22b](https://github.com/Soleone/factory/commit/082b22b305a704c79caf59bdc851c6690944ed3b))
+* **reorder:** show the handle hint as a tooltip instead of title ([03e88ad](https://github.com/Soleone/factory/commit/03e88ad8a0dbad2d1977d6d5244c1d9562f20c52))
+* reroute jobs after a provider rejects startup ([#18](https://github.com/Soleone/factory/issues/18)) ([49d16c5](https://github.com/Soleone/factory/commit/49d16c5e27871f305c0a8b435b554e8ead8b15b5))
+* resolve frontend imports in the Node TypeScript project ([#21](https://github.com/Soleone/factory/issues/21)) ([eb60eb2](https://github.com/Soleone/factory/commit/eb60eb23c7a04487e530f972876aa16168211be6))
+* **web:** keep Results selection controls stable ([#26](https://github.com/Soleone/factory/issues/26)) ([f30ba92](https://github.com/Soleone/factory/commit/f30ba92ffe73d73e440ff6b9431d6fac76cc41fb))
+
+### Performance Improvements
+
+* **web:** fetch finished Results history on demand ([#22](https://github.com/Soleone/factory/issues/22)) ([09c3a3c](https://github.com/Soleone/factory/commit/09c3a3cdcee4cf901a155f8e1c6214ddce76e0ef))
+
 ## [0.6.0](https://github.com/Soleone/factory/compare/v0.5.3...v0.6.0) (2026-11-24)
 
 ### Features
