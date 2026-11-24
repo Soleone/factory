@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.7.1](https://github.com/Soleone/factory/compare/v0.7.0...v0.7.1) (2026-11-24)
+
+### Features
+
+* ask in a dialog instead of the browser's confirm ([9e815f4](https://github.com/Soleone/factory/commit/9e815f4e5a66704b5fa89d2361c2e64fdf3fa60f))
+
+### Bug Fixes
+
+* resolve Pi's ask extension on use so the page loads again ([ac1afb1](https://github.com/Soleone/factory/commit/ac1afb18a507c0694d630b778ee0074bfde9915c))
+
 ## [0.7.0](https://github.com/Soleone/factory/compare/v0.6.0...v0.7.0) (2026-11-24)
 
 ### Features
