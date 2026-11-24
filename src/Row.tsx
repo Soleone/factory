@@ -18,6 +18,7 @@ export function Row({
   meta,
   below,
   progress,
+  marked,
   children,
 }: {
   leading?: ReactNode;
@@ -27,6 +28,8 @@ export function Row({
   below?: ReactNode;
   /** How much of its time a running job has used, from 0 to 1, as a bar along the bottom. */
   progress?: number;
+  /** Draws a bar along the left edge, like for what ended since the last visit. */
+  marked?: boolean;
   children?: ReactNode;
 }) {
   return (
@@ -38,6 +41,8 @@ export function Row({
           style={{ "--progress": `${Math.min(progress, 1) * 100}%` } as CSSProperties}
         />
       )}
+      {/* Here, not in `leading`: ItemMedia's translate would make the bar fill the icon instead. */}
+      {marked && <span aria-hidden className="absolute inset-y-0 left-0 w-1 bg-foreground" />}
       {leading && <ItemMedia>{leading}</ItemMedia>}
       {/* min-w-0 lets long text truncate instead of wrapping the content under the icon. */}
       <ItemContent className="min-w-0">

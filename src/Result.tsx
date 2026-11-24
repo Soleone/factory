@@ -125,13 +125,8 @@ export function Result({
 
   return (
     <Row
-      leading={
-        <>
-          {/* A bar along the row's left edge marks what ended since the last visit. */}
-          {unread && <span aria-hidden className="absolute inset-y-0 left-0 w-1 bg-foreground" />}
-          {leading || <span className="size-4" />}
-        </>
-      }
+      marked={unread}
+      leading={leading || <span className="size-4" />}
       title={
         <>
           {unread && <span className="sr-only">New: </span>}
