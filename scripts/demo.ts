@@ -401,9 +401,43 @@ function demoTranscript(): ChatMessage[] {
   ];
 }
 
-/** The Live Agent's chat, replayed to every page that listens; new messages get a canned reply. */
+/** The Live Agent's chats, the current one replayed to every page that listens; new messages get a canned reply. */
 function demoChat() {
-  let messages = demoTranscript();
+  const hour = 3_600_000;
+  const exchange = (question: string, answer: string): ChatMessage[] => [
+    { role: "user", content: question },
+    { role: "assistant", content: [{ type: "text", text: answer }] },
+  ];
+  const chats = [
+    {
+      id: "tonight",
+      agent: "pi",
+      title: "Pick jobs for tonight",
+      lastActive: Date.now() - 0.1 * hour,
+      messages: demoTranscript(),
+    },
+    {
+      id: "tasks",
+      agent: "claude",
+      title: "Why did the tasks sync job fail twice?",
+      lastActive: Date.now() - 2 * hour,
+      messages: exchange(
+        "Why did the tasks sync job fail twice?",
+        "Both runs hit an expired token halfway through. A retry with a fresh token fixes it.",
+      ),
+    },
+    {
+      id: "split",
+      agent: "pi",
+      title: "Split the jobs.ts refactor into smaller jobs",
+      lastActive: Date.now() - 50 * hour,
+      messages: exchange(
+        "The jobs.ts refactor is too big for one run. Split it?",
+        "Three jobs: move limit parsing out, then the runner, then rename the session types.",
+      ),
+    },
+  ];
+  let current: string | undefined = "tonight";
   const pages = new Set<ServerResponse>();
   const send = (page: ServerResponse, record: PiRecord) =>
     page.write(`data: ${JSON.stringify(record)}\n\n`);
@@ -413,40 +447,56 @@ function demoChat() {
     command: "get_state",
     data: { model: { name: "GPT-6.2 Sol" }, thinkingLevel: "high" },
   };
-  const broadcast = (record: PiRecord) => {
-    for (const page of pages) send(page, record);
+  const listing = () => ({
+    type: "chats",
+    current,
+    chats: chats.map(({ id, agent, title, lastActive }) => ({ id, agent, title, lastActive })),
+  });
+  const messagesOf = () => chats.find((each) => each.id === current)?.messages ?? [];
+  const replay = (page: ServerResponse) => {
+    send(page, listing());
+    send(page, model);
+    for (const message of messagesOf()) send(page, { type: "message_start", message });
   };
-  const add = (message: ChatMessage) => {
-    messages.push(message);
-    broadcast({ type: "message_start", message });
+  const show = (id: string | undefined) => {
+    current = id;
+    for (const page of pages) {
+      send(page, { type: "reset" });
+      replay(page);
+    }
+    return null;
   };
   return {
     listen(page: ServerResponse) {
       page.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store" });
       page.write(": connected\n\n");
-      send(page, model);
-      for (const message of messages) send(page, { type: "message_start", message });
+      replay(page);
       pages.add(page);
       page.on("close", () => pages.delete(page));
     },
     say(text: string) {
-      add({ role: "user", content: text });
-      add({
-        role: "assistant",
-        content: [
-          {
-            type: "text",
-            text: "This is the demo, so no agent runs here. In the real factory I'd look into it, and run `factory merge` once you agree.",
-          },
-        ],
-      });
-      return null;
+      if (!current) {
+        current = randomUUID();
+        chats.unshift({
+          id: current,
+          agent: "pi",
+          title: text.split("\n")[0].slice(0, 60),
+          lastActive: 0,
+          messages: [],
+        });
+      }
+      const chat = chats.find((each) => each.id === current)!;
+      chat.lastActive = Date.now();
+      chat.messages.push(
+        ...exchange(
+          text,
+          "This is the demo, so no agent runs here. In the real factory I'd look into it, and run `factory merge` once you agree.",
+        ),
+      );
+      return show(current);
     },
-    reset() {
-      messages = [];
-      broadcast({ type: "reset" });
-      return null;
-    },
+    open: (id: string) => show(id),
+    fresh: () => show(undefined),
   };
 }
 
@@ -641,8 +691,10 @@ function dispatch(snapshot: Snapshot, route: string, body: unknown): unknown {
       return null;
     case "POST /api/chat":
       return chat.say((body as { message: string }).message);
-    case "POST /api/chat/reset":
-      return chat.reset();
+    case "POST /api/chat/new":
+      return chat.fresh();
+    case "POST /api/chat/open":
+      return chat.open((body as { id: string }).id);
     case "POST /api/chat/abort":
     case "POST /api/chat/answer":
       return null;

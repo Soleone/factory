@@ -54,7 +54,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { AGENT_NAMES } from "@/backend/agents.ts";
 import { agentName, repoName } from "@/format";
-import { Choice, RunFields, TuningFields } from "@/RunFields";
+import { ChatAgentFields, Choice, RunFields, TuningFields } from "@/RunFields";
 import { TierBadge } from "@/TierBadge";
 import { ProviderLogo, providerOf, useModelLabel, WorkerName } from "@/WorkerName";
 import { version } from "../package.json";
@@ -228,24 +228,12 @@ function SettingsForm({
           <StackedTabsContent value="chat">
             <FieldGroup>
               <FieldDescription>
-                The agent you plan the queue with. Changing it starts a new chat.
+                The agent new chats start with. Earlier chats keep the agent they started with.
               </FieldDescription>
-              <Field orientation="horizontal">
-                <Choice
-                  label="Chat agent"
-                  className="w-24 flex-none"
-                  items={AGENT_NAMES.map((name) => ({ value: name, label: agentName(name) }))}
-                  value={draft.chat.agent}
-                  onChange={(agent) => agent && setDraft({ ...draft, chat: { agent } })}
-                />
-                <TuningFields
-                  agent={draft.chat.agent}
-                  value={draft.chat}
-                  onChange={(tuning) =>
-                    setDraft({ ...draft, chat: { ...tuning, agent: draft.chat.agent } })
-                  }
-                />
-              </Field>
+              <ChatAgentFields
+                value={draft.chat}
+                onChange={(chat) => setDraft({ ...draft, chat })}
+              />
             </FieldGroup>
           </StackedTabsContent>
         </div>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "@/api";
-import { EFFORTS } from "@/backend/agents.ts";
+import { agentName } from "@/format";
+import { AGENT_NAMES, EFFORTS } from "@/backend/agents.ts";
 import type { Model, Settings, Tuning } from "@/backend/types.ts";
 import {
   Combobox,
@@ -267,5 +268,30 @@ export function Choice({
         ))}
       </SelectContent>
     </Select>
+  );
+}
+
+/** The Live Agent's agent, model and effort. Another agent means a new chat. */
+export function ChatAgentFields({
+  value,
+  onChange,
+}: {
+  value: Settings["chat"];
+  onChange: (chat: Settings["chat"]) => void;
+}) {
+  return (
+    <Field>
+      <Choice
+        label="Chat agent"
+        items={AGENT_NAMES.map((name) => ({ value: name, label: agentName(name) }))}
+        value={value.agent}
+        onChange={(agent) => agent && onChange({ agent })}
+      />
+      <TuningFields
+        agent={value.agent}
+        value={value}
+        onChange={(tuning) => onChange({ ...tuning, agent: value.agent })}
+      />
+    </Field>
   );
 }

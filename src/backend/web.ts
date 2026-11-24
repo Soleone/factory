@@ -278,7 +278,8 @@ export function serve(
     "POST /api/chat": (body: { message: string }) => planner.prompt(body.message),
     "POST /api/chat/abort": () => planner.abort(),
     "POST /api/chat/answer": (body: { id: string }) => planner.answer(body),
-    "POST /api/chat/reset": () => planner.reset(),
+    "POST /api/chat/new": () => planner.fresh(),
+    "POST /api/chat/open": (body: { id: string }) => planner.open(body.id),
     "POST /api/jobs/close": async (_, id) => {
       const { url } = await openPr(id);
       await closePr(url);
@@ -291,7 +292,7 @@ export function serve(
     "PUT /api/settings": (body: Settings) => {
       const before = JSON.stringify(readSettings(state).chat);
       writeSettings(state, checkSettings(body));
-      if (JSON.stringify(body.chat) !== before) planner.reset();
+      if (JSON.stringify(body.chat) !== before) planner.retune();
       stopMirror();
       stopMirror = mirrorTasks(state, readSettings(state), console.log);
     },

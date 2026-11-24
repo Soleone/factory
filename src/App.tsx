@@ -24,7 +24,7 @@ import { CandidatesView } from "@/CandidatesView";
 import { Controls } from "@/Controls";
 import { GoalsView } from "@/GoalsView";
 import { Logo } from "@/Logo";
-import { PlanView } from "@/PlanView";
+import { ChatSwitcher, PlanView, useChat } from "@/PlanView";
 import { QueueView, queued } from "@/QueueView";
 import { ResultsView } from "@/ResultsView";
 import { SettingsDialog } from "@/SettingsDialog";
@@ -49,6 +49,7 @@ export function App() {
   const { snapshot, error, act } = useFactory();
   /** The Live Agent draft, here so the Results tab can fill it with a question. */
   const [plan, setPlan] = useState("");
+  const chat = useChat();
 
   if (!snapshot)
     return (
@@ -65,8 +66,10 @@ export function App() {
     // The agent sits beside every tab, and stays mounted so a reply keeps streaming while it's closed.
     <AgentSidebar
       title="Live Agent"
+      header={<ChatSwitcher chat={chat} />}
+      busy={chat.transcript.busy}
       agent={
-        <PlanView agent={snapshot.settings.chat.agent} prompt={plan} onPromptChange={setPlan} />
+        <PlanView chat={chat} settings={snapshot.settings} prompt={plan} onPromptChange={setPlan} />
       }
     >
       <Factory snapshot={snapshot} error={error} act={act} onAsk={setPlan} />

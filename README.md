@@ -70,7 +70,7 @@ On the page, everything that waits on you collects in the **Inbox**, which the p
 
 Live Agent, the robot button right of the tabs, is a chat with an agent about what to queue and what to do with the results. It reads the candidates, the queue and past results, proposes a few jobs that won't step on each other, and adds them through the CLI once you agree, candidates or a prompt of its own. Ask it to review results and it reads their PRs and says what it would merge and what it would close; once you agree it puts them on the merge train, rebases, closes, queues follow-ups, retries and cleans up. It can reorder and pin the queue and answer the Inbox as you tell it. It never approves a goal's plan, turns the factory on or off, or changes your repos other than through the CLI. That is an instruction to the agent, not a sandbox: it has a shell, like the agents doing jobs. Results that failed, or that the train skipped, have an **Ask** button that starts the chat with the question already written.
 
-Settings > Live Agent picks the agent (Claude Code or Pi), its model and effort. Model choices are short lists: Pi's scoped models (`enabledModels` in Pi's settings) and Claude Code's current models. The chat survives a restart of `factory serve`.
+The chat's title in the agent's header opens a searchable list of earlier chats; picking one replays it and the agent resumes that session. Only one agent runs at a time, so opening another chat stops a reply still running. **+** starts a new chat, named after its first message. The model badge under the composer picks the agent, model and effort for the next message, like Settings > Live Agent; another agent starts a new chat, and every chat keeps the agent it started with. Model choices are short lists: Pi's scoped models (`enabledModels` in Pi's settings) and Claude Code's current models. Chats survive a restart of `factory serve`.
 
 ## Commands
 
@@ -148,7 +148,7 @@ In `$DATA/apps/factory/` when `DATA` is set, otherwise `~/.local/share/factory/`
 - `runs/<run>/<job>-<attempt>/`: `prompt.md`, `turn-N.md` for each later turn, and `agent.log` with the runner's event stream
 - `running/<job>.json`: an attempt in progress or paused: its session, worktree and turn
 - `sessions/`: pi's session files for job attempts (Claude Code keeps its own)
-- `chat.json`, `chat.jsonl`, `chat-sessions/`: the Live Agent
+- `chats.json`, `chats/`, `chat-sessions/`: the Live Agent's chats
 - `worktrees/<repo>/<n>/`
 - `status.json`, `factory.pid`, `factory.log`: the current run, its pools and workers
 

@@ -95,7 +95,8 @@ export const api = {
   chat: (message: string) => call("POST", "/api/chat", { message }),
   abortChat: () => call("POST", "/api/chat/abort"),
   answerChat: (answer: { id: string } & DialogAnswer) => call("POST", "/api/chat/answer", answer),
-  resetChat: () => call("POST", "/api/chat/reset"),
+  newChat: () => call("POST", "/api/chat/new"),
+  openChat: (id: string) => call("POST", "/api/chat/open", { id }),
 };
 
 /** Runs a change against the factory; the page reloads after it and shows what went wrong, if anything. */

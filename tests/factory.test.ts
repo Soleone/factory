@@ -1673,7 +1673,10 @@ esac`;
       let text = "";
       return async (type: string) => {
         for (;;) {
-          const records = [...text.matchAll(/^data: (.*)$/gm)].map(([, json]) => JSON.parse(json));
+          // The list of chats comes along with every change; only a test that waits for it sees it.
+          const records = [...text.matchAll(/^data: (.*)$/gm)]
+            .map(([, json]) => JSON.parse(json))
+            .filter((record) => type === "chats" || record.type !== "chats");
           const end = records.findIndex((record) => record.type === type);
           if (end >= 0) return records.slice(0, end + 1);
           text += (await reader.read()).value;
@@ -1709,7 +1712,7 @@ esac; done`,
       const replay = await later("agent_settled");
       expect(replay.map((record) => record.type)).toEqual(types);
       expect(replay[1].message.content[0].text).toBe("Queue a");
-      await fetch(`${chat.url}/reset`, { method: "POST" });
+      await fetch(`${chat.url}/new`, { method: "POST" });
       expect((await first("reset")).at(-1).type).toBe("reset");
       expect(readFileSync(args, "utf8")).toMatch(/--model openai\/gpt-6.2-sol --thinking low/);
     } finally {
@@ -1749,10 +1752,43 @@ esac; done`;
       const launches = readFileSync(args, "utf8");
       const id = /--session-id (\S+)/.exec(launches)![1];
       expect(launches).toContain(`--resume ${id}`);
-      await fetch(`${second.url}/reset`, { method: "POST" });
-      expect(existsSync(join(first.state, "chat.jsonl"))).toBe(false);
     } finally {
       second.close();
+    }
+  });
+
+  test("the Plan chat keeps earlier chats: a new one starts fresh, opening the first replays it and resumes its session", async () => {
+    const args = join(scratch, "claude-switch-args");
+    const fake = `echo "$@" >> ${args}; while read -r line; do case "$line" in
+*'"user"'*) echo '{"type":"result","is_error":false}' ;;
+esac; done`;
+    const chat = await chatServer("claude", fake, { agent: "claude" });
+    try {
+      const page = await chat.page();
+      await chat.prompt("Pick five jobs\nfor tonight");
+      await page("agent_settled");
+      const [{ id: first }] = JSON.parse(
+        readFileSync(join(chat.state, "chats.json"), "utf8"),
+      ).chats;
+      await fetch(`${chat.url}/new`, { method: "POST" });
+      await chat.prompt("why did tasks fail?");
+      const later = await chat.page();
+      const listed = (await later("chats"))[0];
+      expect(listed.chats.map((entry: { title: string }) => entry.title)).toEqual([
+        "why did tasks fail?",
+        "Pick five jobs",
+      ]);
+      expect(listed.current).not.toBe(first);
+      await fetch(`${chat.url}/open`, { method: "POST", body: JSON.stringify({ id: first }) });
+      const replay = await later("exit");
+      expect(replay.some((record) => record.type === "reset")).toBe(true);
+      await chat.prompt("and one more");
+      await (
+        await chat.page()
+      )("agent_settled");
+      expect(readFileSync(args, "utf8")).toContain(`--resume ${first}`);
+    } finally {
+      chat.close();
     }
   });
 

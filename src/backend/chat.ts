@@ -1,6 +1,15 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { appendFileSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import type { ServerResponse } from "node:http";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -20,64 +29,93 @@ const pi: Protocol = {
   record: (record: PiRecord) => [record],
 };
 
+/** A Live Agent chat, kept under chats/<id>.jsonl. It stays with the agent it started with. */
+export type ChatEntry = {
+  id: string;
+  agent: string;
+  title: string;
+  lastActive: number;
+  prompted: boolean;
+};
+
+/** The first line of the first prompt, short enough for one row. */
+function titleOf(message: string): string {
+  const line = message.trim().split("\n")[0].trim();
+  return line.length > 60 ? `${line.slice(0, 59)}…` : line;
+}
+
 /**
- * One chat for planning the queue, shared by every open page, with the agent the settings name.
- * The page reads Pi's RPC records (see Pi's docs/rpc.md), whichever agent replies. The conversation
- * lasts until reset, and a page that opens later gets it replayed. It survives a restart of serve:
- * the agent keeps its session (Pi's in chat-sessions/, Claude Code's in its own folder) and the page's
- * records are in chat.jsonl.
+ * The chats for planning the queue, with the agent the settings name for new ones. Every open page
+ * shows the current chat and reads Pi's RPC records (see Pi's docs/rpc.md), whichever agent replies,
+ * plus a `chats` record with the list. One agent runs at a time: opening another chat ends it. Chats
+ * survive a restart of serve: the agent keeps its session (Pi's in chat-sessions/, Claude Code's in
+ * its own folder) and the page's records are in chats/.
  */
 export function chat(state: string, address: () => string) {
-  const savedPath = join(state, "chat.jsonl");
-  const conversationPath = join(state, "chat.json");
+  const folder = join(state, "chats");
+  const indexPath = join(state, "chats.json");
+  mkdirSync(folder, { recursive: true });
   let session: { child: ChildProcessWithoutNullStreams; protocol: Protocol } | undefined;
   const pages = new Set<ServerResponse>();
-  /** The agent session this chat continues; `prompted` once the agent has one to resume. */
-  let conversation: { agent: string; id: string; prompted: boolean } | undefined = existsSync(
-    conversationPath,
-  )
-    ? JSON.parse(readFileSync(conversationPath, "utf8"))
-    : undefined;
-  /** Every record of this conversation, minus the deltas of replies that have ended. */
-  let log: PiRecord[] = existsSync(savedPath)
-    ? readFileSync(savedPath, "utf8")
-        .split("\n")
-        .filter(Boolean)
-        .map((line) => JSON.parse(line))
-    : [];
-  // A reply the restart cut off doesn't stay busy.
-  if (log.length > 0) log.push({ type: "exit" });
+  let { chats, current } = existsSync(indexPath)
+    ? (JSON.parse(readFileSync(indexPath, "utf8")) as { chats: ChatEntry[]; current?: string })
+    : adoptSingleChat(state, folder);
+  /** Every record of the current chat, minus the deltas of replies that have ended. */
+  let log = load(current);
+
+  function load(id: string | undefined): PiRecord[] {
+    const path = id && join(folder, `${id}.jsonl`);
+    if (!path || !existsSync(path)) return [];
+    const records = readFileSync(path, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+    // A reply that a restart or a switch cut off doesn't stay busy.
+    return [...records, { type: "exit" }];
+  }
+
+  function broadcast(record: PiRecord): void {
+    for (const page of pages) page.write(`data: ${JSON.stringify(record)}\n\n`);
+  }
 
   function emit(record: PiRecord): void {
     if (record.type === "message_end") log = log.filter((each) => each.type !== "message_update");
     log.push(record);
     // Deltas only matter while a reply streams; its message_end holds the whole of it.
-    if (record.type !== "message_update") appendFileSync(savedPath, `${JSON.stringify(record)}\n`);
-    for (const page of pages) page.write(`data: ${JSON.stringify(record)}\n\n`);
+    if (record.type !== "message_update")
+      appendFileSync(join(folder, `${current}.jsonl`), `${JSON.stringify(record)}\n`);
+    broadcast(record);
   }
 
-  function save(change: typeof conversation): void {
-    conversation = change;
-    writeFileSync(conversationPath, `${JSON.stringify(conversation)}\n`);
+  const listing = () => ({ type: "chats", chats, current }) as PiRecord;
+
+  function save(): void {
+    chats.sort((a, b) => b.lastActive - a.lastActive);
+    writeFileSync(indexPath, `${JSON.stringify({ chats, current })}\n`);
+    broadcast(listing());
   }
 
   function start() {
+    const entry = chats.find((each) => each.id === current)!;
     const { agent, ...tuning } = readSettings(state).chat;
-    // Settings edited by hand while serve was off can name another agent: that's a new chat.
-    if (conversation?.agent !== agent) save({ agent, id: randomUUID(), prompted: false });
-    const { id, prompted } = conversation!;
-    const { command, args } = chatAgent(agent, tuning, context(), {
-      id,
-      resume: prompted,
-      folder: join(state, "chat-sessions"),
-    });
-    const protocol = agent === "claude" ? claudeChat(tuning.effort) : pi;
+    // A chat started with the other agent continues with that one, at its defaults.
+    const { command, args } = chatAgent(
+      entry.agent,
+      entry.agent === agent ? tuning : {},
+      context(),
+      {
+        id: entry.id,
+        resume: entry.prompted,
+        folder: join(state, "chat-sessions"),
+      },
+    );
+    const protocol = entry.agent === "claude" ? claudeChat(tuning.effort) : pi;
     const child = spawn(command, args, {
       cwd: state,
       env: { ...process.env, FACTORY_URL: address() },
     });
     createInterface({ input: child.stdout }).on("line", (line) => {
-      // Only JSON records are for the page, and nothing from an agent New chat let go.
+      // Only JSON records are for the page, and nothing from an agent that was let go.
       if (line.startsWith("{") && session?.child === child)
         for (const record of protocol.record(JSON.parse(line))) emit(record);
     });
@@ -86,7 +124,8 @@ export function chat(state: string, address: () => string) {
     let stderr = "";
     child.stderr.on("data", (data) => (stderr = (stderr + data).slice(-2000)));
     child.on("error", (error) => {
-      if (session?.child === child) session = undefined;
+      if (session?.child !== child) return;
+      session = undefined;
       emit({ type: "exit", error: `Can't start ${command}: ${error.message}` });
     });
     child.on("exit", (code) => {
@@ -108,21 +147,51 @@ export function chat(state: string, address: () => string) {
     for (const each of heard) emit(each);
   }
 
+  /** Closing stdin asks the agent to shut down; the next prompt starts it again. */
+  function stop(): void {
+    session?.child.stdin.end();
+    session = undefined;
+  }
+
+  /** Shows chat `id`, or a new one for undefined, on every page. */
+  function show(id: string | undefined): void {
+    stop();
+    current = id;
+    log = load(id);
+    broadcast({ type: "reset" });
+    for (const record of log) broadcast(record);
+    save();
+  }
+
   return {
-    /** Streams records to a page, starting with the conversation so far. */
+    /** Streams records to a page: the list of chats, then the current one so far. */
     listen(response: ServerResponse): void {
       response.writeHead(200, {
         "content-type": "text/event-stream",
         "cache-control": "no-store",
       });
       response.write(": connected\n\n");
+      response.write(`data: ${JSON.stringify(listing())}\n\n`);
       for (const record of log) response.write(`data: ${JSON.stringify(record)}\n\n`);
       pages.add(response);
       response.on("close", () => pages.delete(response));
     },
     prompt(message: string): void {
+      let entry = chats.find((each) => each.id === current);
+      if (!entry) {
+        entry = {
+          id: randomUUID(),
+          agent: readSettings(state).chat.agent,
+          title: titleOf(message),
+          lastActive: 0,
+          prompted: false,
+        };
+        chats.push(entry);
+        current = entry.id;
+      }
       send({ type: "prompt", message });
-      if (!conversation!.prompted) save({ ...conversation!, prompted: true });
+      Object.assign(entry, { prompted: true, lastActive: Date.now() });
+      save();
     },
     abort: () => session && send({ type: "abort" }),
     /** Answers a question from one of Pi's extensions, which Pi waits on; every page closes it. */
@@ -131,16 +200,44 @@ export function chat(state: string, address: () => string) {
       send({ type: "extension_ui_response", ...reply });
       emit({ type: "extension_ui_answered", id: reply.id });
     },
-    reset(): void {
-      // Closing stdin asks the agent to shut down.
-      session?.child.stdin.end();
-      session = undefined;
-      for (const page of pages) page.write(`data: ${JSON.stringify({ type: "reset" })}\n\n`);
-      log = [];
-      rmSync(savedPath, { force: true });
-      rmSync(conversationPath, { force: true });
-      conversation = undefined;
+    open(id: string): void {
+      if (!chats.some((each) => each.id === id)) throw new Error(`no chat ${id}`);
+      if (id !== current) show(id);
     },
+    fresh: () => show(undefined),
+    /** New settings reach the next prompt; another agent means a new chat. */
+    retune(): void {
+      const entry = chats.find((each) => each.id === current);
+      if (entry && entry.agent !== readSettings(state).chat.agent) show(undefined);
+      else stop();
+    },
+  };
+}
+
+/** Before chats.json there was one chat, in chat.json and chat.jsonl: it becomes the first entry. */
+function adoptSingleChat(state: string, folder: string): { chats: ChatEntry[]; current?: string } {
+  const old = join(state, "chat.json");
+  const records = join(state, "chat.jsonl");
+  if (!existsSync(old)) return { chats: [] };
+  const { agent, id, prompted } = JSON.parse(readFileSync(old, "utf8"));
+  rmSync(old);
+  if (!prompted || !existsSync(records)) return { chats: [] };
+  const asked = readFileSync(records, "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map(
+      (line) =>
+        JSON.parse(line) as { message?: { role: string; content: string | { text?: string }[] } },
+    )
+    .find((record) => record.message?.role === "user")?.message?.content;
+  const text = typeof asked === "string" ? asked : asked?.find((part) => part.text)?.text;
+  const title = text ? titleOf(text) : "Earlier chat";
+  renameSync(records, join(folder, `${id}.jsonl`));
+  return {
+    chats: [
+      { id, agent, title, lastActive: statSync(join(folder, `${id}.jsonl`)).mtimeMs, prompted },
+    ],
+    current: id,
   };
 }
 
