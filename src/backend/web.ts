@@ -33,7 +33,7 @@ import {
   removeJob,
   retryJob,
 } from "./jobs.ts";
-import { turnOff, turnOn } from "./power.ts";
+import { resumeWorker, turnOff, turnOn } from "./power.ts";
 import { closePr, mergePr, prCache, readPrDetails, rebasePr } from "./review.ts";
 import {
   approveGoal,
@@ -335,6 +335,7 @@ export function serve(
       return turnOn(state, runArgs(body));
     },
     "POST /api/off": () => turnOff(state),
+    "POST /api/workers/resume": (body: { id: string }) => resumeWorker(state, body.id),
     "POST /api/images": (body: {
       prompt: string;
       repo?: string;

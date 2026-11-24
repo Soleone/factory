@@ -1,4 +1,11 @@
-import { CheckCheckIcon, CheckIcon, EyeIcon, FlagIcon, LightbulbIcon } from "lucide-react";
+import {
+  CheckCheckIcon,
+  CheckIcon,
+  EyeIcon,
+  FlagIcon,
+  LightbulbIcon,
+  SettingsIcon,
+} from "lucide-react";
 import { api, type Act } from "@/api";
 import type { Snapshot } from "@/backend/types.ts";
 import { Button } from "@/components/ui/button";
@@ -13,6 +20,7 @@ import { Said } from "@/JobNotes";
 
 const ICON = {
   checkpoint: <FlagIcon className="size-4 text-warning" />,
+  setup: <SettingsIcon className="size-4 text-warning" />,
   assume: <LightbulbIcon className="size-4 text-warning" />,
   unverified: <EyeIcon className="size-4 text-muted-foreground" />,
 };
@@ -149,6 +157,14 @@ function InboxRow({
           </Button>
           <Button size="sm" onClick={() => act(() => api.goal(job.id, "approve"))}>
             Approve
+          </Button>
+        </Row>
+      );
+    case "setup":
+      return (
+        <Row leading={ICON.setup} title={title} meta={job.why ?? "waiting for setup"}>
+          <Button variant="outline" size="sm" onClick={() => act(() => api.retry(job.id))}>
+            Retry now
           </Button>
         </Row>
       );

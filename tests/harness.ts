@@ -160,6 +160,27 @@ ${[
   .join("\n")}
 JSON
 exit 0`;
+export const AUTH_ERROR = "Invalid API key · Please run /login";
+/** Claude Code reports authentication failures in a structured assistant record. */
+export const AUTH_FAILED = `
+cat <<'JSON'
+${[
+  { type: "system", subtype: "init", session_id: "auth" },
+  {
+    type: "assistant",
+    error: "authentication_failed",
+    message: {
+      model: "<synthetic>",
+      usage: ZERO_USAGE,
+      content: [{ type: "text", text: AUTH_ERROR }],
+    },
+  },
+  { type: "result", subtype: "success", is_error: true, result: AUTH_ERROR, usage: ZERO_USAGE },
+]
+  .map((event) => JSON.stringify(event))
+  .join("\n")}
+JSON
+exit 1`;
 export const OPEN_PR = {
   state: "OPEN",
   isDraft: false,

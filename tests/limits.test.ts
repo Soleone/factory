@@ -1,8 +1,11 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vite-plus/test";
 import { pinJob } from "../src/backend/jobs.ts";
-import { readSettings, writeSettings } from "../src/backend/state.ts";
+import { resumeWorker } from "../src/backend/power.ts";
+import { pidPath, readSettings, writeSettings } from "../src/backend/state.ts";
+import { readStream } from "../src/backend/stream.ts";
+import type { Job, Status } from "../src/backend/types.ts";
 import {
   scratch,
   MINUTE,
@@ -16,6 +19,8 @@ import {
   OK,
   LIMIT_ERROR,
   STARTUP_LIMIT,
+  AUTH_ERROR,
+  AUTH_FAILED,
 } from "./harness.ts";
 
 describe("the factory", () => {
@@ -243,13 +248,99 @@ describe("the factory", () => {
     expect(wakes).toHaveLength(3);
   });
 
-  test("three quick failures in a row stop the agent", async () => {
+  test("quick failures, retries of one job included, leave the worker free for later jobs", async () => {
     const base = setup(["a", "b", "c"]);
-    agents({ claude: "echo 'Not logged in'; exit 1" });
+    agents({ claude: `case "$prompt" in *"do c"*) ${OK} ;; *) echo 'it broke'; exit 1 ;; esac` });
     for (const id of ["a", "b", "c"]) base.pick(id);
-    const jobs = await work(options(base), () => false);
-    expect(jobs.map((job) => job.attempts.length)).toEqual([2, 1, 0]);
-    expect(status(base.state).workers[0].reason).toMatch(/^3 failures in a row/);
+    const jobs = await work(options(base));
+    expect(jobs.map((job) => [job.state, job.attempts.length])).toEqual([
+      ["failed", 2],
+      ["failed", 2],
+      ["done", 1],
+    ]);
+    expect(status(base.state).workers[0]).toMatchObject({ state: "stopped", reason: "turned off" });
+  });
+
+  test("a worker that can't log in pauses with its job's session kept, and resumes in the same run", async () => {
+    const base = setup(["a", "b"]);
+    const loggedIn = join(base.state, "logged-in");
+    agents({ claude: `[ -f '${loggedIn}' ] && { ${OK}; exit 0; }\n${AUTH_FAILED}` });
+    base.pick("a");
+    base.pick("b");
+    // resumeWorker asks the running factory; this test process is it.
+    writeFileSync(pidPath(base.state), `${process.pid}\n`);
+    const pauses: { worker: Status["workers"][number]; jobs: Job[] }[] = [];
+    const jobs = await work(options(base), (jobs) => {
+      if (!existsSync(join(base.state, "status.json"))) return false;
+      const worker = status(base.state).workers[0];
+      if (worker.state === "paused" && worker.since !== pauses.at(-1)?.worker.since) {
+        pauses.push({ worker, jobs });
+        // The first resume finds the fault still there, so the worker pauses again.
+        if (pauses.length === 2) writeFileSync(loggedIn, "");
+        resumeWorker(base.state, worker.id);
+      }
+      return jobs.every((job) => job.state !== "queued" && job.state !== "running");
+    });
+    expect(pauses).toHaveLength(2);
+    for (const { worker, jobs } of pauses) {
+      expect(worker.reason).toBe(`authentication failed: ${AUTH_ERROR}`);
+      // Not the job's failure: no attempt ends, and the other job isn't touched.
+      expect(jobs.map((job) => [job.state, job.attempts.length])).toEqual([
+        ["queued", 0],
+        ["queued", 0],
+      ]);
+    }
+    expect(jobs.map((job) => job.state)).toEqual(["done", "done"]);
+    expect(jobs[0].attempts).toMatchObject([{ outcome: "done", turns: 3 }]);
+    const after = status(base.state);
+    expect(after.workers).toHaveLength(1);
+    expect(after.pools[0]).toMatchObject({ limits: 0 });
+    expect(() => resumeWorker(base.state, after.workers[0].id)).toThrow(/isn't paused/);
+    rmSync(pidPath(base.state));
+    expect(readStream(AUTH_FAILED).fault).toBe("authentication failed");
+  });
+
+  test("a missing Git identity holds the repo's jobs without spending agent time, until it's set", async () => {
+    const base = setup(["a", "b", "c"]);
+    const previousConfig = process.env.GIT_CONFIG_GLOBAL;
+    const noIdentity = join(scratch, "no-identity-hold.gitconfig");
+    writeFileSync(noIdentity, "[user]\n\tuseConfigOnly = true\n");
+    const launches = join(base.state, "launches");
+    agents({ claude: `echo x >> '${launches}'; ${OK}` });
+    for (const id of ["a", "b", "c"]) base.pick(id);
+    try {
+      process.env.GIT_CONFIG_GLOBAL = noIdentity;
+      let held: Job[] | undefined;
+      let heldAt = 0;
+      let fixedAt: Job[] | undefined;
+      const jobs = await work(options(base), (jobs) => {
+        if (!held && jobs.every((job) => job.state === "blocked")) {
+          held = jobs;
+          heldAt = Date.now();
+        }
+        // Held a while first, so a run that started them again and again would show it.
+        if (held && !fixedAt && Date.now() - heldAt > 300) {
+          fixedAt = jobs;
+          writeSettings(base.state, {
+            ...readSettings(base.state),
+            commitIdentity: { name: "Factory Test", email: "factory@example.com" },
+          });
+        }
+        return jobs.every((job) => job.state === "done");
+      });
+      for (const each of [held!, fixedAt!])
+        expect(each.map((job) => [job.blocked, job.attempts.length])).toEqual([
+          ["setup", 1],
+          ["setup", 0],
+          ["setup", 0],
+        ]);
+      expect(held!.every((job) => job.why?.includes("Settings → GitHub"))).toBe(true);
+      expect(jobs.map((job) => job.attempts.length)).toEqual([2, 1, 1]);
+      expect(jobs[0].attempts[0].setupFailed).toBe(true);
+      expect(readFileSync(launches, "utf8")).toBe("x\nx\nx\n");
+    } finally {
+      process.env.GIT_CONFIG_GLOBAL = previousConfig;
+    }
   });
 
   test("a repo that can't be set up fails the job with the reason in its log", async () => {
@@ -257,8 +348,8 @@ describe("the factory", () => {
     agents({ claude: OK });
     sh(base.repo, "git", "remote", "set-url", "origin", join(scratch, "gone"));
     for (const id of ["a", "b", "c"]) base.pick(id);
-    const jobs = await work(options(base), () => false);
-    expect(jobs.map((job) => job.attempts.length)).toEqual([2, 1, 0]);
+    const jobs = await work(options(base));
+    expect(jobs.map((job) => job.attempts.length)).toEqual([2, 2, 2]);
     const attempt = jobs[0].attempts[0];
     expect(readFileSync(attempt.log, "utf8")).toBe(`${attempt.error}\n`);
   });

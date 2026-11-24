@@ -63,6 +63,7 @@ const BLOCKED: Record<string, string> = {
   asked: "waiting for you",
   held: "held by a failure",
   review: "merging",
+  setup: "waiting for setup",
 };
 
 /** The brief the goal started from; goals from before it was kept have it only in their decomposer's prompt. */

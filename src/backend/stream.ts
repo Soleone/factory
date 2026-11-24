@@ -16,6 +16,8 @@ export type Facts = {
   /** The agent's last words, and an error the runner reported. */
   text?: string;
   error?: string;
+  /** A fault of the worker rather than the job, as the runner itself classes it: a failed login. */
+  fault?: string;
 };
 
 export const noFacts = (): Facts => ({
@@ -34,6 +36,8 @@ type Record_ = {
   session_id?: string;
   is_error?: boolean;
   result?: string;
+  /** Claude Code's class of an assistant error: authentication_failed, rate_limit, server_error… */
+  error?: string;
   usage?: Usage;
   rate_limit_info?: { status?: string };
   message?: {
@@ -110,6 +114,8 @@ function fold(record: Record_, facts: Facts, seen: Set<string>): void {
   // Claude Code
   if (type === "system" && record.subtype === "init") facts.session = record.session_id;
   if (type === "system" && record.subtype === "compact_boundary") facts.compactions++;
+  if (type === "assistant" && record.error === "authentication_failed")
+    facts.fault = "authentication failed";
   if (type === "assistant" && record.message) {
     const { message } = record;
     for (const block of blocks(message.content)) {

@@ -77,6 +77,7 @@ const DOT: Record<Worker["state"], string> = {
   idle: "border border-muted-foreground",
   working: "bg-primary",
   sleeping: "bg-muted-foreground/40",
+  paused: "bg-warning",
   stopped: "bg-destructive",
 };
 
@@ -95,7 +96,7 @@ function workerState(worker: Worker): string {
  * Each provider's workers as same-size dots, a row per kind of worker, filled while one works.
  * While the factory is off it shows, muted, the workers the settings would start.
  */
-function Pool({ status, presets }: { status: Status | null; presets: Preset[] }) {
+function Pool({ status, presets, act }: { status: Status | null; presets: Preset[]; act: Act }) {
   const workers = status?.workers ?? presetWorkers(presets);
   const pools =
     status?.pools ??
@@ -109,6 +110,7 @@ function Pool({ status, presets }: { status: Status | null; presets: Preset[] })
         const inPool = workers.filter((worker) => worker.pool === pool.name);
         const busy = inPool.filter((worker) => worker.job).length;
         const kinds = [...new Set(inPool.map((worker) => worker.preset))];
+        const paused = status ? inPool.filter((worker) => worker.state === "paused") : [];
         const pause =
           pool.stopped ??
           (pool.until
@@ -159,6 +161,20 @@ function Pool({ status, presets }: { status: Status | null; presets: Preset[] })
               </p>
             )}
             {pause && <p className="text-xs text-warning">{pause}</p>}
+            {paused.map((worker) => (
+              <p key={worker.id} className="flex items-start justify-between gap-2 text-xs">
+                <span className="min-w-0 text-warning">
+                  {worker.id} paused: {worker.reason}
+                </span>
+                <Button
+                  variant="outline"
+                  size="xs"
+                  onClick={() => act(() => api.resumeWorker(worker.id))}
+                >
+                  Resume
+                </Button>
+              </p>
+            ))}
           </section>
         );
       })}
@@ -345,7 +361,7 @@ export function QueueView({
 
   return (
     <div className="grid gap-8 pt-2 lg:grid-cols-[1fr_15rem]">
-      <Pool status={on ? status : null} presets={settings.presets} />
+      <Pool status={on ? status : null} presets={settings.presets} act={act} />
       <div className="flex min-w-0 flex-col gap-8 lg:row-start-1">
         {running.length > 0 && (
           <Section title={`Running (${running.length})`}>

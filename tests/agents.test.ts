@@ -90,9 +90,9 @@ describe("the factory", () => {
     expect(sh(base.repo, "git", "branch", "--list", "factory/*")).toBe(`  factory/${b.id}-1\n`);
   });
 
-  test("requires Git identity before launching an agent and uses the saved identity on retry", async () => {
+  test("requires Git identity before launching an agent and uses the saved identity when unblocked", async () => {
     const base = setup(["a"]);
-    const queued = base.pick("a");
+    base.pick("a");
     const previousConfig = process.env.GIT_CONFIG_GLOBAL;
     const noIdentity = join(scratch, "require-explicit.gitconfig");
     writeFileSync(noIdentity, "[user]\n\tuseConfigOnly = true\n");
@@ -103,16 +103,15 @@ describe("the factory", () => {
     });
     try {
       process.env.GIT_CONFIG_GLOBAL = noIdentity;
-      const [failed] = await work(options(base));
-      expect(failed.state).toBe("failed");
-      expect(failed.attempts).toHaveLength(1);
-      expect(failed.attempts[0].error).toContain("Settings → GitHub");
+      const [blocked] = await work(options(base));
+      expect(blocked).toMatchObject({ state: "blocked", blocked: "setup" });
+      expect(blocked.why).toContain("Settings → GitHub");
+      expect(blocked.attempts).toMatchObject([{ setupFailed: true }]);
       expect(existsSync(launched)).toBe(false);
 
       const commitIdentity = { name: "Factory Test", email: "factory@example.com" };
       writeSettings(base.state, { ...readSettings(base.state), commitIdentity });
-      retryJob(base.state, queued.id);
-      const [finished] = await work(options(base));
+      const [finished] = await work(options(base), (jobs) => jobs[0].state === "done");
       expect(finished.state).toBe("done");
       expect(finished.attempts).toHaveLength(2);
       expect(existsSync(launched)).toBe(true);

@@ -22,6 +22,9 @@ export const pidPath = (state: string) => join(state, "factory.pid");
 
 /** Where a running or paused attempt keeps its session, worktree and turns. */
 export const livePath = (state: string, id: string) => join(state, "running", `${id}.json`);
+/** Asks the run to resume a paused worker, by its id like claude#1. */
+export const resumePath = (state: string, worker: string) =>
+  join(state, "resume", encodeURIComponent(worker));
 
 export function runningPid(state: string): number | undefined {
   if (!existsSync(pidPath(state))) return undefined;

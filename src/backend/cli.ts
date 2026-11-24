@@ -38,7 +38,7 @@ import {
 import { run, type RunOptions } from "./loop.ts";
 import { createRepo } from "./repos.ts";
 import { exportGoal } from "./goalExport.ts";
-import { logPath, turnOff, turnOn } from "./power.ts";
+import { logPath, resumeWorker, turnOff, turnOn } from "./power.ts";
 import { output, pidPath, readSettings, runningPid, STATE, writeSettings } from "./state.ts";
 import {
   openAssumptions,
@@ -154,6 +154,8 @@ http://127.0.0.1:7040), like the page.`,
   factory run [run options]    the same, in the foreground
   factory stop [--kill]        turn it off; agents at work finish, and the next start records them;
                                --kill stops them too and puts their jobs back in the queue
+  factory resume <worker>      go on with a worker that paused on a fault of its own, like a failed
+                               login, once that's fixed; \`factory status\` shows why it paused
   factory auto on|off          let auto mode keep the queue topped up from workwork, or not
   factory serve [--port 7040] [--host 127.0.0.1]
                                a web page to watch, browse candidates, queue them and turn it on or off
@@ -278,6 +280,7 @@ async function main(): Promise<void> {
   if (command === "tail") return tail();
   if (command === "add") return add(args, values);
   if (command === "serve") return void serve(STATE, count(values.port, "--port"), values.host);
+  if (command === "resume") return resume(need(args[0], "a worker"));
   if (command === "stop") {
     const pid = await turnOff(STATE, values.kill);
     return console.log(pid ? `turned off (pid ${pid})` : "already off");
@@ -715,6 +718,11 @@ function auto(onOrOff: string | undefined): void {
   console.log(`auto mode ${onOrOff}`);
 }
 
+function resume(worker: string): void {
+  resumeWorker(STATE, worker);
+  console.log(`${worker} resumes`);
+}
+
 function status(): void {
   const pid = runningPid(STATE);
   const path = join(STATE, "status.json");
@@ -745,10 +753,13 @@ function status(): void {
     }
   }
   const jobs = readJobs(STATE);
-  const blocked = jobs.filter((job) => job.state === "blocked");
+  const blocked = jobs.filter((job) => job.state === "blocked" && job.blocked === "asked");
   if (blocked.length) console.log(`waiting for your answer: ${blocked.length}`);
   for (const job of blocked)
     console.log(`  ${line(job)}\n    ${job.notes.findLast((note) => note.kind === "ask")!.text}`);
+  const unset = jobs.filter((job) => job.state === "blocked" && job.blocked === "setup");
+  if (unset.length) console.log(`waiting for setup: ${unset.length}`);
+  for (const job of unset) console.log(`  ${line(job)}\n    ${job.why?.split("\n")[0] ?? ""}`);
   const queued = jobs.filter((job) => job.state === "queued");
   console.log(`queue: ${queued.length}`);
   for (const job of queued.slice(0, 10)) console.log(`  ${line(job)}`);

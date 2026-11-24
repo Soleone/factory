@@ -6,6 +6,7 @@ const KIND: Record<InboxItem["kind"], string> = {
   ask: "question",
   checkpoint: "approval",
   failed: "failed",
+  setup: "setup",
   review: "PR",
   assume: "assumption",
   unverified: "unverified",
@@ -43,6 +44,8 @@ function contextOf(item: InboxItem): string | undefined {
       return item.job.why ?? "waiting for your approval";
     case "failed":
       return item.job.attempts.at(-1)?.error?.split("\n")[0];
+    case "setup":
+      return item.job.why?.split("\n")[0];
     case "review":
       return undefined;
     case "assume":

@@ -119,6 +119,8 @@ export const api = {
   githubProfile: () => call<CommitIdentity>("GET", "/api/github-profile"),
   turnOn: (run: RunRequest) => call("POST", "/api/on", run),
   turnOff: () => call("POST", "/api/off"),
+  /** A worker paused on a fault of its own goes on, in the same run. */
+  resumeWorker: (id: string) => call("POST", "/api/workers/resume", { id }),
   chat: (message: string, images: AgentImage[]) => call("POST", "/api/chat", { message, images }),
   abortChat: () => call("POST", "/api/chat/abort"),
   answerChat: (answer: { id: string } & DialogAnswer) => call("POST", "/api/chat/answer", answer),
