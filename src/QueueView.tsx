@@ -1,5 +1,5 @@
 import { XIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, Reorder } from "motion/react";
 import { useState, type ReactNode, type Ref } from "react";
 import { api, type Act } from "@/api";
 import {
@@ -248,9 +248,16 @@ export function QueueView({
   onAdd: (view: "candidates" | "job") => void;
 }) {
   const { jobs, status, on, settings } = snapshot;
-  const [dragging, setDragging] = useState<number>();
   const byId = new Map(jobs.map((job) => [job.id, job]));
   const { picks, auto, fromGoals } = queued(jobs);
+  // The order while a pick is dragged, held until the move is saved so the list doesn't jump back.
+  const [order, setOrder] = useState<string[]>();
+  const shown = order ? order.flatMap((id) => picks.filter((job) => job.id === id)) : picks;
+  const drop = async (job: Job) => {
+    const index = order?.indexOf(job.id) ?? -1;
+    if (index >= 0 && index !== picks.indexOf(job)) await act(() => api.move(job.id, index));
+    setOrder(undefined);
+  };
   const details = (job: Job, removable: boolean) => (
     <TaskDetails
       item={job.item}
@@ -335,43 +342,46 @@ export function QueueView({
             </Empty>
           ) : (
             <>
-              <RowGroup>
+              <Reorder.Group
+                as="div"
+                axis="y"
+                values={shown.map((job) => job.id)}
+                onReorder={setOrder}
+                className="flex flex-col gap-1.5"
+              >
                 <AnimatePresence mode="popLayout" initial={false}>
-                  {picks.map((job, index) => (
-                    <Glide key={job.id}>
-                      <div
-                        draggable
-                        onDragStart={() => setDragging(index)}
-                        onDragOver={(event) => dragging !== undefined && event.preventDefault()}
-                        onDrop={() => {
-                          if (dragging !== undefined && dragging !== index)
-                            void act(() => api.move(picks[dragging].id, index));
-                          setDragging(undefined);
-                        }}
-                        onDragEnd={() => setDragging(undefined)}
+                  {shown.map((job, index) => (
+                    <Reorder.Item
+                      key={job.id}
+                      as="div"
+                      value={job.id}
+                      onDragEnd={() => void drop(job)}
+                      transition={{ duration: 0.15, ease: "easeOut" }}
+                      whileDrag={{ scale: 1.02, boxShadow: "0 10px 28px rgb(0 0 0 / 0.18)" }}
+                      exit={{ opacity: 0, x: 64, transition: { duration: 0.2 } }}
+                      className="relative rounded-md"
+                    >
+                      <Row
+                        leading={
+                          <span className="flex items-center gap-1">
+                            <ReorderHandle
+                              label={itemTitle(job.item)}
+                              index={index}
+                              count={shown.length}
+                              onMove={(target) => void act(() => api.move(job.id, target))}
+                            />
+                            <StateIcon state={job.state} />
+                          </span>
+                        }
+                        title={details(job, true)}
+                        meta={<Meta job={job} byId={byId} settings={settings} act={act} />}
                       >
-                        <Row
-                          leading={
-                            <span className="flex items-center gap-1">
-                              <ReorderHandle
-                                label={itemTitle(job.item)}
-                                index={index}
-                                count={picks.length}
-                                onMove={(target) => void act(() => api.move(job.id, target))}
-                              />
-                              <StateIcon state={job.state} />
-                            </span>
-                          }
-                          title={details(job, true)}
-                          meta={<Meta job={job} byId={byId} settings={settings} act={act} />}
-                        >
-                          {remove(job)}
-                        </Row>
-                      </div>
-                    </Glide>
+                        {remove(job)}
+                      </Row>
+                    </Reorder.Item>
                   ))}
                 </AnimatePresence>
-              </RowGroup>
+              </Reorder.Group>
             </>
           )}
         </Section>
