@@ -30,6 +30,8 @@ export function Outcome({
   const result = job.notes.findLast((note) => note.kind === "result");
   const followups = [...new Set(job.notes.flatMap((note) => note.followups ?? []))];
   const branch = job.attempts.at(-1)?.branch;
+  // A review's findings go to its fix, not jobs of their own.
+  const review = job.item.blueprint === "review";
   if (!result && followups.length === 0 && !branch) return null;
   return (
     <div className="flex flex-col gap-2 rounded-md border bg-popover p-2 text-sm">
@@ -44,8 +46,10 @@ export function Outcome({
       )}
       {followups.map((task) => (
         <span key={task} className="flex flex-wrap items-center gap-x-2 text-muted-foreground">
-          <span>Follow-up: {task}</span>
-          {queued.has(task) ? (
+          <span>
+            {review ? "Finding" : "Follow-up"}: {task}
+          </span>
+          {review ? null : queued.has(task) ? (
             <span>queued</span>
           ) : (
             <Button

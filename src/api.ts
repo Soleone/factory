@@ -81,7 +81,7 @@ export const api = {
   /** The user checked what the job couldn't; without a need, all of it. */
   verify: (id: string, need?: string) => call("POST", `/api/jobs/${id}/verify`, { need }),
   followup: (id: string, task: string) => call("POST", `/api/jobs/${id}/followup`, { task }),
-  review: (id: string, agent: string) => call("POST", `/api/jobs/${id}/review`, { agent }),
+  review: (id: string) => call("POST", `/api/jobs/${id}/review`, {}),
   prDetails: (id: string) => call<{ body: string; diff: string }>("GET", `/api/jobs/${id}/pr`),
   merge: (id: string) => call("POST", `/api/jobs/${id}/merge`),
   rebase: (id: string) => call("POST", `/api/jobs/${id}/rebase`),

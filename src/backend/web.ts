@@ -252,7 +252,7 @@ export function serve(
     "POST /api/jobs/verify": (body: { need?: string }, id) =>
       record(state, { type: "verify", id, need: body.need }),
     "POST /api/jobs/followup": (body: { task: string }, id) => queueFollowup(state, id, body.task),
-    "POST /api/jobs/review": (body: { agent: string }, id) => queueReview(state, id, body.agent),
+    "POST /api/jobs/review": (body: { agent?: string }, id) => queueReview(state, id, body.agent),
     "POST /api/jobs/move": (body: { index: number }, id) => moveJob(state, id, body.index),
     "GET /api/jobs/pr": (_, id) => readPrDetails(jobPr(id)),
     "GET /api/jobs/prompt": (_, id) => jobPrompt(id),

@@ -18,6 +18,7 @@ import {
   type Pin,
   type Settings,
   type Tier,
+  reviewTier,
   upgradeItem,
 } from "./types.ts";
 
@@ -461,17 +462,19 @@ End your reply with the pull request's URL.
 `;
 
 /**
- * Queues a review of the job's PR by another agent, once the job is done. Like a conflicts job it
- * keeps the job's workwork id, so it finds and links the same PR.
+ * Queues a review of the job's PR once the job is done, by another role than the author's, or by
+ * the agent given. Like a conflicts job it keeps the job's workwork id, so it finds and links the
+ * same PR. What it finds becomes a fix on that PR (queueReviewFix).
  */
-export function queueReview(state: string, id: string, agent: string): Job | undefined {
+export function queueReview(state: string, id: string, agent?: string): Job | undefined {
   const job = find(state, id, ...ACTIVE, "done");
-  if (job.agent === agent)
+  if (agent && job.agent === agent)
     throw new Error(`job ${id} is ${agent}'s own; pick another agent to review it`);
   const branch = workworkBranch(job.item);
   const item = { ...job.item, blueprint: "review", title: `Review: ${job.item.title}` };
+  const by = agent ? { agent } : { tier: reviewTier(job) };
   const prompt = reviewPrompt(branch, job.agent);
-  return addJobs(state, [item], "pick", { agent, prompt, after: [id] })[0];
+  return addJobs(state, [item], "pick", { ...by, prompt, after: [id], branchOf: id })[0];
 }
 
 const reviewPrompt = (
@@ -482,11 +485,42 @@ const reviewPrompt = (
 1. Check it out with \`gh pr checkout ${branch}\`, run the repo's checks and tests, and read the change against what its description says it does.
 2. Look for bugs, missed cases and changes nobody asked for. Skip style the linters already cover.
 3. Post what you found as one comment with \`gh pr comment ${branch} --body-file -\`: each finding with file, line and why it matters, or that you found nothing. Don't push, approve or merge.
+4. Report with \`factory result "<summary>"\`, adding \`--followup "<finding: file, line, why it matters>"\` for each finding worth fixing; factory queues a fix for them on the same branch. No findings: no --followup.
 
 If there's no such pull request, say so and end.
 
 End your reply with the pull request's URL.
 `;
+
+/**
+ * Queues the fix for what a done review of a job's PR found, on the same PR, by the author's role.
+ * A review that found nothing queues nothing.
+ */
+export function queueReviewFix(state: string, id: string): Job | undefined {
+  const jobs = readJobs(state);
+  const review = jobs.find((job) => job.id === id)!;
+  const reviewed = jobs.find((job) => job.id === review.branchOf);
+  if (review.of || review.item.blueprint !== "review" || !reviewed) return undefined;
+  const findings = review.notes.findLast((note) => note.kind === "result")?.followups ?? [];
+  if (review.state !== "done" || findings.length === 0) return undefined;
+  const item = {
+    ...reviewed.item,
+    blueprint: "fix",
+    title: `Fix review findings: ${reviewed.item.title}`,
+  };
+  const url = prUrl(review) ?? prUrl(reviewed);
+  const prompt = `A review of pull request ${url ?? `from branch \`${workworkBranch(reviewed.item)}\``} found:
+
+${findings.map((each) => `- ${each}`).join("\n")}
+
+1. Check out its branch with \`gh pr checkout ${url ?? workworkBranch(reviewed.item)}\`.
+2. Fix each finding, or leave one that's wrong and say why. Run the repo's checks and tests, and push to the same branch. Don't open a new pull request.
+3. Reply on the pull request with what changed.
+
+End your reply with the pull request's URL.
+`;
+  return addJobs(state, [item], "pick", { tier: reviewed.tier, prompt, branchOf: reviewed.id })[0];
+}
 
 /**
  * Queues a task an agent reported as a follow-up of its job. Its own id, so the PR of the job it

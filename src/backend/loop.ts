@@ -17,7 +17,17 @@ import { keepWork, release } from "./git.ts";
 import { piWindows } from "./models.ts";
 import { mirrorTasks } from "./tasksStore.ts";
 import { afterAttempt, builtinCheck, finishGoals, prepare } from "./goals.ts";
-import { addJobs, answer, autoPicks, endJob, ready, readJobs, record, startJob } from "./jobs.ts";
+import {
+  addJobs,
+  answer,
+  autoPicks,
+  endJob,
+  queueReviewFix,
+  ready,
+  readJobs,
+  record,
+  startJob,
+} from "./jobs.ts";
 import { findPr } from "./review.ts";
 import { alive, compactAt, readCandidates, readSettings, refreshCandidates } from "./state.ts";
 import { noFacts, readStream, type Facts } from "./stream.ts";
@@ -394,6 +404,8 @@ export async function run(options: RunOptions): Promise<string> {
         log(
           `${worker.id} ${result.attempt.outcome} ${job.id} ${result.attempt.url ?? result.attempt.error?.split("\n")[0] ?? ""}`,
         );
+        const fix = queueReviewFix(state, job.id);
+        if (fix) log(`${job.id} found something: queued ${fix.id}, ${fix.item.title}`);
         // Still holding the worktree: a goal node merges from it.
         const worktree = readLive(state, job.id)?.worktree;
         if (worktree) {

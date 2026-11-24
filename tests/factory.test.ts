@@ -17,6 +17,7 @@ import {
   nextJob,
   queueFollowup,
   queueReview,
+  queueReviewFix,
   order,
   readJobs,
   record,
@@ -277,6 +278,35 @@ describe("jobs that wait on others", () => {
     expect(readJobs(state).map((job) => job.blocked)).toEqual([undefined, "held", "held"]);
     retryJob(state, fix.id);
     expect(states()).toEqual(["queued", "queued", "queued"]);
+  });
+
+  test("a review goes to another role, and its findings become a fix on the same PR", () => {
+    const state = mkdtempSync(join(scratch, "state-"));
+    const finish = (id: string, agent: string, followups: string[] = []) => {
+      startJob(state, id, agent);
+      addNote(state, id, { kind: "result", text: "done", followups });
+      endJob(state, id, { run: "r", agent, start: "", end: "", outcome: "done", log: "" });
+    };
+    const [job] = addJobs(state, [item("r", "a")], "pick", { tier: "builder" });
+    const review = queueReview(state, job.id)!;
+    expect(review).toMatchObject({ tier: "communicator", branchOf: job.id });
+    expect(review.prompt).toContain("--followup");
+    finish(job.id, "claude");
+    finish(review.id, "pi", ["a.ts:3 off by one"]);
+    const fix = queueReviewFix(state, review.id)!;
+    expect(fix).toMatchObject({
+      tier: "builder",
+      branchOf: job.id,
+      item: { id: "a", blueprint: "fix" },
+    });
+    expect(fix.prompt).toContain("- a.ts:3 off by one");
+    expect(queueReviewFix(state, review.id)).toBeUndefined();
+
+    const [clean] = addJobs(state, [item("r", "b")], "pick");
+    const second = queueReview(state, clean.id)!;
+    expect(second.tier).toBe("builder");
+    finish(second.id, "pi");
+    expect(queueReviewFix(state, second.id)).toBeUndefined();
   });
 
   test("a follow-up an agent reported becomes its own job, once", () => {

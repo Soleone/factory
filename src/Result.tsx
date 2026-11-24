@@ -7,12 +7,12 @@ import {
   itemKey,
   onTrain,
   prUrl,
+  reviewTier,
   type Attempt,
   type Job,
   type Pr,
   type Snapshot,
   type TrainCar,
-  workersOf,
 } from "@/backend/types.ts";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/tooltip/tooltip";
@@ -28,9 +28,9 @@ export function canDismiss(job: Job) {
 
 export const hasBranch = (job: Job) => job.attempts.some((attempt) => attempt.branch);
 
-/** Another agent to review the job's PR, unless it is a review or has one already. */
+/** The role to review the job's PR, unless it is a review or a fix of one, or has one already. */
 export function reviewerOf(job: Job, snapshot: Snapshot) {
-  if (job.item.blueprint === "review") return undefined;
+  if (job.item.blueprint === "review" || job.branchOf) return undefined;
   const reviewed = snapshot.jobs.some(
     (other) =>
       other.state !== "removed" &&
@@ -38,10 +38,7 @@ export function reviewerOf(job: Job, snapshot: Snapshot) {
       itemKey(other.item) === itemKey(job.item),
   );
   if (reviewed) return undefined;
-  return snapshot.settings.presets
-    .filter((preset) => workersOf(preset) > 0)
-    .map((preset) => preset.agent)
-    .find((agent) => agent !== job.agent);
+  return reviewTier(job);
 }
 
 export function Result({
@@ -171,9 +168,9 @@ export function Result({
                     variant="outline"
                     size="sm"
                     disabled={disabled}
-                    onClick={() => act(() => api.review(job.id, reviewer))}
+                    onClick={() => act(() => api.review(job.id))}
                   >
-                    Review with {agentName(reviewer)}
+                    Review as {reviewer}
                   </Button>
                 )}
                 {question && (

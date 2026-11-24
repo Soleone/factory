@@ -62,8 +62,9 @@ const USAGE = `factory: works workwork candidates and long goals with headless c
                                queue what a blueprint finds in DIR, on-request ones too; ids pick some
   factory add --prompt FILE --tier T [--repo DIR] [--title TEXT]
                                one job of your own, without workwork, for a tier
-  factory review <job> --agent NAME
-                               queue a review of the job's PR by another agent, once the job is done
+  factory review <job> [--agent NAME]
+                               queue a review of the job's PR once it's done, by another role than
+                               the author's or by that agent; its findings queue a fix on the PR
   factory merge <job>...       put the jobs' PRs on the merge train of the running factory serve
                                (at $FACTORY_URL, default http://127.0.0.1:7040)
   factory wait <job> [--timeout MIN]
@@ -393,8 +394,8 @@ async function goal(
 }
 
 function review(id: string | undefined, name: string | undefined): void {
-  if (!id || !name) throw new Error("factory review wants a job and --agent NAME");
-  agent(name);
+  if (!id) throw new Error("factory review wants a job");
+  if (name) agent(name);
   const job = queueReview(STATE, id, name);
   console.log(job ? `queued ${job.id}: ${job.item.title}` : `a review of ${id} is already queued`);
 }

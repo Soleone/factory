@@ -25,6 +25,9 @@ export const TIERS = ["communicator", "builder", "grunt"] as const;
 export const PLANNING = ["decompose", "replan"] as const;
 export type Tier = (typeof TIERS)[number];
 
+/** A role other than the author's to review its work: builders review, and communicators review builders. */
+export const reviewTier = (job: Job): Tier => (job.tier === "builder" ? "communicator" : "builder");
+
 export const presetId = (preset: Preset) =>
   preset.id ?? [preset.agent, preset.model, preset.effort].filter(Boolean).join("/");
 

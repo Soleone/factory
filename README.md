@@ -30,7 +30,7 @@ Needs node 22+, git, [workwork](https://github.com/Soleone/workwork) 0.3 or late
 - **Limits:** a limit of 1 (the default) stops a pool at its first usage-limit hit, so only the current allowance gets used. A limit of 2 waits for one reset; "none" always waits. Three quick failures in a row stop a worker, so a broken login can't burn through the queue.
 - **Reserves:** `reserves` keeps a percent of a pool's 5-hour window for other apps on the same subscription. Once the window reaches it, the pool starts nothing new until the window resets; jobs already running finish, so leave room for them. Factory reads the window at most once a minute, for `claude` and pi's `anthropic` and `openai-codex`; when a read fails, nothing is held and the usage-limit hits still apply.
 - **Failures:** a job that fails gets one more attempt; then it waits for you to retry it, and jobs that wait on it are held until then.
-- **Reviewing results:** each result links its PR. From the page you can read its description and diff, merge it, rebase it, or close it, and put several on the **merge train**, which merges them one after another per repo, rebasing as it goes. A rebase that stops on real conflicts queues a job to resolve them.
+- **Reviewing results:** each result links its PR. From the page you can read its description and diff, merge it, rebase it, or close it, and put several on the **merge train**, which merges them one after another per repo, rebasing as it goes. A rebase that stops on real conflicts queues a job to resolve them. **Review** has another role check the PR (a builder, or a communicator for a builder's work); it comments what it found, and the findings queue a fix on the same PR by the author's role.
 
 ### Goals
 
@@ -82,7 +82,7 @@ factory status                # on or off, each pool and its workers, the queue
 factory add <id>... [--repo DIR] [--agent NAME] [--model M] [--effort E] [--after JOB]...
 factory add --prompt FILE --tier grunt [--repo DIR]   # a job of your own, without workwork
 factory remove <job> | retry <job> | answer <job> "<text>" | verify <job> [NEED]
-factory review <job> --agent pi   # another agent reviews the job's PR once it's done
+factory review <job> [--agent pi] # another role (or agent) reviews the PR; findings queue a fix
 factory merge <job>...           # put their PRs on the merge train of the running serve
 factory wait <job> [--timeout MIN]
 factory tail                      # follow every job event, one line each
