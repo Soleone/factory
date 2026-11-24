@@ -26,7 +26,7 @@ function sectionOf(state: TaskState) {
 }
 
 const SEEN = "factory.results.seen";
-const FINISHED_BATCH_SIZE = 25;
+const FINISHED_BATCH_SIZE = 250;
 
 /** When the user last looked at the results, in this browser; empty the first time. */
 function useLastSeen(): string {
