@@ -76,10 +76,12 @@ export function agent(name: string, { model, effort }: Tuning = {}, session?: Se
   throw new Error(`unknown agent ${name} (known: ${AGENT_NAMES.join(", ")})`);
 }
 
-// Beside this file when run from source, beside cli.mjs once packed.
-const askExtension = fileURLToPath(
-  new URL(import.meta.url.endsWith(".ts") ? "./pi-ask.ts" : "./pi-ask.mjs", import.meta.url),
-);
+// Beside this file when run from source, beside cli.mjs once packed. Resolved on use, not at load:
+// the page imports this module for AGENT_NAMES and node:url isn't there in the browser.
+const askExtension = () =>
+  fileURLToPath(
+    new URL(import.meta.url.endsWith(".ts") ? "./pi-ask.ts" : "./pi-ask.mjs", import.meta.url),
+  );
 
 /**
  * How the Plan chat starts an agent: Pi in RPC mode, Claude Code streaming JSON both ways (chat.ts
@@ -132,7 +134,7 @@ export function chatAgent(
         "--session-dir",
         session.folder,
         "--extension",
-        askExtension,
+        askExtension(),
         "--tools",
         "read,write,bash,grep,find,ls,ask_user",
         "--append-system-prompt",
