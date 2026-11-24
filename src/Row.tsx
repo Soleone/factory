@@ -9,8 +9,8 @@ import {
 import { RowItem } from "@/components/variants/item";
 
 /**
- * One line in a list: a title, a muted line under it, and buttons on the right. Flat, filled on
- * hover; focusable for the list keys in `useRowKeys`, which find it by `data-row`.
+ * One line in a list: a title, a muted line under it, and buttons on the right. A filled card,
+ * deeper on hover; focusable for the list keys in `useRowKeys`, which find it by `data-row`.
  */
 export function Row({
   leading,
