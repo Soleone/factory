@@ -39,6 +39,7 @@ import { findPr } from "./review.ts";
 import {
   alive,
   compactAt,
+  livePath,
   output,
   readCandidates,
   readSettings,
@@ -125,7 +126,6 @@ type Live = {
 };
 type Begun = Pick<Attempt, "run" | "agent" | "model" | "effort" | "preset" | "start" | "log">;
 
-const livePath = (state: string, id: string) => join(state, "running", `${id}.json`);
 const readLive = (state: string, id: string): Live | undefined =>
   existsSync(livePath(state, id))
     ? JSON.parse(readFileSync(livePath(state, id), "utf8"))

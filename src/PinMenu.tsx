@@ -65,7 +65,10 @@ export function PinMenuItems({
   );
 }
 
-/** A waiting job's role or worker, changeable from the same menu until a worker takes it. */
+/**
+ * A waiting job's role or worker, changeable from the same menu until a worker takes it. A paused
+ * job can move too, after a warning: it loses its session and starts fresh.
+ */
 export function PinChip({ job, settings, act }: { job: Job; settings: Settings; act: Act }) {
   const preset = settings.presets.find((each) => presetId(each) === job.preset);
   const current = job.tier ? (
@@ -84,7 +87,19 @@ export function PinChip({ job, settings, act }: { job: Job; settings: Settings; 
         {current}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-auto">
-        <PinMenuItems settings={settings} onPin={(pin) => act(() => api.pin(job.id, pin))} />
+        <PinMenuItems
+          settings={settings}
+          onPin={(pin) => {
+            if (
+              job.open &&
+              !window.confirm(
+                "This job already started and has context. Reassigning it drops that session and starts fresh. Continue?",
+              )
+            )
+              return;
+            act(() => api.pin(job.id, pin));
+          }}
+        />
       </DropdownMenuContent>
     </DropdownMenu>
   );

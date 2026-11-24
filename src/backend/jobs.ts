@@ -1,8 +1,8 @@
 import { randomBytes } from "node:crypto";
-import { appendFileSync, existsSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { basename, join } from "node:path";
 import { workworkBranch } from "./review.ts";
-import { ATTENTION, output } from "./state.ts";
+import { ATTENTION, livePath, output } from "./state.ts";
 import {
   chains,
   itemKey,
@@ -578,14 +578,31 @@ function find(state: string, id: string, ...states: Job["state"][]): Job {
 
 const PIN_KEYS = ["agent", "model", "effort", "preset", "tier"] as const;
 
-/** The user changes what a waiting job runs on: a tier, a worker, or neither for any free worker. */
+/**
+ * The user changes what a waiting job runs on: a tier, a worker, or neither for any free worker. A
+ * paused attempt ends as stopped, so the job starts fresh; the next checkout of its worktree keeps
+ * what it left on a branch.
+ */
 export function pinJob(state: string, id: string, pin: Pin): void {
   const job = find(state, id, "queued");
-  if (job.open || job.of) throw new Error(`job ${id} has started or belongs to a goal`);
+  if (job.of) throw new Error(`job ${id} belongs to a goal`);
   if (pin.tier && !TIERS.includes(pin.tier))
     throw new Error(`a tier is ${TIERS.join(", ")}, not ${pin.tier}`);
+  const at = new Date().toISOString();
+  if (job.open) {
+    const live = JSON.parse(readFileSync(livePath(state, id), "utf8"));
+    const attempt = {
+      ...live.begun,
+      end: at,
+      outcome: "stopped",
+      session: live.session,
+      turns: live.turns,
+    };
+    append(state, { at, type: "attempt", id, attempt });
+    rmSync(livePath(state, id), { force: true });
+  }
   const kept = Object.fromEntries(PIN_KEYS.flatMap((key) => (pin[key] ? [[key, pin[key]]] : [])));
-  append(state, { at: new Date().toISOString(), type: "pin", id, pin: kept });
+  append(state, { at, type: "pin", id, pin: kept });
 }
 
 /** Takes a job out of the queue or the results, and deletes the branches its attempts kept. */

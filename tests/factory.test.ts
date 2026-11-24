@@ -975,6 +975,21 @@ ${lines
     ]);
   });
 
+  test("a paused job pinned elsewhere drops its session and starts fresh there", async () => {
+    const base = setup(["a"]);
+    agents({ claude: "echo 'Claude AI usage limit reached|1794801600'; exit 1" });
+    const added = base.pick("a");
+    await work({ ...options(base), limit: 1, sleep: async () => {} }, () => false);
+    pinJob(base.state, added.id, { agent: "pi" });
+    expect(existsSync(join(base.state, "running", `${added.id}.json`))).toBe(false);
+    agents({ pi: OK });
+    const [done] = await work(options(base, {}));
+    expect(done.attempts).toMatchObject([
+      { agent: "claude", outcome: "stopped" },
+      { agent: "pi", outcome: "done" },
+    ]);
+  });
+
   test("sleeps until the parsed reset, resumes the session, and stops at its limit", async () => {
     const base = setup(["a", "b"]);
     const reset = Math.floor(Date.now() / 1000) + 3600;

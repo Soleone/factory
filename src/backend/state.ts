@@ -23,6 +23,9 @@ export const STATE = process.env.DATA
 
 export const pidPath = (state: string) => join(state, "factory.pid");
 
+/** Where a running or paused attempt keeps its session, worktree and turns. */
+export const livePath = (state: string, id: string) => join(state, "running", `${id}.json`);
+
 export function runningPid(state: string): number | undefined {
   if (!existsSync(pidPath(state))) return undefined;
   const pid = Number(readFileSync(pidPath(state), "utf8"));
