@@ -14,7 +14,7 @@ test("numbers hunk lines by old and new file line, and names each file", () => {
     "\\ No newline at end of file",
     "",
   ].join("\n");
-  expect(diffRows(diff).map(({ text, ...rest }) => rest)).toEqual([
+  expect(diffRows(diff).map(({ text: _text, ...rest }) => rest)).toEqual([
     { file: "src/a.ts" },
     {},
     {},

@@ -97,7 +97,7 @@ export function PinChip({ job, settings, act }: { job: Job; settings: Settings; 
               )
             )
               return;
-            act(() => api.pin(job.id, pin));
+            void act(() => api.pin(job.id, pin));
           }}
         />
       </DropdownMenuContent>

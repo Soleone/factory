@@ -1,5 +1,5 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "entry": ["src/backend/cli.ts"],
+  "entry": ["src/backend/cli.ts", "src/backend/pi-ask.ts"],
   "ignore": ["src/components/ui/**", "src/components/soleone/**"]
 }
