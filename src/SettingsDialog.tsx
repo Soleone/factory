@@ -1,13 +1,7 @@
 import { type ComponentProps, Fragment, useEffect, useState } from "react";
-import {
-  ArrowDownIcon,
-  ArrowUpIcon,
-  GripVerticalIcon,
-  PlusIcon,
-  Settings2,
-  XIcon,
-} from "lucide-react";
+import { GripVerticalIcon, PlusIcon, Settings2, XIcon } from "lucide-react";
 import { api, type Act } from "@/api";
+import { ReorderHandle } from "@/ReorderHandle";
 import {
   presetId,
   TIERS,
@@ -431,7 +425,7 @@ const TIER_ABOUT: Record<Tier, string> = {
   grunt: "well-specified mechanical work",
 };
 
-/** Each role's workers, tried in order: drag or use the arrows to reorder. In code, roles are tiers. */
+/** Each role's workers, tried in order. In code, roles are tiers. */
 function RoleFields({
   presets,
   value,
@@ -481,9 +475,15 @@ function RoleFields({
                     if (dragging?.tier === tier) move(tier, dragging.index, index);
                     setDragging(undefined);
                   }}
+                  onDragEnd={() => setDragging(undefined)}
                   className="flex items-center gap-1 rounded-md border px-2 py-1 text-sm"
                 >
-                  <GripVerticalIcon className="size-4 cursor-grab text-muted-foreground" />
+                  <ReorderHandle
+                    label={`${id} in ${tier}`}
+                    index={index}
+                    count={list.length}
+                    onMove={(target) => move(tier, index, target)}
+                  />
                   <span className="flex min-w-0 flex-1 items-center gap-1.5">
                     {index + 1}.
                     {byId.has(id) ? (
@@ -495,26 +495,6 @@ function RoleFields({
                       <span className="text-muted-foreground">not running</span>
                     )}
                   </span>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label="Move up"
-                    disabled={index === 0}
-                    onClick={() => move(tier, index, index - 1)}
-                  >
-                    <ArrowUpIcon />
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label="Move down"
-                    disabled={index === list.length - 1}
-                    onClick={() => move(tier, index, index + 1)}
-                  >
-                    <ArrowDownIcon />
-                  </Button>
                   <Button
                     type="button"
                     variant="ghost"

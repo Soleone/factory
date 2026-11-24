@@ -316,28 +316,45 @@ export function ResultsView({
           </Select>
         </div>
       )}
-      {selection.length > 0 && (
-        <div
-          role="group"
-          aria-label="Batch actions"
-          className="sticky top-0 z-10 flex flex-wrap items-center gap-2 rounded-lg border bg-background px-3 py-2"
-        >
-          <span className="text-sm font-medium">{selection.length} selected</span>
-          <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
+      {/* Keep both groups the same width so only resizing, not selection, can rewrap them. */}
+      <div
+        role="group"
+        aria-label="Batch actions"
+        className="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-background px-3 py-2"
+      >
+        <div className="flex items-center gap-2">
+          <span className="w-24 whitespace-nowrap text-sm font-medium tabular-nums">
+            {selection.length} selected
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={selection.length === 0}
+            onClick={() => setSelected(new Set())}
+          >
             Clear
           </Button>
-          <div className="flex items-center gap-2 sm:ml-auto">
-            <Button variant="outline" size="sm" disabled={dismissing} onClick={dismissSelected}>
-              {dismissing ? "Dismissing…" : "Dismiss"}
-            </Button>
-            {boarding.length > 0 && (
-              <MergeButton disabled={dismissing} onClick={() => merge(boarding)}>
-                Merge {boarding.length < selection.length && `(${boarding.length})`}
-              </MergeButton>
-            )}
-          </div>
         </div>
-      )}
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-24"
+            disabled={selection.length === 0 || dismissing}
+            onClick={dismissSelected}
+          >
+            {dismissing ? "Dismissing…" : "Dismiss"}
+          </Button>
+          <MergeButton
+            className="w-28 [&>button]:w-full"
+            disabled={boarding.length === 0 || dismissing}
+            onClick={() => merge(boarding)}
+          >
+            Merge{" "}
+            {boarding.length > 0 && boarding.length < selection.length && `(${boarding.length})`}
+          </MergeButton>
+        </div>
+      </div>
       {running.length > 0 && (
         <section className="flex flex-col gap-3">
           <div className="flex min-h-8 items-center px-3">{heading("In progress", running)}</div>

@@ -1,4 +1,4 @@
-import { ArrowDownIcon, ArrowUpIcon, GripVerticalIcon, XIcon } from "lucide-react";
+import { XIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useState, type ReactNode, type Ref } from "react";
 import { api, type Act } from "@/api";
@@ -25,6 +25,7 @@ import { clock, itemTitle, minutesSince } from "@/format";
 import { PinChip } from "@/PinMenu";
 import { ProviderLogo, providerOf, WorkerName } from "@/WorkerName";
 import { TierBadge } from "@/TierBadge";
+import { ReorderHandle } from "@/ReorderHandle";
 import { Row, Section } from "@/Row";
 import { RowGroup } from "@/components/variants/item";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/tooltip/tooltip";
@@ -352,31 +353,18 @@ export function QueueView({
                         <Row
                           leading={
                             <span className="flex items-center gap-1">
-                              <GripVerticalIcon className="size-4 cursor-grab text-muted-foreground" />
+                              <ReorderHandle
+                                label={itemTitle(job.item)}
+                                index={index}
+                                count={picks.length}
+                                onMove={(target) => void act(() => api.move(job.id, target))}
+                              />
                               <StateIcon state={job.state} />
                             </span>
                           }
                           title={details(job, true)}
                           meta={<Meta job={job} byId={byId} settings={settings} act={act} />}
                         >
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            aria-label="Move up"
-                            disabled={index === 0}
-                            onClick={() => act(() => api.move(job.id, index - 1))}
-                          >
-                            <ArrowUpIcon />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            aria-label="Move down"
-                            disabled={index === picks.length - 1}
-                            onClick={() => act(() => api.move(job.id, index + 1))}
-                          >
-                            <ArrowDownIcon />
-                          </Button>
                           {remove(job)}
                         </Row>
                       </div>
