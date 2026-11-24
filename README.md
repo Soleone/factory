@@ -64,7 +64,7 @@ factory result "<summary>" --confidence high --url LINK --followup "<task>" --un
 
 The prompt tells agents to decide what a reasonable engineer would and note the call. An assumption you answer with "fine" closes; any other answer queues a job to change it. A plain question pauses the job until you answer, on the page or with `factory answer`, and the same session picks up from there. Nobody may be awake to answer, so after 15 minutes without one the agent goes with its recommendation and records it as an assumption you can still overrule. `factory report` ends with what waits on you: unverified work and assumptions to confirm.
 
-On the page, everything that waits on you collects in the **Inbox**, which the page opens on while anything blocks work. On top, what holds work up until you act: questions, goal checkpoints and plans to approve, and jobs that failed twice. Below, what agents carried on past: PRs to merge, assumptions to confirm and work to verify. **Add work** gathers every way in: a job of your own, a goal, candidates and blueprints. Activity sits next to Results. `g` then `i`, `q`, `g` or `r` jumps to Inbox, Queue, Goals or Results.
+On the page, everything that waits on you collects in the **Inbox**, which the page opens on while anything blocks work. On top, what holds work up until you act: questions, goal checkpoints and plans to approve, and jobs that failed twice. Below, what agents carried on past: PRs to merge, assumptions to confirm and work to verify. `factory inbox` prints the same two groups with their counts, each row with its job id and PR, from the running `factory serve` so PR states match the page. **Add work** gathers every way in: a job of your own, a goal, candidates and blueprints. Activity sits next to Results. `g` then `i`, `q`, `g` or `r` jumps to Inbox, Queue, Goals or Results.
 
 ## Live Agent
 
@@ -92,6 +92,7 @@ factory wait <job> [--timeout MIN]
 factory tail                      # follow every job event, one line each
 factory auto on|off
 factory report [--all]            # the last run (or every run), then what waits on you
+factory inbox                     # the page's Inbox, read from the running serve
 factory goal new|import|check|show|approve|pause|resume|cancel|replan|tier|drop|export ...
 factory serve [--port 7040] [--host 127.0.0.1]
 ```
