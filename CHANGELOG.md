@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.7.2](https://github.com/Soleone/factory/compare/v0.7.1...v0.7.2) (2026-11-24)
+
+### Features
+
+* **agent:** show the session's context size under the composer ([e5dd062](https://github.com/Soleone/factory/commit/e5dd062e9026da97b5b2715c136d2939a3692bf0))
+
+### Bug Fixes
+
+* **soleone:** focus composer when a conversation resets ([da304ae](https://github.com/Soleone/factory/commit/da304ae169fe80dfe0eda35c9ca9d61bfefd6c23))
+
 ## [0.7.1](https://github.com/Soleone/factory/compare/v0.7.0...v0.7.1) (2026-11-24)
 
 ### Features
