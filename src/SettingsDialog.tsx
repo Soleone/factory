@@ -13,6 +13,7 @@ import {
   TIERS,
   workersOf,
   USAGE_POOLS,
+  type CommitIdentity,
   type Preset,
   type Settings,
   type Snapshot,
@@ -43,6 +44,7 @@ import { AnchoredDialogContent } from "@/components/variants/dialog";
 import {
   Field,
   FieldDescription,
+  FieldError,
   FieldGroup,
   FieldLabel,
   FieldLegend,
@@ -94,6 +96,7 @@ function SettingsForm({
   const [draft, setDraft] = useState<Settings>(snapshot.settings);
   const [blueprints, setBlueprints] = useState<string[]>([]);
   const [repos, setRepos] = useState<string[]>([]);
+  const [saveError, setSaveError] = useState<string>();
   // The Auto switch in the header saves on its own; this form never changes it.
   const current = { ...draft, auto: { ...draft.auto, on: snapshot.settings.auto.on } };
   const unchanged = JSON.stringify(current) === JSON.stringify(snapshot.settings);
@@ -125,8 +128,13 @@ function SettingsForm({
       onSubmit={(event) => {
         event.preventDefault();
         void act(async () => {
-          await api.saveSettings(current);
-          onSaved();
+          setSaveError(undefined);
+          try {
+            await api.saveSettings(current);
+            onSaved();
+          } catch (error) {
+            setSaveError((error as Error).message);
+          }
         });
       }}
     >
@@ -136,7 +144,7 @@ function SettingsForm({
           <TabsTrigger value="workers">Workers</TabsTrigger>
           <TabsTrigger value="roles">Roles</TabsTrigger>
           <TabsTrigger value="auto">Auto mode</TabsTrigger>
-          <TabsTrigger value="triggers">Triggers</TabsTrigger>
+          <TabsTrigger value="github">GitHub</TabsTrigger>
           <TabsTrigger value="chat">Live Agent</TabsTrigger>
         </TabsList>
         <div className="mt-2 grid">
@@ -219,11 +227,17 @@ function SettingsForm({
               </Field>
             </FieldGroup>
           </StackedTabsContent>
-          <StackedTabsContent value="triggers">
-            <TriggerFields
-              value={draft.triggers}
-              onChange={(triggers) => setDraft({ ...draft, triggers })}
-            />
+          <StackedTabsContent value="github">
+            <FieldGroup>
+              <CommitIdentityFields
+                value={draft.commitIdentity ?? { name: "", email: "" }}
+                onChange={(commitIdentity) => setDraft((draft) => ({ ...draft, commitIdentity }))}
+              />
+              <TriggerFields
+                value={draft.triggers}
+                onChange={(triggers) => setDraft({ ...draft, triggers })}
+              />
+            </FieldGroup>
           </StackedTabsContent>
           <StackedTabsContent value="chat">
             <FieldGroup>
@@ -238,6 +252,7 @@ function SettingsForm({
           </StackedTabsContent>
         </div>
       </Tabs>
+      {saveError && <FieldError>{saveError}</FieldError>}
       <DialogFooter className="sm:items-center">
         <span className="text-xs text-muted-foreground sm:mr-auto">factory {version}</span>
         <Button type="submit" disabled={unchanged}>
@@ -586,6 +601,75 @@ function MultiPicker({
         </ComboboxList>
       </ComboboxContent>
     </Combobox>
+  );
+}
+
+function CommitIdentityFields({
+  value,
+  onChange,
+}: {
+  value: CommitIdentity;
+  onChange: (identity: CommitIdentity) => void;
+}) {
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState<string>();
+  async function suggest() {
+    setLoading(true);
+    setMessage(undefined);
+    try {
+      onChange(await api.githubProfile());
+      setMessage("Profile filled in. Review the fields, then Save to apply it.");
+    } catch (error) {
+      setMessage((error as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }
+  return (
+    <FieldSet>
+      <FieldLegend>Commit identity</FieldLegend>
+      <FieldDescription>
+        Used as author and committer in Factory worktrees. Leave both blank to use Git
+        configuration.
+      </FieldDescription>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field>
+          <FieldLabel htmlFor="commit-name">Name</FieldLabel>
+          <Input
+            id="commit-name"
+            value={value.name}
+            disabled={loading}
+            onChange={(event) => onChange({ ...value, name: event.target.value })}
+          />
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="commit-email">Email</FieldLabel>
+          <Input
+            id="commit-email"
+            inputMode="email"
+            value={value.email}
+            disabled={loading}
+            onChange={(event) => onChange({ ...value, email: event.target.value })}
+          />
+        </Field>
+      </div>
+      <div>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={loading}
+          onClick={() => void suggest()}
+        >
+          {loading ? "Reading GitHub profile…" : "Use GitHub profile"}
+        </Button>
+        {message && (
+          <FieldDescription role="status" className="mt-2">
+            {message}
+          </FieldDescription>
+        )}
+      </div>
+    </FieldSet>
   );
 }
 

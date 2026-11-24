@@ -11,9 +11,9 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { addJob, newId, readJobs, record, type Change, type NewJob } from "./jobs.ts";
-import { checkout, originHead } from "./git.ts";
+import { checkout, originHead, requireIdentity, worktreeEnv, worktreeGit } from "./git.ts";
 import { createPr } from "./review.ts";
-import { output } from "./state.ts";
+import { output, readSettings } from "./state.ts";
 import {
   critical,
   depths,
@@ -227,19 +227,8 @@ export async function importPlan(state: string, plan: Plan, into?: Job): Promise
     )
   )
     throw new Error(`a goal ${slug} already exists in ${goal.repo}`);
-  const job =
-    into ??
-    addJob(state, {
-      id: newId(),
-      item: goalItem(goal.repo, `goal/${slug}`, "goal", plan.goal.title),
-      source: "goal",
-      goal,
-    });
-  if (!into) {
-    checkpoint(state, job.id, planReady(plan));
-    await createBranch(goal);
-  }
-  await commitFiles(goal, `factory: plan for ${plan.goal.title}`, {
+  if (!into) await createBranch(goal);
+  await commitFiles(state, goal, `factory: plan for ${plan.goal.title}`, {
     [planPath(slug)]: `${JSON.stringify(plan, null, 2)}\n`,
     ...(into
       ? {}
@@ -248,6 +237,15 @@ export async function importPlan(state: string, plan: Plan, into?: Job): Promise
             `# ${plan.goal.title}\n\n${plan.goal.summary.trim()}\n\n## Decisions\n`,
         }),
   });
+  const job =
+    into ??
+    addJob(state, {
+      id: newId(),
+      item: goalItem(goal.repo, `goal/${slug}`, "goal", plan.goal.title),
+      source: "goal",
+      goal,
+    });
+  if (!into) checkpoint(state, job.id, planReady(plan));
   addNodes(state, job, plan.nodes);
   return job;
 }
@@ -296,12 +294,13 @@ async function createBranch(goal: Goal): Promise<void> {
 
 /** Commits files onto the integration branch from a scratch worktree, and pushes. */
 async function commitFiles(
+  state: string,
   goal: Goal,
   message: string,
   files: Record<string, string>,
 ): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), "factory-goal-"));
-  const git = (...args: string[]) => output("git", args, dir);
+  const git = worktreeGit(dir, worktreeEnv(readSettings(state), goal.repo, dir));
   try {
     await output("git", ["fetch", "--quiet", "origin"], goal.repo);
     await output(
@@ -309,6 +308,7 @@ async function commitFiles(
       ["worktree", "add", "--quiet", "--detach", dir, `origin/${integration(goal)}`],
       goal.repo,
     );
+    await requireIdentity(git);
     for (const [path, text] of Object.entries(files)) {
       mkdirSync(dirname(join(dir, path)), { recursive: true });
       writeFileSync(join(dir, path), text);
@@ -350,15 +350,15 @@ export async function newGoal(
     gates: [],
     allowUp: false,
   };
+  await createBranch(goal);
+  await commitFiles(state, goal, `factory: goal ${title}`, {
+    [memoryPath(slug)]: `# ${title}\n\n${summary}\n\n## Decisions\n`,
+  });
   const job = addJob(state, {
     id: newId(),
     item: goalItem(repo, `goal/${slug}`, "goal", title),
     source: "goal",
     goal,
-  });
-  await createBranch(goal);
-  await commitFiles(goal, `factory: goal ${title}`, {
-    [memoryPath(slug)]: `# ${title}\n\n${summary}\n\n## Decisions\n`,
   });
   addJob(state, {
     id: newId(),
@@ -445,11 +445,12 @@ export async function prepare(
   jobs: Job[],
   worktree: string,
   workwork: string,
+  env: Record<string, string>,
 ): Promise<string> {
   const goalJob = jobs.find((each) => each.id === job.of);
   if (!goalJob?.goal) {
     const head = await originHead(job.item.repo);
-    await checkout(worktree, job.item.repo, `origin/${head}`);
+    await checkout(worktree, job.item.repo, `origin/${head}`, env);
     return job.prompt ?? (await output(workwork, ["prompt", job.item.id], job.item.repo));
   }
   const goal = goalJob.goal;
@@ -460,6 +461,7 @@ export async function prepare(
     worktree,
     goal.repo,
     remote.trim() ? `origin/${branch}` : `origin/${integration(goal)}`,
+    env,
   );
   await output("git", ["checkout", "--quiet", "-B", branch], worktree);
   if (job.item.blueprint === DECOMPOSE || job.item.blueprint === REVIEW) return job.prompt!;
@@ -685,7 +687,9 @@ async function merge(
   by?: Job,
 ): Promise<void> {
   const goal = goalJob.goal!;
-  const git = (...args: string[]) => output("git", args, worktree);
+  const env = worktreeEnv(readSettings(state), goal.repo, worktree);
+  const git = worktreeGit(worktree, env);
+  await requireIdentity(git);
   const branch = nodeBranch(goal, node.key ?? `${node.item.blueprint}-${node.id}`);
   const base = integration(goal);
   for (let tries = 0; ; tries++) {
@@ -709,7 +713,7 @@ async function merge(
       log(`goal ${goal.slug}: ${node.key} conflicts with ${base}`);
       return;
     }
-    const failed = await gatesFail(node.gates, worktree);
+    const failed = await gatesFail(node.gates, worktree, env);
     if (failed) {
       addJob(
         state,
@@ -752,12 +756,17 @@ async function merge(
   record(state, { type: "merged", id: node.id });
   if (by) record(state, { type: "merged", id: by.id });
   log(`goal ${goal.slug}: merged ${node.key ?? node.item.id}`);
-  await remember(goal, node, worktree);
+  await remember(goal, node, worktree, git);
   await afterMerge(state, node, goalJob.id, worktree, log);
 }
 
 /** Factory's notes on the node go into the goal memory, in a commit of its own. */
-async function remember(goal: Goal, node: Job, worktree: string): Promise<void> {
+async function remember(
+  goal: Goal,
+  node: Job,
+  worktree: string,
+  git: ReturnType<typeof worktreeGit>,
+): Promise<void> {
   const said = node.notes.filter(
     (note) => note.kind === "factory" && !note.text.startsWith("merged"),
   );
@@ -769,12 +778,14 @@ async function remember(goal: Goal, node: Job, worktree: string): Promise<void> 
     path,
     `${before.trimEnd()}\n${heading}${said.map((note) => `- ${node.key ?? node.item.id}: ${note.text}`).join("\n")}\n`,
   );
-  await output(
-    "git",
-    ["commit", "--quiet", "--no-verify", "-am", `factory: notes on ${node.key ?? node.item.id}`],
-    worktree,
+  await git(
+    "commit",
+    "--quiet",
+    "--no-verify",
+    "-am",
+    `factory: notes on ${node.key ?? node.item.id}`,
   );
-  await output("git", ["push", "--quiet", "origin", `HEAD:${integration(goal)}`], worktree);
+  await git("push", "--quiet", "origin", `HEAD:${integration(goal)}`);
 }
 
 /** After a merge: the goal's gates, checkpoints, milestones and a red goal turning green. */
@@ -788,7 +799,11 @@ async function afterMerge(
   const jobs = readJobs(state);
   const goalJob = jobs.find((each) => each.id === goalId)!;
   const goal = goalJob.goal!;
-  const failed = await gatesFail(goal.gates, worktree);
+  const failed = await gatesFail(
+    goal.gates,
+    worktree,
+    worktreeEnv(readSettings(state), goal.repo, worktree),
+  );
   if (failed) {
     record(state, { type: "block", id: goalId, reason: "red" });
     record(state, {
@@ -873,7 +888,8 @@ async function rebaseOntoMain(
   log: Log,
 ): Promise<void> {
   const goal = goalJob.goal!;
-  const git = (...args: string[]) => output("git", args, worktree);
+  const git = worktreeGit(worktree, worktreeEnv(readSettings(state), goal.repo, worktree));
+  await requireIdentity(git);
   const main = await originHead(goal.repo);
   await git("checkout", "--quiet", "--detach", `origin/${integration(goal)}`);
   try {
@@ -904,10 +920,11 @@ async function rebaseOntoMain(
 async function gatesFail(
   gates: string[],
   cwd: string,
+  env: Record<string, string>,
 ): Promise<{ gate: string; output: string } | undefined> {
   for (const gate of gates) {
     try {
-      await output("sh", ["-c", gate], cwd);
+      await output("sh", ["-c", gate], cwd, undefined, env);
     } catch (error) {
       const text = `${(error as { stdout?: string }).stdout ?? ""}${(error as { stderr?: string }).stderr ?? ""}`;
       return { gate, output: text.split("\n").slice(-200).join("\n") || (error as Error).message };

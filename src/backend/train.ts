@@ -1,5 +1,5 @@
 import { Conflicts, mergePr, rebasePr, type prCache } from "./review.ts";
-import { canMerge, onTrain, type Pr, type TrainCar } from "./types.ts";
+import { canMerge, onTrain, type CommitIdentity, type Pr, type TrainCar } from "./types.ts";
 
 const POLL = 10_000;
 const PATIENCE = 30 * 60_000;
@@ -16,6 +16,7 @@ export function mergeTrain(
   prs: ReturnType<typeof prCache>,
   onConflicts: (id: string, url: string, files: string[]) => void,
   onEnd: (id: string, text: string) => void,
+  identity: () => CommitIdentity | undefined,
 ) {
   const cars = new Map<string, TrainCar>();
   /** Each repo's last PR on the train; a new one waits for it, even from a later start. */
@@ -67,7 +68,7 @@ export function mergeTrain(
           "The pull request still has conflicts after rebasing. Resolve them on its branch, then add it to the merge train again",
         );
       cars.set(id, { step: "rebasing" });
-      await rebasePr(url);
+      await rebasePr(url, identity());
     }
   }
 

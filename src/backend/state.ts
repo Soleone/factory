@@ -9,6 +9,7 @@ import {
   TIERS,
   USAGE_POOLS,
   type Candidates,
+  type CommitIdentity,
   type Item,
   type Preset,
   type Settings,
@@ -78,6 +79,7 @@ export function checkSettings(
     tiers: { ...DEFAULTS.tiers, ...rest.tiers },
     auto: { ...DEFAULTS.auto, ...upgradeAuto(rest.auto) },
     triggers: { ...DEFAULTS.triggers, ...rest.triggers },
+    commitIdentity: checkCommitIdentity(rest.commitIdentity),
   };
   if (!AGENT_NAMES.includes(settings.chat.agent))
     throw new Error(`unknown chat agent ${settings.chat.agent} (known: ${AGENT_NAMES.join(", ")})`);
@@ -117,6 +119,22 @@ export function checkSettings(
   for (const attention of settings.auto.attention)
     if (!ATTENTION.includes(attention)) throw new Error(`unknown attention ${attention}`);
   return settings;
+}
+
+function checkCommitIdentity(value: CommitIdentity | undefined): CommitIdentity | undefined {
+  if (value === undefined) return undefined;
+  const message =
+    "Enter a commit name and a valid email address, or clear both to use Git configuration.";
+  if (typeof value?.name !== "string" || typeof value.email !== "string") throw new Error(message);
+  const { name, email } = value;
+  if (!name.trim() && !email.trim()) return undefined;
+  if (
+    !name.trim() ||
+    /[<>\p{Cc}]/u.test(name) ||
+    !/^[^\s<>@\p{Cc}]+@[^\s<>@\p{Cc}]+$/u.test(email.trim())
+  )
+    throw new Error(message);
+  return { name: name.trim(), email: email.trim() };
 }
 
 /**
@@ -196,8 +214,13 @@ export async function output(
   args: string[],
   cwd: string,
   input?: string,
+  env?: Record<string, string>,
 ): Promise<string> {
-  const run = promisify(execFile)(command, args, { cwd, maxBuffer: 64 * 1024 * 1024 });
+  const run = promisify(execFile)(command, args, {
+    cwd,
+    env: env && { ...process.env, ...env },
+    maxBuffer: 64 * 1024 * 1024,
+  });
   run.child.stdin!.end(input);
   const { stdout, stderr } = await run;
   // workwork reports failed finders here; they belong in the factory log.

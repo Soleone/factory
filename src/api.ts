@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type {
   Blueprint,
   Candidates,
+  CommitIdentity,
   Job,
   Model,
   Pin,
@@ -90,6 +91,7 @@ export const api = {
   move: (id: string, index: number) => call("POST", `/api/jobs/${id}/move`, { index }),
   models: () => call<Record<string, Model[]>>("GET", "/api/models"),
   saveSettings: (settings: Snapshot["settings"]) => call("PUT", "/api/settings", settings),
+  githubProfile: () => call<CommitIdentity>("GET", "/api/github-profile"),
   turnOn: (run: RunRequest) => call("POST", "/api/on", run),
   turnOff: () => call("POST", "/api/off"),
   chat: (message: string) => call("POST", "/api/chat", { message }),

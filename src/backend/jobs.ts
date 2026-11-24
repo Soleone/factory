@@ -235,7 +235,8 @@ export function replay(events: Event[]): Job[] {
       const planning = (PLANNING as readonly string[]).includes(job.item.blueprint);
       if (outcome === "done" && lacking.length && !planning)
         job.unverified = [...new Set([...job.unverified, ...lacking])];
-      if (asked) {
+      if (event.attempt.setupFailed) job.state = "failed";
+      else if (asked) {
         // Old logs: the attempt ended with the question.
         job.state = "blocked";
         job.blocked = "asked";

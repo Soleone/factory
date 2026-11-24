@@ -52,6 +52,8 @@ export type RunRequest = Pick<Settings, "limit" | "until"> & { workers: Record<s
 /** stopped: the factory was turned off with --kill while the agent worked. timeout: no output for `idle` minutes. */
 export type Outcome = "done" | "failed" | "limited" | "timeout" | "stopped";
 
+export type CommitIdentity = { name: string; email: string };
+
 /** The global settings; a run starts from these unless told otherwise. */
 export type Settings = {
   /** The agent the Plan chat talks to, with its model and effort; a change starts a new chat. */
@@ -83,6 +85,8 @@ export type Settings = {
    * default branch, an open issue with `label` (empty: none), a person's remarks on a job's PR.
    */
   triggers: { ci: boolean; label: string; reviews: boolean };
+  /** Optional author and committer for Factory's worktrees. */
+  commitIdentity?: CommitIdentity;
 };
 
 /** A workwork candidate, as `workwork --json` prints it. `id` is workwork's, not a job's. */
@@ -133,6 +137,8 @@ export type Tokens = { input: number; cached: number; output: number };
  * holds work it left unpushed.
  */
 export type Attempt = {
+  /** A setup error the user must fix before retrying. */
+  setupFailed?: boolean;
   run: string;
   agent: string;
   model?: string;

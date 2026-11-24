@@ -13,7 +13,14 @@ import {
 } from "node:fs";
 import { basename, join } from "node:path";
 import { agent as makeAgent, classify, resetTime, type Agent } from "./agents.ts";
-import { keepWork, release } from "./git.ts";
+import {
+  GitIdentityError,
+  keepWork,
+  release,
+  requireIdentity,
+  worktreeEnv,
+  worktreeGit,
+} from "./git.ts";
 import { piWindows } from "./models.ts";
 import { mirrorTasks } from "./tasksStore.ts";
 import { afterAttempt, builtinCheck, discardCancelledJob, finishGoals, prepare } from "./goals.ts";
@@ -430,7 +437,8 @@ export async function run(options: RunOptions): Promise<string> {
         // Still holding the worktree: a goal node merges from it.
         const worktree = readLive(state, job.id)?.worktree;
         if (worktree) {
-          await afterAttempt(state, job.id, worktree, log);
+          if (result.attempt.setupFailed) discardCancelledJob(state, readJobs(state), job);
+          else await afterAttempt(state, job.id, worktree, log);
           // Lets go of its branch, which a later job may check out elsewhere. When that fails, the
           // next job's checkout forces it anyway.
           await release(worktree).catch((error: Error) =>
@@ -440,7 +448,9 @@ export async function run(options: RunOptions): Promise<string> {
         rmSync(livePath(state, job.id), { force: true });
         const seconds = (Date.parse(result.attempt.end) - Date.parse(result.attempt.start)) / 1000;
         slot.quickFailures =
-          result.attempt.outcome === "failed" && seconds < 60 ? slot.quickFailures + 1 : 0;
+          result.attempt.outcome === "failed" && !result.attempt.setupFailed && seconds < 60
+            ? slot.quickFailures + 1
+            : 0;
         if (slot.quickFailures >= 3)
           return set(worker, {
             state: "stopped",
@@ -481,7 +491,13 @@ export async function run(options: RunOptions): Promise<string> {
     log(`${job.id} broke: ${message.split("\n")[0]}`);
     const end = new Date().toISOString();
     return {
-      attempt: { ...begun, end, outcome: "failed", error: message.slice(0, 2000) },
+      attempt: {
+        ...begun,
+        end,
+        outcome: "failed",
+        error: message.slice(0, 2000),
+        setupFailed: error instanceof GitIdentityError || undefined,
+      },
       text: "",
     };
   }
@@ -516,7 +532,10 @@ export async function run(options: RunOptions): Promise<string> {
     for (;;) {
       if (!live.pid) {
         if (stopping) return undefined;
-        live.pid = startAgent(agentOf(), live, job.id, envFor(job, live.worktree));
+        const env = envFor(job, live.worktree);
+        await requireIdentity(worktreeGit(live.worktree, env));
+        if (stopping) return undefined;
+        live.pid = startAgent(agentOf(), live, job.id, env);
         writeLive(state, job.id, live);
       }
       const turn = await finishTurn(worker, live);
@@ -611,7 +630,7 @@ export async function run(options: RunOptions): Promise<string> {
     let prompt: string;
     try {
       const jobs = readJobs(state);
-      prompt = await prepare(state, job, jobs, worktree, options.workwork);
+      prompt = await prepare(state, job, jobs, worktree, options.workwork, envFor(job, worktree));
     } catch (error) {
       // The repo or workwork failed, not the agent: record why and move on.
       borrowed.delete(worktree);
@@ -623,6 +642,7 @@ export async function run(options: RunOptions): Promise<string> {
           end: new Date().toISOString(),
           outcome: "failed",
           error: message.slice(0, 2000),
+          setupFailed: error instanceof GitIdentityError || undefined,
         },
       };
     }
@@ -744,7 +764,11 @@ export async function run(options: RunOptions): Promise<string> {
     last: Facts,
     error?: string,
   ): Promise<Attempt> {
-    const branch = await keepWork(live.worktree, `factory/${basename(live.dir)}`);
+    const branch = await keepWork(
+      live.worktree,
+      `factory/${basename(live.dir)}`,
+      envFor(job, live.worktree),
+    );
     const whole = readFileSync(live.begun.log, "utf8");
     const facts = readStream(whole);
     const fresh = readJobs(state).find((each) => each.id === job.id)!;
@@ -784,10 +808,7 @@ export async function run(options: RunOptions): Promise<string> {
   }
 
   function envFor(job: Job, worktree: string): Record<string, string> {
-    const extra = settings.env[job.item.repo] ?? {};
-    return Object.fromEntries(
-      Object.entries(extra).map(([key, value]) => [key, value.replaceAll("{worktree}", worktree)]),
-    );
+    return worktreeEnv(readSettings(state), job.item.repo, worktree);
   }
 
   /**

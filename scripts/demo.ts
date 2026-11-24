@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { ServerResponse } from "node:http";
 import type { Plugin } from "vite-plus";
+import { checkSettings } from "../src/backend/state.ts";
 import {
   canMerge,
   canRebase,
@@ -650,8 +651,10 @@ function dispatch(snapshot: Snapshot, route: string, body: unknown): unknown {
           })),
         ],
       };
+    case "GET /api/github-profile":
+      return { name: "Demo User", email: "12345+demo-user@users.noreply.github.com" };
     case "PUT /api/settings":
-      snapshot.settings = body as Settings;
+      snapshot.settings = checkSettings(body as Settings);
       return null;
     case "POST /api/on": {
       const { workers, until, limit } = body as RunRequest;
