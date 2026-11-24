@@ -1,8 +1,9 @@
+import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
-import { dirname, extname, join, relative, resolve, sep } from "node:path";
+import { dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AGENT_NAMES } from "./agents.ts";
 import { chat } from "./chat.ts";
@@ -40,6 +41,7 @@ import {
   resumeGoal,
 } from "./goals.ts";
 import { exportGoal } from "./goalExport.ts";
+import { jobContext, jobPrs, liveJobs, resultsPage, webJob } from "./webHistory.ts";
 import { mirrorTasks } from "./tasksStore.ts";
 import { mergeTrain } from "./train.ts";
 import { piProvider, usageCache } from "./usage.ts";
@@ -66,6 +68,7 @@ import {
   poolOf,
   workersOf,
   presetId,
+  RESULTS_BATCH_SIZE,
   type RunRequest,
   type Settings,
   type Snapshot,
@@ -94,6 +97,7 @@ export function serve(
   usage = usageCache(join(state, "usage.json")),
 ): Server {
   const prs = prCache();
+  const cachedPrs = (urls: string[]) => prs.get(urls);
   const train = mergeTrain(
     prs,
     (id, url, files) => queueConflicts(state, id, url, files),
@@ -175,7 +179,6 @@ export function serve(
     }
   }
   const routes: Record<string, (body: never, id: string) => unknown> = {
-    "GET /api/state": () => snapshot(state, (urls) => prs.get(urls), train.cars(), usage),
     "GET /api/candidates": () => {
       const cached = readCandidates(state);
       const items = cached?.items ?? [];
@@ -315,11 +318,29 @@ export function serve(
 
   const server = createServer(async (request, response) => {
     // Job ids and run folders are [\w.-] only, so the path needs no decoding.
-    const path = new URL(request.url ?? "/", "http://factory").pathname;
+    const { pathname: path, searchParams } = new URL(request.url ?? "/", "http://factory");
     // /api/jobs/<id>/<action> is routed as /api/jobs/<action> with the id.
     const [, jobId, action] = /^\/api\/jobs\/(\w+)\/(\w+)$/.exec(path) ?? [];
     const route = routes[`${request.method} ${jobId ? `/api/jobs/${action}` : path}`];
     try {
+      if (request.method === "GET" && path === "/api/state")
+        return sendPoll(request, response, snapshot(state, cachedPrs, train.cars(), usage));
+      if (request.method === "GET" && path === "/api/results") {
+        const limit = Number(searchParams.get("limit") ?? RESULTS_BATCH_SIZE);
+        if (!Number.isSafeInteger(limit) || limit < 1) throw new Error("invalid results limit");
+        return sendPoll(
+          request,
+          response,
+          resultsPage(
+            state,
+            readJobs(state),
+            searchParams.get("repo"),
+            limit,
+            cachedPrs,
+            train.cars(),
+          ),
+        );
+      }
       if (`${request.method} ${path}` === "GET /api/chat") return planner.listen(response);
       if (request.method === "GET" && action === "export") return await sendExport(response, jobId);
       if (route) {
@@ -373,24 +394,28 @@ function snapshot(
   const statusPath = join(state, "status.json");
   const settings = readSettings(state);
   const candidates = readCandidates(state);
-  const jobs = readJobs(state);
+  const all = readJobs(state);
+  const status = existsSync(statusPath)
+    ? (JSON.parse(readFileSync(statusPath, "utf8")) as Status)
+    : null;
+  // A previously settled PR can still be on a visible goal, in Activity or in Results.
+  // Check all PRs as before so an old unresolved PR can enter or leave the Inbox.
+  const prStates = jobPrs(all, prs);
+  const jobs = liveJobs(all, prStates, candidates?.items ?? [], status);
   return {
     on: runningPid(state) !== undefined,
-    status: existsSync(statusPath)
-      ? (JSON.parse(readFileSync(statusPath, "utf8")) as Status)
-      : null,
+    status,
     settings,
-    // Paths under runs/ are where this server serves them.
-    jobs: jobs.map((job) => ({
-      ...job,
-      attempts: job.attempts.map((attempt) => ({ ...attempt, log: relative(state, attempt.log) })),
-    })),
+    jobs: jobs.map((job) => webJob(state, job)),
+    ...jobContext(all, jobs),
     candidates: {
       at: candidates?.at ?? null,
       count: candidates?.items.length ?? 0,
       refreshing: refreshingCandidates(state),
     },
-    prs: prs(jobs.flatMap((job) => (job.state === "removed" ? [] : (prUrl(job) ?? [])))),
+    prs: jobPrs(jobs, (urls) =>
+      Object.fromEntries(urls.flatMap((url) => (prStates[url] ? [[url, prStates[url]]] : []))),
+    ),
     train,
     usage: usage(usagePools(settings)),
   };
@@ -423,6 +448,14 @@ async function body(request: IncomingMessage): Promise<unknown> {
 
 function isFile(path: string): boolean {
   return existsSync(path) && statSync(path).isFile();
+}
+
+function sendPoll(request: IncomingMessage, response: ServerResponse, value: unknown): void {
+  const json = JSON.stringify(value);
+  const etag = `"${createHash("sha256").update(json).digest("base64url")}"`;
+  const headers = { etag, "cache-control": "private, no-cache" };
+  if (request.headers["if-none-match"] === etag) response.writeHead(304, headers).end();
+  else response.writeHead(200, { ...headers, "content-type": "application/json" }).end(json);
 }
 
 function send(response: ServerResponse, type: string, body: string | Buffer): void {

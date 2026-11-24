@@ -336,8 +336,18 @@ export type Status = {
   pools: Pool[];
 };
 
-/** What the page polls: everything it shows except the candidates themselves. */
-export type Snapshot = {
+export const ACTIVITY_LIMIT = 200;
+export const RESULTS_BATCH_SIZE = 250;
+
+type JobContext = {
+  /** Visible job ids whose item already has a review job. */
+  reviewed: string[];
+  /** Suggested follow-ups on visible jobs that already have a job. */
+  queuedFollowups: string[];
+};
+
+/** What the page polls. Older results are read separately, when requested. */
+export type Snapshot = JobContext & {
   on: boolean;
   /** The current run's, or the last one's when the factory is off. */
   status: Status | null;
@@ -352,6 +362,15 @@ export type Snapshot = {
   /** The last good usage read of each pool a run works on, by pool; a pool never read is missing. */
   usage: Record<string, ReadUsage>;
 };
+
+export type ResultsPage = JobContext &
+  Pick<Snapshot, "prs" | "train"> & {
+    running: Job[];
+    finished: Job[];
+    total: number;
+    repos: string[];
+    repo: string | null;
+  };
 
 export type TrainCar =
   | { step: "queued" | "waiting" | "rebasing" | "merging" | "merged" }

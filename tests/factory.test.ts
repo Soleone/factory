@@ -32,6 +32,7 @@ import {
   retryJob,
   pinJob,
   startJob,
+  type Event,
 } from "../src/backend/jobs.ts";
 import {
   approveGoal,
@@ -50,14 +51,18 @@ import { agentModels } from "../src/backend/models.ts";
 import { checkSettings, readSettings, writeSettings } from "../src/backend/state.ts";
 import {
   onTrain,
+  RESULTS_BATCH_SIZE,
   type Item,
   type Job,
+  type ResultsPage,
   type Settings,
   type Snapshot,
   type Status,
   type TrainCar,
 } from "../src/backend/types.ts";
 import { serve } from "../src/backend/web.ts";
+import { webJob } from "../src/backend/webHistory.ts";
+import { inbox } from "../src/inbox.ts";
 
 const scratch = mkdtempSync(join(tmpdir(), "factory-test-"));
 const NOW = Date.parse("2026-11-16T04:00:00Z");
@@ -1866,6 +1871,161 @@ esac`;
       expect(jobs.map((job) => [job.item.id, job.state])).toEqual([["a", "done"]]);
       expect(await (await fetch(url(`/${jobs[0].attempts[0].log}`))).text()).toContain("pull/7");
       expect(await (await fetch(url("/runs/%2E%2E/jobs.jsonl"))).text()).not.toContain('"add"');
+    } finally {
+      server.close();
+    }
+  });
+
+  test("polls a bounded projection and reads older results and actions on demand", async () => {
+    const { state, repo } = setup([]);
+    gh();
+    const archived = `${repo}/archive`;
+    const oldPr = "https://github.com/o/r/pull/7";
+    const count = 1250;
+    const events: Event[] = Array.from({ length: count }, (_, i): Event[] => {
+      const id = `job${i}`;
+      const at = new Date(NOW + i * MINUTE).toISOString();
+      const item = {
+        repo: i < 2 ? archived : repo,
+        id,
+        blueprint: "test",
+        title: id,
+        label: "test",
+        attention: "none",
+      };
+      return [
+        { at, type: "add", job: { id, item, source: "pick", prompt: `Prompt for ${id}` } },
+        {
+          at,
+          type: "attempt",
+          id,
+          attempt: {
+            run: "test",
+            start: at,
+            end: at,
+            agent: "pi",
+            outcome: "done",
+            log: join(state, "runs", id, "agent.log"),
+            ...(i === 1 ? { url: oldPr } : {}),
+          },
+        },
+        { at, type: "note", id, note: { kind: "result", text: "x".repeat(1024) } },
+      ];
+    }).flat();
+    // Old outcome, recent event: Activity must not simply pick the most recently finished jobs.
+    events.push({
+      at: new Date(NOW + count * MINUTE).toISOString(),
+      type: "note",
+      id: "job2",
+      note: { kind: "note", text: "Recent update on an old job" },
+    });
+    const at = new Date(NOW).toISOString();
+    const item = {
+      repo,
+      id: "goal",
+      blueprint: "goal",
+      title: "A goal",
+      label: "test",
+      attention: "none",
+    };
+    events.push(
+      {
+        at,
+        type: "add",
+        job: {
+          id: "goal",
+          item,
+          source: "goal",
+          goal: { repo, slug: "goal", summary: "Test", gates: [], allowUp: false },
+        },
+      },
+      {
+        at,
+        type: "add",
+        job: { id: "node", item: { ...item, id: "node" }, source: "goal", of: "goal" },
+      },
+      { at, type: "merged", id: "node" },
+    );
+    writeFileSync(
+      join(state, "jobs.jsonl"),
+      events.map((event) => JSON.stringify(event)).join("\n") + "\n",
+    );
+
+    const server = serve(state, 0, "127.0.0.1", () => ({}));
+    await once(server, "listening");
+    const { port } = server.address() as AddressInfo;
+    const get = (path: string, etag?: string) =>
+      fetch(`http://127.0.0.1:${port}${path}`, { headers: etag ? { "if-none-match": etag } : {} });
+    try {
+      // Wait until the PR cache has filled, so the validator isn't changed by that background read.
+      await expect
+        .poll(async () => ((await (await get("/api/state")).json()) as Snapshot).prs[oldPr]?.state)
+        .toBe("OPEN");
+      const response = await get("/api/state");
+      const json = await response.text();
+      const live = JSON.parse(json) as Snapshot;
+      const all = readJobs(state);
+      const oldSize = Buffer.byteLength(
+        JSON.stringify({
+          ...live,
+          jobs: all.map((job) => webJob(state, job)),
+          reviewed: undefined,
+          queuedFollowups: undefined,
+        }),
+      );
+      expect(Buffer.byteLength(json)).toBeLessThan(oldSize / 8);
+      expect(live.jobs.map((job) => job.id)).toEqual(
+        expect.arrayContaining(["job1", "job2", "goal", "node"]),
+      );
+      expect(live.jobs.some(({ id }) => id === "job0")).toBe(false);
+      expect(inbox(live)).toEqual(
+        inbox({ jobs: all.map((job) => webJob(state, job)), prs: live.prs }),
+      );
+      const firstResponse = await get("/api/results");
+      const firstJson = await firstResponse.text();
+      const first = JSON.parse(firstJson) as ResultsPage;
+      expect(first.finished).toHaveLength(RESULTS_BATCH_SIZE);
+      expect(first.finished[0].id).toBe(`job${count - 1}`);
+      expect(first.total).toBe(count);
+      expect(Buffer.byteLength(firstJson) + Buffer.byteLength(json)).toBeLessThan(oldSize / 3);
+      for (const [path, previous] of [
+        ["/api/state", response],
+        ["/api/results", firstResponse],
+      ] as const) {
+        const poll = await get(path, previous.headers.get("etag")!);
+        expect(poll.status).toBe(304);
+        expect(await poll.text()).toBe("");
+      }
+
+      const more = (await (
+        await get(`/api/results?limit=${RESULTS_BATCH_SIZE * 2}`)
+      ).json()) as ResultsPage;
+      expect(more.finished).toHaveLength(RESULTS_BATCH_SIZE * 2);
+      expect(more.finished.slice(0, RESULTS_BATCH_SIZE)).toEqual(first.finished);
+      expect(more.finished.at(-1)?.id).toBe(`job${count - RESULTS_BATCH_SIZE * 2}`);
+      const expandedPath = `/api/results?limit=${count}`;
+      const expanded = await get(expandedPath);
+      expect(((await expanded.json()) as ResultsPage).finished.at(-1)?.id).toBe("job0");
+      const expandedPoll = await get(expandedPath, expanded.headers.get("etag")!);
+      expect(expandedPoll.status).toBe(304);
+      expect(await expandedPoll.text()).toBe("");
+
+      const oldPage = `/api/results?${new URLSearchParams({ repo: archived }).toString()}`;
+      const old = (await (await get(oldPage)).json()) as ResultsPage;
+      expect(old.finished.map(({ id }) => id)).toEqual(["job1", "job0"]);
+      expect(old.finished.at(-1)?.attempts[0].log).toBe("runs/job0/agent.log");
+      expect(await (await get("/api/jobs/job0/prompt")).json()).toBe("Prompt for job0");
+      expect(old.prs[oldPr].state).toBe("OPEN");
+      const merge = await fetch(`http://127.0.0.1:${port}/api/jobs/job1/merge`, { method: "POST" });
+      expect(merge.status).toBe(200);
+      const after = (await (await get(oldPage)).json()) as ResultsPage;
+      expect(after.prs[oldPr].state).toBe("MERGED");
+      const updated = await get("/api/state", response.headers.get("etag")!);
+      expect(updated.status).toBe(200);
+      expect(inbox((await updated.json()) as Snapshot).ready).toHaveLength(0);
+      console.log(
+        `History transfer (uncompressed JSON): ${oldSize} B full, ${Buffer.byteLength(json)} B shared state, ${Buffer.byteLength(firstJson)} B first Results window, 0 B unchanged polls`,
+      );
     } finally {
       server.close();
     }

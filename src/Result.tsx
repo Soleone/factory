@@ -4,7 +4,6 @@ import { api, type Act } from "@/api";
 import {
   canMerge,
   canRebase,
-  itemKey,
   onTrain,
   prUrl,
   reviewTier,
@@ -31,13 +30,7 @@ export const hasBranch = (job: Job) => job.attempts.some((attempt) => attempt.br
 /** The role to review the job's PR, unless it is a review or a fix of one, or has one already. */
 export function reviewerOf(job: Job, snapshot: Snapshot) {
   if (job.item.blueprint === "review" || job.branchOf) return undefined;
-  const reviewed = snapshot.jobs.some(
-    (other) =>
-      other.state !== "removed" &&
-      other.item.blueprint === "review" &&
-      itemKey(other.item) === itemKey(job.item),
-  );
-  if (reviewed) return undefined;
+  if (snapshot.reviewed.includes(job.id)) return undefined;
   return reviewTier(job);
 }
 
