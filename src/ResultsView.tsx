@@ -8,14 +8,8 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { NeutralCheckbox } from "@/components/variants/checkbox";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { RowGroup } from "@/components/variants/item";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { itemTitle, repoName } from "@/format";
+import { ProjectsFilter } from "@/ProjectsFilter";
+import { itemTitle } from "@/format";
 import { canBoard, MergeButton, mergeTrain } from "@/PullRequest";
 import { canDismiss, hasBranch, Result, reviewerOf } from "@/Result";
 import { Spinner } from "@/components/ui/spinner";
@@ -57,6 +51,7 @@ function useResults(project: string | null, limit: number, refresh: number) {
   const current = loaded?.project === project ? loaded : undefined;
   return {
     page: current?.page,
+    resultProjects: loaded?.page.repos ?? [],
     appending: current?.limit !== limit,
     error: failure?.project === project ? failure.text : undefined,
   };
@@ -112,19 +107,30 @@ export function ResultsView({
   snapshot: live,
   act: change,
   onAsk,
+  projects,
+  project,
+  onProjectChange,
 }: {
   snapshot: Snapshot;
   act: Act;
   onAsk: (question: string) => void;
+  projects: readonly string[];
+  project: string | null;
+  onProjectChange: (project: string | null) => void;
 }) {
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [dismissing, setDismissing] = useState(false);
   const seen = useLastSeen();
-  const [project, setProject] = useState<string | null>(null);
   const [finishedOpen, setFinishedOpen] = useState(true);
   const [limit, setLimit] = useState(RESULTS_BATCH_SIZE);
   const [refresh, setRefresh] = useState(0);
-  const { page, appending, error } = useResults(project, limit, refresh);
+  const [previousProject, setPreviousProject] = useState(project);
+  if (previousProject !== project) {
+    setPreviousProject(project);
+    setLimit(RESULTS_BATCH_SIZE);
+    setSelected(new Set());
+  }
+  const { page, resultProjects, appending, error } = useResults(project, limit, refresh);
   const more = useRef<HTMLButtonElement>(null);
   const hasMore = page !== undefined && page.finished.length < page.total;
   const act: Act = async (action) => {
@@ -160,30 +166,46 @@ export function ResultsView({
       Can't load results: {error}
     </p>
   );
+  const filter = (
+    <div className="px-3">
+      <ProjectsFilter
+        projects={[...projects, ...resultProjects]}
+        project={project}
+        onProjectChange={onProjectChange}
+      />
+    </div>
+  );
   if (!page)
     return (
-      <div className="flex gap-2 p-3" role="status">
-        {problem || (
-          <>
-            <Spinner /> Loading results…
-          </>
-        )}
+      <div className="flex flex-col gap-6 pt-2">
+        {filter}
+        <div className="flex gap-2 p-3" role="status">
+          {problem || (
+            <>
+              <Spinner /> Loading results…
+            </>
+          )}
+        </div>
       </div>
     );
 
   const { running, finished, total, prs, train, reviewed, queuedFollowups } = page;
   const snapshot = { ...live, prs, train, reviewed, queuedFollowups };
-  const repos = page.repos.toSorted((a, b) => repoName(a).localeCompare(repoName(b)));
   if (running.length === 0 && total === 0)
     return (
-      <Empty>
-        <EmptyHeader>
-          <EmptyTitle>Nothing done yet</EmptyTitle>
-          <EmptyDescription>
-            What the agents did shows up here, with their PRs to review and merge.
-          </EmptyDescription>
-        </EmptyHeader>
-      </Empty>
+      <div className="flex flex-col gap-6 pt-2">
+        {filter}
+        <Empty>
+          <EmptyHeader>
+            <EmptyTitle>
+              {project === null ? "Nothing done yet" : "No results for this project"}
+            </EmptyTitle>
+            <EmptyDescription>
+              What the agents did shows up here, with their PRs to review and merge.
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      </div>
     );
 
   const selection = [...running, ...finished].filter(
@@ -284,38 +306,10 @@ export function ResultsView({
     );
   };
 
-  const projects = [
-    { value: null, label: "All projects" },
-    ...repos.map((repo) => ({ value: repo, label: repoName(repo) })),
-  ];
-
   return (
     <div className="flex flex-col gap-6 pt-2">
+      {filter}
       {problem}
-      {repos.length > 1 && (
-        <div className="px-3">
-          <Select
-            items={projects}
-            value={page.repo}
-            onValueChange={(repo) => {
-              setProject(repo);
-              setLimit(RESULTS_BATCH_SIZE);
-              setSelected(new Set());
-            }}
-          >
-            <SelectTrigger aria-label="Project" size="sm">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent alignItemWithTrigger={false}>
-              {projects.map(({ value, label }) => (
-                <SelectItem key={label} value={value}>
-                  {label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      )}
       {/* Keep both groups the same width so only resizing, not selection, can rewrap them. */}
       <div
         role="group"

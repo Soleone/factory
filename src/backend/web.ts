@@ -178,12 +178,14 @@ export function serve(
       rmSync(dir, { recursive: true, force: true });
     }
   }
+  const projectPaths = (items: Item[]) =>
+    [...new Set([...localRepos(), ...items.map((item) => item.repo)])].sort();
   const routes: Record<string, (body: never, id: string) => unknown> = {
+    "GET /api/projects": () => projectPaths(readCandidates(state)?.items ?? []),
     "GET /api/candidates": () => {
       const cached = readCandidates(state);
       const items = cached?.items ?? [];
-      const repos = [...new Set([...localRepos(), ...items.map((item) => item.repo)])].sort();
-      return { at: cached?.at ?? null, items, repos, root: sourceRoot() };
+      return { at: cached?.at ?? null, items, repos: projectPaths(items), root: sourceRoot() };
     },
     "POST /api/candidates/refresh": () => {
       refresh();
