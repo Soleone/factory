@@ -80,6 +80,17 @@ const DOT: Record<Worker["state"], string> = {
   stopped: "bg-destructive",
 };
 
+/** What a running worker does, and since, until or why. */
+function workerState(worker: Worker): string {
+  const doing = worker.job ? "working" : worker.state === "idle" ? "ready" : worker.state;
+  const when = worker.until
+    ? ` until ${clock(worker.until)}`
+    : worker.reason
+      ? `: ${worker.reason}`
+      : ` since ${clock(worker.since)}`;
+  return doing + when;
+}
+
 /**
  * Each provider's workers as same-size dots, a row per kind of worker, filled while one works.
  * While the factory is off it shows, muted, the workers the settings would start.
@@ -132,20 +143,7 @@ function Pool({ status, presets }: { status: Status | null; presets: Preset[] })
                           />
                           <TooltipContent>
                             {worker.id},{" "}
-                            {!status
-                              ? "starts when the factory is on"
-                              : worker.job
-                                ? "working"
-                                : worker.state === "idle"
-                                  ? "ready"
-                                  : worker.state}
-                            {!status
-                              ? ""
-                              : worker.until
-                                ? ` until ${clock(worker.until)}`
-                                : worker.reason
-                                  ? `: ${worker.reason}`
-                                  : ` since ${clock(worker.since)}`}
+                            {status ? workerState(worker) : "starts when the factory is on"}
                           </TooltipContent>
                         </Tooltip>
                       ))}
