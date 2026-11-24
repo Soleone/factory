@@ -173,5 +173,12 @@ function toolOf(
   // A call without a result after the run ended was cut off.
   const status = result ? (result.isError ? "error" : "complete") : busy ? "running" : "error";
   const output = result && textOf(result.content);
-  return { id: call.id, name: call.name, status, output, ...piStep(call, status, output) };
+  return {
+    id: call.id,
+    name: call.name,
+    status,
+    output,
+    arguments: call.arguments,
+    ...piStep(call, status, output),
+  };
 }

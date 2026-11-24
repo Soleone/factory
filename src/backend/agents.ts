@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import type { Outcome, Tuning } from "./types.ts";
 
 /** A headless coding agent: how to start it (the prompt goes on stdin) and what its usage limit looks like. */
@@ -71,6 +72,11 @@ export function agent(name: string, { model, effort }: Tuning = {}, session?: Se
   throw new Error(`unknown agent ${name} (known: ${AGENT_NAMES.join(", ")})`);
 }
 
+// Beside this file when run from source, beside cli.mjs once packed.
+const askExtension = fileURLToPath(
+  new URL(import.meta.url.endsWith(".ts") ? "./pi-ask.ts" : "./pi-ask.mjs", import.meta.url),
+);
+
 /**
  * How the Plan chat starts an agent: Pi in RPC mode, Claude Code streaming JSON both ways (chat.ts
  * reads each). Tools for looking, writing prompt files and running commands; it changes the queue
@@ -118,8 +124,10 @@ export function chatAgent(
         session.id,
         "--session-dir",
         session.folder,
+        "--extension",
+        askExtension,
         "--tools",
-        "read,write,bash,grep,find,ls",
+        "read,write,bash,grep,find,ls,ask_user",
         "--append-system-prompt",
         context,
         ...pick,

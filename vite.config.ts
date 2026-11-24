@@ -40,7 +40,7 @@ const API = "http://127.0.0.1:7041";
 export default defineConfig(({ mode }) => ({
   // The CLI, bundled to dist/cli.mjs. `vp build` then puts the page next to it in dist/web.
   pack: {
-    entry: ["src/backend/cli.ts"],
+    entry: ["src/backend/cli.ts", "src/backend/pi-ask.ts"],
     dts: false,
   },
   plugins: lazyPlugins(() => [
