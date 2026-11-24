@@ -16,7 +16,7 @@ import { agent as makeAgent, classify, resetTime, type Agent } from "./agents.ts
 import { keepWork, release } from "./git.ts";
 import { piWindows } from "./models.ts";
 import { mirrorTasks } from "./tasksStore.ts";
-import { afterAttempt, builtinCheck, finishGoals, prepare } from "./goals.ts";
+import { afterAttempt, builtinCheck, discardCancelledJob, finishGoals, prepare } from "./goals.ts";
 import {
   addJobs,
   answer,
@@ -398,7 +398,9 @@ export async function run(options: RunOptions): Promise<string> {
       }
       if (result.paused) {
         record(state, { type: "pause", id: job.id, reason: result.paused });
-        log(`${worker.id} ${job.id} waits: ${result.paused}`);
+        if (discardCancelledJob(state, readJobs(state), job))
+          log(`${worker.id} discards ${job.id}: its goal was canceled`);
+        else log(`${worker.id} ${job.id} waits: ${result.paused}`);
       } else {
         endJob(state, job.id, result.attempt);
         log(

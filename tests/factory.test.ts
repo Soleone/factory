@@ -35,6 +35,7 @@ import {
 } from "../src/backend/jobs.ts";
 import {
   approveGoal,
+  cancelGoal,
   dropNode,
   importPlan,
   importPlanText,
@@ -1190,6 +1191,71 @@ echo "$key" > $key.txt; git add $key.txt; git commit -qm "$key"; git push -q ori
     expect(prompt).toMatch(
       /## What this builds on\n\n- a: did it \(https:\/\/github.com\/o\/r\/pull\/10\d\)/,
     );
+  });
+
+  test("canceling a goal while a node runs doesn't deliver or reopen it", async () => {
+    const { repo, state, files, base } = goalRepo();
+    const gate = mkdtempSync(join(scratch, "cancel-"));
+    const started = join(gate, "started");
+    const released = join(gate, "released");
+    agents({
+      claude: `touch ${started}; while [ ! -e ${released} ]; do sleep 0.02; done; ${NODE}`,
+    });
+    const goal = await importPlan(state, plan(repo, [{ key: "a" }]));
+    approveGoal(state, goal.id);
+    let releasedAgent = false;
+    const running = work(
+      options(base),
+      (jobs) => releasedAgent && !jobs.some((job) => job.of === goal.id && job.state === "running"),
+    );
+    try {
+      for (let i = 0; i < 250 && !existsSync(started); i++)
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(existsSync(started)).toBe(true);
+      cancelGoal(state, goal.id);
+    } finally {
+      writeFileSync(released, "");
+      releasedAgent = true;
+      await running;
+    }
+    expect(readJobs(state).find((job) => job.id === goal.id)?.state).toBe("removed");
+    expect(readJobs(state).find((job) => job.key === "a")).toMatchObject({
+      state: "removed",
+      attempts: [expect.objectContaining({ outcome: "done" })],
+    });
+    expect(files("goal/demo")).not.toContain("a.txt");
+  });
+
+  test("canceling a goal while its node asks removes the waiting job", async () => {
+    const { repo, state, base } = goalRepo();
+    const gate = mkdtempSync(join(scratch, "cancel-ask-"));
+    const started = join(gate, "started");
+    const released = join(gate, "released");
+    agents({
+      claude: `touch ${started}; while [ ! -e ${released} ]; do sleep 0.02; done; echo '{"at":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'","type":"note","id":"'$FACTORY_JOB'","note":{"kind":"ask","text":"which?"}}' >> ../../../jobs.jsonl`,
+    });
+    const goal = await importPlan(state, plan(repo, [{ key: "a" }]));
+    approveGoal(state, goal.id);
+    let releasedAgent = false;
+    const running = work(
+      options(base),
+      (jobs) => releasedAgent && !jobs.some((job) => job.of === goal.id && job.state === "running"),
+    );
+    try {
+      for (let i = 0; i < 250 && !existsSync(started); i++)
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(existsSync(started)).toBe(true);
+      cancelGoal(state, goal.id);
+    } finally {
+      writeFileSync(released, "");
+      releasedAgent = true;
+      await running;
+    }
+    expect(readJobs(state).find((job) => job.id === goal.id)?.state).toBe("removed");
+    expect(readJobs(state).find((job) => job.key === "a")).toMatchObject({
+      state: "removed",
+      notes: expect.arrayContaining([expect.objectContaining({ kind: "ask", text: "which?" })]),
+    });
   });
 
   test("a goal's export zips its jobs, events, attempt folders, memory, plan and PRs", async () => {
