@@ -85,17 +85,16 @@ export function PlanView({
   references: AgentReferences;
 }) {
   const { transcript, run } = chat;
+  const dialog = transcript.dialogs[0];
   const agent = chat.chats.find((entry) => entry.id === chat.current)?.agent ?? settings.chat.agent;
 
   return (
     <>
-      {transcript.dialogs[0] && (
+      {dialog && (
         <AgentDialog
-          key={transcript.dialogs[0].id}
-          dialog={transcript.dialogs[0]}
-          onAnswer={(answer) =>
-            void run(() => api.answerChat({ id: transcript.dialogs[0].id, ...answer }))
-          }
+          key={dialog.id}
+          dialog={dialog}
+          onAnswer={(answer) => void run(() => api.answerChat({ id: dialog.id, ...answer }))}
         />
       )}
       <AgentPanel
