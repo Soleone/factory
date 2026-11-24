@@ -1,5 +1,6 @@
 import { GitBranchIcon, GitMergeIcon, RotateCcwIcon, XIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
+import { confirm } from "@/Confirm";
 import { api, type Act } from "@/api";
 import {
   canMerge,
@@ -124,8 +125,16 @@ export function Result({
       Retry
     </Button>
   );
-  const dismiss = () => {
-    if (hasBranch(job) && !window.confirm("Dismiss this result and delete its unpushed branch?"))
+  const dismiss = async () => {
+    if (
+      hasBranch(job) &&
+      !(await confirm({
+        title: "Dismiss this result?",
+        description: "Its unpushed branch is deleted too.",
+        action: "Dismiss",
+        destructive: true,
+      }))
+    )
       return;
     void act(() => api.remove(job.id));
   };

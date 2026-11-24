@@ -90,7 +90,7 @@ export function InboxView({
               <MergeButton
                 className="ml-auto"
                 disabled={false}
-                onClick={() => mergeTrain(mergeable, act)}
+                onClick={() => void mergeTrain(mergeable, act)}
               >
                 Merge all ready ({mergeable.length})
               </MergeButton>

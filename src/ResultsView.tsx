@@ -1,5 +1,6 @@
 import { ChevronDownIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { confirm } from "@/Confirm";
 import { api, type Act } from "@/api";
 import { dayOf } from "@/ActivityView";
 import { RESULTS_BATCH_SIZE, type Job, type ResultsPage, type Snapshot } from "@/backend/types.ts";
@@ -227,7 +228,12 @@ export function ResultsView({
   const dismissSelected = async () => {
     if (
       selection.some(hasBranch) &&
-      !window.confirm("Dismiss selected results and delete their unpushed branches?")
+      !(await confirm({
+        title: "Dismiss selected results?",
+        description: "Their unpushed branches are deleted too.",
+        action: "Dismiss",
+        destructive: true,
+      }))
     )
       return;
 
@@ -244,8 +250,8 @@ export function ResultsView({
     }
   };
 
-  const merge = (merging: Job[]) => {
-    if (mergeTrain(merging, act)) setSelected(new Set());
+  const merge = async (merging: Job[]) => {
+    if (await mergeTrain(merging, act)) setSelected(new Set());
   };
 
   const list = (shown: readonly Job[]) =>

@@ -5,6 +5,7 @@ import { ThemeProvider } from "@/components/soleone/theme";
 import { TooltipProvider } from "@/components/soleone/tooltip/tooltip";
 import { THEME_STORAGE_KEY } from "@/theme/config";
 import { App } from "./App";
+import { ConfirmHost } from "./Confirm";
 import "./index.css";
 
 createRoot(document.getElementById("root")!).render(
@@ -12,6 +13,7 @@ createRoot(document.getElementById("root")!).render(
     <ThemeProvider themes={themeOptions} storageKey={THEME_STORAGE_KEY}>
       <TooltipProvider>
         <App />
+        <ConfirmHost />
       </TooltipProvider>
     </ThemeProvider>
   </StrictMode>,

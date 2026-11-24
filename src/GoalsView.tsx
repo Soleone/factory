@@ -10,6 +10,7 @@ import {
   GitBranchIcon,
   XIcon,
 } from "lucide-react";
+import { confirm } from "@/Confirm";
 import { api, type Act } from "@/api";
 import {
   critical,
@@ -277,11 +278,14 @@ function GoalView({
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => {
+              onClick={async () => {
                 if (
-                  confirm(
-                    `Cancel ${goal.item.title}? Every job that hasn't finished is removed; this can't be undone.`,
-                  )
+                  await confirm({
+                    title: `Cancel ${goal.item.title}?`,
+                    description: "Every job that hasn't finished is removed. This can't be undone.",
+                    action: "Cancel goal",
+                    destructive: true,
+                  })
                 )
                   void act(() => api.goal(goal.id, "cancel"));
               }}

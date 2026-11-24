@@ -7,6 +7,7 @@ import {
   GitPullRequestIcon,
 } from "lucide-react";
 import type { ReactNode } from "react";
+import { confirm } from "@/Confirm";
 import { api, type Act } from "@/api";
 import {
   onTrain,
@@ -42,12 +43,15 @@ export function canBoard(job: Job, prs: Prs, train: Snapshot["train"]) {
 }
 
 /** Puts PRs on the merge train after the user agrees; says whether they did. */
-export function mergeTrain(merging: Job[], act: Act) {
+export async function mergeTrain(merging: Job[], act: Act) {
   const count = merging.length === 1 ? "1 PR" : `${merging.length} PRs`;
   if (
-    !window.confirm(
-      `Merge ${count} one after another? Conflicting ones get rebased; ones that still conflict are skipped.`,
-    )
+    !(await confirm({
+      title: `Merge ${count}?`,
+      description:
+        "They merge one after another. Conflicting ones get rebased; ones that still conflict are skipped.",
+      action: "Merge",
+    }))
   )
     return false;
   void act(() => api.mergeTrain(merging.map((job) => job.id)));

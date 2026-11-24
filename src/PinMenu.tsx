@@ -1,4 +1,5 @@
 import { ChevronDownIcon } from "lucide-react";
+import { confirm } from "@/Confirm";
 import { api, type Act } from "@/api";
 import { presetId, TIERS, workersOf, type Job, type Pin, type Settings } from "@/backend/types.ts";
 import { Badge } from "@/components/ui/badge";
@@ -89,12 +90,15 @@ export function PinChip({ job, settings, act }: { job: Job; settings: Settings; 
       <DropdownMenuContent align="start" className="w-auto">
         <PinMenuItems
           settings={settings}
-          onPin={(pin) => {
+          onPin={async (pin) => {
             if (
               job.open &&
-              !window.confirm(
-                "This job already started and has context. Reassigning it drops that session and starts fresh. Continue?",
-              )
+              !(await confirm({
+                title: "Reassign this job?",
+                description:
+                  "It already started and has context. Reassigning it drops that session and starts fresh.",
+                action: "Reassign",
+              }))
             )
               return;
             void act(() => api.pin(job.id, pin));

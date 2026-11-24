@@ -1,5 +1,6 @@
 import { PlusIcon } from "lucide-react";
 import { useEffect, useState } from "react";
+import { confirm } from "@/Confirm";
 import { api, type Act } from "@/api";
 import type { Blueprint } from "@/backend/types.ts";
 import { Button } from "@/components/ui/button";
@@ -106,8 +107,15 @@ export function BlueprintsView({ act }: { act: Act }) {
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => {
-            if (confirm(`Delete the blueprint ${blueprint.name}?`))
+          onClick={async () => {
+            if (
+              await confirm({
+                title: `Delete the blueprint ${blueprint.name}?`,
+                description: "This can't be undone.",
+                action: "Delete",
+                destructive: true,
+              })
+            )
               void change(() => api.deleteBlueprint(blueprint.name));
           }}
         >
