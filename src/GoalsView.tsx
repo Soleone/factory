@@ -4,6 +4,7 @@ import {
   ArrowLeftIcon,
   CheckCheckIcon,
   CheckIcon,
+  DownloadIcon,
   ChevronRightIcon,
   FlameIcon,
   GitBranchIcon,
@@ -295,6 +296,7 @@ function GoalView({
             )
           )}
           {goal.state !== "done" && <Replan goal={goal} act={act} />}
+          <ExportButton goal={goal} act={act} />
           {goal.state !== "done" && (
             <Button
               variant="ghost"
@@ -733,6 +735,32 @@ function Assumption({
         </Button>
       </form>
     </li>
+  );
+}
+
+function ExportButton({ goal, act }: { goal: Job; act: Act }) {
+  const [exporting, setExporting] = useState(false);
+  const run = async () => {
+    setExporting(true);
+    try {
+      await act(() => api.exportGoal(goal.id, goal.goal!.slug));
+    } finally {
+      setExporting(false);
+    }
+  };
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={<Button variant="ghost" size="sm" disabled={exporting} onClick={run} />}
+      >
+        <DownloadIcon data-icon="inline-start" />
+        {exporting ? "Exporting…" : "Export"}
+      </TooltipTrigger>
+      <TooltipContent>
+        A zip of its jobs, events, prompts, agent logs, memory, plan and PRs, for an agent to review
+        how the goal went
+      </TooltipContent>
+    </Tooltip>
   );
 }
 

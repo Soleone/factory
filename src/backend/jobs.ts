@@ -123,12 +123,15 @@ const fresh = (job: NewJob, at: string): Job => ({
  * goal and longest remaining chain, then auto.
  */
 export function readJobs(state: string): Job[] {
+  return replay(readEvents(state));
+}
+
+export function readEvents(state: string): Event[] {
   if (!existsSync(path(state))) return [];
-  const events: Event[] = readFileSync(path(state), "utf8")
+  return readFileSync(path(state), "utf8")
     .split("\n")
     .filter(Boolean)
     .map((line) => JSON.parse(line));
-  return replay(events);
 }
 
 export function replay(events: Event[]): Job[] {

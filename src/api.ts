@@ -61,6 +61,16 @@ export const api = {
   goal: (id: string, action: "approve" | "pause" | "resume" | "cancel") =>
     call("POST", `/api/jobs/${id}/${action}`),
   /** Without `repo`, `project` names a new one to create. */
+  /** Downloads the goal's export zip; it gathers PRs from GitHub, so it can take a while. */
+  exportGoal: async (id: string, slug: string) => {
+    const response = await fetch(`/api/jobs/${id}/export`);
+    if (!response.ok) throw new Error((await response.json()).error);
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(await response.blob());
+    link.download = `factory-goal-${slug}.zip`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+  },
   newGoal: (goal: { title: string; brief: string; repo?: string; project?: string }) =>
     call<Job>("POST", "/api/goals", goal),
   importPlan: (plan: string) => call<Job>("POST", "/api/goals/import", { plan }),

@@ -186,10 +186,10 @@ const slugOf = (plan: Plan) =>
     .replace(/^-|-$/g, "")
     .slice(0, 40);
 
-const memoryPath = (slug: string) => `.factory/${slug}.md`;
-const planPath = (slug: string) => `.factory/${slug}.plan.json`;
-const replanPath = (slug: string) => `.factory/${slug}.replan.json`;
-const integration = (goal: Goal) => `goal/${goal.slug}`;
+export const memoryPath = (slug: string) => `.factory/${slug}.md`;
+export const planPath = (slug: string) => `.factory/${slug}.plan.json`;
+export const replanPath = (slug: string) => `.factory/${slug}.replan.json`;
+export const integration = (goal: Goal) => `goal/${goal.slug}`;
 const nodeBranch = (goal: Goal, key: string) => `node/${goal.slug}/${key}`;
 
 const goalItem = (repo: string, id: string, blueprint: string, title: string): Item => ({

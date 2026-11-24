@@ -34,6 +34,7 @@ import {
   retierNode,
   type Plan,
 } from "../src/backend/goals.ts";
+import { exportGoal } from "../src/backend/goalExport.ts";
 import { stringify as toYaml } from "yaml";
 import { makeSlots, piSettingsWarnings, run, type RunOptions } from "../src/backend/loop.ts";
 import { agentModels } from "../src/backend/models.ts";
@@ -1150,6 +1151,45 @@ echo "$key" > $key.txt; git add $key.txt; git commit -qm "$key"; git push -q ori
     expect(prompt).toMatch(
       /## What this builds on\n\n- a: did it \(https:\/\/github.com\/o\/r\/pull\/10\d\)/,
     );
+  });
+
+  test("a goal's export zips its jobs, events, attempt folders, memory, plan and PRs", async () => {
+    const { repo, state, base } = goalRepo();
+    agents({ claude: NODE });
+    const goal = await importPlan(state, plan(repo, [{ key: "a" }]));
+    approveGoal(state, goal.id);
+    const jobs = await work(
+      options(base),
+      (jobs) => jobs.find((job) => job.id === goal.id)!.state === "done",
+    );
+    const node = jobs.find((job) => job.key === "a")!;
+    const out = join(mkdtempSync(join(scratch, "export-")), "goal.zip");
+    await exportGoal(
+      state,
+      readJobs(state).find((job) => job.id === goal.id)!,
+      out,
+    );
+    const entries = sh(scratch, "unzip", "-Z1", out).trim().split("\n");
+    expect(entries).toEqual(
+      expect.arrayContaining([
+        "REVIEW.md",
+        "summary.txt",
+        "goal.json",
+        "jobs.json",
+        "events.jsonl",
+        "settings.json",
+        `attempts/${node.id}-1/prompt.md`,
+        `attempts/${node.id}-1/agent.log`,
+        "repo/memory.md",
+        "repo/plan.json",
+        "repo/git-log.txt",
+        "prs/101.json",
+        "prs/101.diff",
+      ]),
+    );
+    const unzip = (path: string) => sh(scratch, "unzip", "-p", out, path);
+    expect(JSON.parse(unzip("jobs.json")).map((job: Job) => job.key)).toEqual(["a"]);
+    expect(unzip("events.jsonl").trim().split("\n")[0]).toContain(`"id":"${goal.id}"`);
   });
 
   test("a node that no longer rebases gets a conflicts job on its branch, then merges", async () => {

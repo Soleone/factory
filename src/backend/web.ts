@@ -1,6 +1,7 @@
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
 import { dirname, extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AGENT_NAMES } from "./agents.ts";
@@ -36,6 +37,7 @@ import {
   queueReplan,
   resumeGoal,
 } from "./goals.ts";
+import { exportGoal } from "./goalExport.ts";
 import { mirrorTasks } from "./tasksStore.ts";
 import { mergeTrain } from "./train.ts";
 import { piProvider, usageCache } from "./usage.ts";
@@ -151,6 +153,23 @@ export function serve(
     const pr = await prs.fresh(url);
     if (pr.state !== "OPEN") throw new Error(`${url} is already ${pr.state.toLowerCase()}`);
     return { url, pr };
+  }
+  /** The goal's export as a zip download. */
+  async function sendExport(response: ServerResponse, id: string) {
+    const goal = findGoal(state, id);
+    const dir = mkdtempSync(join(tmpdir(), "factory-download-"));
+    try {
+      const file = join(dir, "export.zip");
+      await exportGoal(state, goal, file);
+      response
+        .writeHead(200, {
+          "content-type": "application/zip",
+          "content-disposition": `attachment; filename="factory-goal-${goal.goal!.slug}.zip"`,
+        })
+        .end(readFileSync(file));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   }
   const routes: Record<string, (body: never, id: string) => unknown> = {
     "GET /api/state": () => snapshot(state, (urls) => prs.get(urls), train.cars(), usage),
@@ -291,6 +310,7 @@ export function serve(
     const route = routes[`${request.method} ${jobId ? `/api/jobs/${action}` : path}`];
     try {
       if (`${request.method} ${path}` === "GET /api/chat") return planner.listen(response);
+      if (request.method === "GET" && action === "export") return await sendExport(response, jobId);
       if (route) {
         // Each route says what body it takes; JSON from the page is trusted to match it, the commands check the rest.
         const result = await route((await body(request)) as never, jobId);

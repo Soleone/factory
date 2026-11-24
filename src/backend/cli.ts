@@ -31,6 +31,7 @@ import {
 } from "./goals.ts";
 import { run, type RunOptions } from "./loop.ts";
 import { createRepo } from "./repos.ts";
+import { exportGoal } from "./goalExport.ts";
 import { logPath, turnOff, turnOn } from "./power.ts";
 import { output, pidPath, readSettings, runningPid, STATE, writeSettings } from "./state.ts";
 import {
@@ -90,6 +91,9 @@ Goals: one large task as a graph of jobs on its own integration branch
                                the graph: layers, states, tiers, the critical path, unverified work
   factory goal approve|pause|resume|cancel GOAL
   factory goal replan GOAL "<why>"
+  factory goal export GOAL [--out FILE]
+                               zip everything about the goal (jobs, events, prompts, agent logs,
+                               memory, plan, PRs) for an agent to review how it went
 
 For the agent working a job (the job is $FACTORY_JOB, or --job ID):
   factory step "<what>" [--done N --of M]
@@ -129,6 +133,7 @@ async function main(): Promise<void> {
       tier: { type: "string" },
       title: { type: "string" },
       brief: { type: "string" },
+      out: { type: "string" },
       json: { type: "boolean" },
       assume: { type: "string" },
       assumption: { type: "string" },
@@ -322,7 +327,7 @@ function step(
 
 async function goal(
   args: string[],
-  values: { repo?: string; project?: string; brief?: string; json?: boolean },
+  values: { repo?: string; project?: string; brief?: string; json?: boolean; out?: string },
 ): Promise<void> {
   const [sub, target, why] = args;
   if (sub === "new") {
@@ -370,6 +375,12 @@ async function goal(
   }
   if (!target) throw new Error(`factory goal ${sub} wants a goal`);
   const id = findGoal(STATE, target).id;
+  if (sub === "export") {
+    const goalJob = findGoal(STATE, id);
+    const out = resolve(values.out ?? `factory-goal-${goalJob.goal!.slug}.zip`);
+    await exportGoal(STATE, goalJob, out);
+    return console.log(`exported ${goalJob.goal!.slug} to ${out}`);
+  }
   if (sub === "approve") return approveGoal(STATE, id);
   if (sub === "pause") return pauseGoal(STATE, id);
   if (sub === "resume") return resumeGoal(STATE, id);
