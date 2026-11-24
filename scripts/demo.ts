@@ -1,12 +1,11 @@
 import { randomUUID } from "node:crypto";
+import type { ServerResponse } from "node:http";
 import type { Plugin } from "vite-plus";
 import {
   canMerge,
   canRebase,
-  poolOf,
-  presetId,
+  presetWorkers,
   prUrl,
-  workersOf,
   type Item,
   type Job,
   type Pin,
@@ -14,6 +13,7 @@ import {
   type Settings,
   type Snapshot,
 } from "../src/backend/types.ts";
+import type { PiRecord } from "../src/pi.ts";
 
 const DEMO_NOTES: Record<number, Omit<Job["notes"][number], "at" | "attempt">[]> = {
   0: [
@@ -30,6 +30,13 @@ const DEMO_NOTES: Record<number, Omit<Job["notes"][number], "at" | "attempt">[]>
     {
       kind: "ask",
       text: "Drop the request-id field from logs (simpler, but dashboards use it) or keep it? I'd keep it.",
+    },
+  ],
+  4: [
+    {
+      kind: "result",
+      text: "The webhook docs already match the retry code: 5 tries, doubling from 1 second. Nothing to change.",
+      confidence: "high",
     },
   ],
 };
@@ -200,9 +207,10 @@ function seed(): Snapshot {
       notes: [],
       ...BLANK,
     })),
-    ...items.slice(3, 7).map((item, index): Job => {
+    ...items.slice(3, 8).map((item, index): Job => {
       const id = `result${index + 1}`;
       const failed = index === 2;
+      // The last one, without a PR or branch, found nothing to change.
       return {
         ...BLANK,
         id,
@@ -274,7 +282,7 @@ function seed(): Snapshot {
         ];
       }),
     ),
-    train: {},
+    train: { result2: { step: "rebasing" } },
     usage: {
       claude: {
         fiveHour: { used: 58, resets: Date.now() + 112 * 60_000 },
@@ -295,9 +303,9 @@ const items: Item[] = [
   ["atlas", "docs", "none", "Document the export format"],
   ["relay", "cleanup", "none", "Remove unused retry settings"],
   ["atlas", "tests", "skim", "Add CSV export tests"],
-  ["relay", "cleanup", "decide", "Simplify request logging"],
+  ["atlas", "docs", "skim", "Check the quickstart links"],
   ["relay", "tests", "skim", "Test reconnect after timeout"],
-  ["atlas", "docs", "none", "Check the quickstart links"],
+  ["relay", "cleanup", "decide", "Simplify request logging"],
   ["relay", "docs", "none", "Document webhook retries"],
   ["atlas", "cleanup", "decide", "Split the import parser"],
 ].map(([repo, blueprint, attention, title], index) => ({
@@ -331,6 +339,119 @@ diff --git a/tests/index.test.ts b/tests/index.test.ts
 `,
 };
 
+type ChatMessage = PiRecord["message"];
+
+const tool = (id: string, name: string, args: Record<string, unknown>, output: string) => ({
+  call: { type: "toolCall" as const, id, name, arguments: args },
+  result: {
+    role: "toolResult" as const,
+    toolCallId: id,
+    content: [{ type: "text" as const, text: output }],
+    isError: false,
+  },
+});
+
+/** A finished review by the Live Agent, so its tool steps show without an agent. */
+function demoTranscript(): ChatMessage[] {
+  const steps = [
+    tool(
+      "t1",
+      "bash",
+      {
+        command:
+          "factory report --json | jq '.jobs[] | select(.state == \"done\") | {id, title: .item.title, pr: .attempts[-1].url}'",
+      },
+      '{ "id": "result1", "title": "Add CSV export tests", "pr": "https://example.com/demo/pull/1" }\n{ "id": "result2", "title": "Check the quickstart links", "pr": "https://example.com/demo/pull/2" }',
+    ),
+    tool(
+      "t2",
+      "bash",
+      {
+        command:
+          "gh pr view https://example.com/demo/pull/1 --json title,mergeable,statusCheckRollup,files --jq '{title, mergeable, checks: [.statusCheckRollup[].conclusion]}'",
+      },
+      '{ "title": "Add CSV export tests", "mergeable": "MERGEABLE", "checks": ["SUCCESS", "SUCCESS"] }',
+    ),
+    tool(
+      "t3",
+      "read",
+      { path: "/demo/atlas/src/export/csv.ts" },
+      "export function toCsv(rows: string[][]) { ... }",
+    ),
+    tool(
+      "t4",
+      "web_search",
+      { queries: ["RFC 4180 line endings", "Excel CSV quoted newline import"] },
+      "RFC 4180 https://www.rfc-editor.org/rfc/rfc4180\nExcel import notes https://support.microsoft.com/",
+    ),
+  ];
+  return [
+    { role: "user", content: "Review today's results and merge what's ready." },
+    { role: "assistant", content: steps.map((step) => step.call) },
+    ...steps.map((step) => step.result),
+    {
+      role: "assistant",
+      content: [
+        {
+          type: "text",
+          text: "Two results have PRs:\n\n- **Add CSV export tests** passes its checks and quotes values the way RFC 4180 asks. I'd merge it.\n- **Check the quickstart links** has conflicts, so the merge train is rebasing it first.\n\nShould I put the CSV tests on the merge train?",
+        },
+      ],
+    },
+  ];
+}
+
+/** The Live Agent's chat, replayed to every page that listens; new messages get a canned reply. */
+function demoChat() {
+  let messages = demoTranscript();
+  const pages = new Set<ServerResponse>();
+  const send = (page: ServerResponse, record: PiRecord) =>
+    page.write(`data: ${JSON.stringify(record)}\n\n`);
+  const model = {
+    type: "response",
+    success: true,
+    command: "get_state",
+    data: { model: { name: "GPT-6.2 Sol" }, thinkingLevel: "high" },
+  };
+  const broadcast = (record: PiRecord) => {
+    for (const page of pages) send(page, record);
+  };
+  const add = (message: ChatMessage) => {
+    messages.push(message);
+    broadcast({ type: "message_start", message });
+  };
+  return {
+    listen(page: ServerResponse) {
+      page.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store" });
+      page.write(": connected\n\n");
+      send(page, model);
+      for (const message of messages) send(page, { type: "message_start", message });
+      pages.add(page);
+      page.on("close", () => pages.delete(page));
+    },
+    say(text: string) {
+      add({ role: "user", content: text });
+      add({
+        role: "assistant",
+        content: [
+          {
+            type: "text",
+            text: "This is the demo, so no agent runs here. In the real factory I'd look into it, and run `factory merge` once you agree.",
+          },
+        ],
+      });
+      return null;
+    },
+    reset() {
+      messages = [];
+      broadcast({ type: "reset" });
+      return null;
+    },
+  };
+}
+
+const chat = demoChat();
+
 export function demoApi(): Plugin {
   return {
     name: "factory-demo",
@@ -358,6 +479,7 @@ export function demoApi(): Plugin {
           );
         }
         if (!path.startsWith("/api/")) return next();
+        if (`${request.method} ${path}` === "GET /api/chat") return chat.listen(response);
         try {
           let text = "";
           for await (const chunk of request) text += chunk;
@@ -484,19 +606,21 @@ function dispatch(snapshot: Snapshot, route: string, body: unknown): unknown {
     case "POST /api/on": {
       const { workers, until, limit } = body as RunRequest;
       const since = new Date().toISOString();
-      const slots = snapshot.settings.presets.flatMap((preset) =>
-        Array.from({ length: workers[presetId(preset)] ?? workersOf(preset) }, (_, index) => ({
-          id: `${presetId(preset)}#${index + 1}`,
-          agent: preset.agent,
-          model: preset.model,
-          effort: preset.effort,
-          preset: presetId(preset),
-          pool: poolOf(preset),
-          state: "idle" as const,
-          since,
-          reason: "Demo mode: no agents are launched",
-        })),
-      );
+      const slots = presetWorkers(snapshot.settings.presets, workers).map((worker) => ({
+        ...worker,
+        reason: "Demo mode: no agents are launched",
+      }));
+      // The goal's CSV step shows as running on the first worker of its tier.
+      const busy = slots.find((worker) => worker.preset === "luna");
+      if (busy)
+        Object.assign(busy, {
+          state: "working",
+          job: "csv",
+          since: new Date(Date.now() - 7 * 60_000).toISOString(),
+          activity: "Running pnpm test src/csv",
+          context: 48_000,
+          reason: undefined,
+        });
       snapshot.on = true;
       snapshot.status = {
         pid: 0,
@@ -511,6 +635,16 @@ function dispatch(snapshot: Snapshot, route: string, body: unknown): unknown {
     }
     case "POST /api/off":
       snapshot.on = false;
+      return null;
+    case "POST /api/train":
+      for (const id of (body as { ids: string[] }).ids) snapshot.train[id] = { step: "queued" };
+      return null;
+    case "POST /api/chat":
+      return chat.say((body as { message: string }).message);
+    case "POST /api/chat/reset":
+      return chat.reset();
+    case "POST /api/chat/abort":
+    case "POST /api/chat/answer":
       return null;
   }
   if (/^GET \/api\/jobs\/\w+\/pr$/.test(route)) return DEMO_PR;

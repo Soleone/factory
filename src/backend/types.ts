@@ -272,6 +272,21 @@ export type Worker = Tuning & {
   context?: number;
 };
 
+/** Each preset's workers, in settings order and ready, with a run's counts over the settings'. */
+export const presetWorkers = (presets: Preset[], counts: Record<string, number> = {}): Worker[] =>
+  presets.flatMap((preset) =>
+    Array.from({ length: counts[presetId(preset)] ?? workersOf(preset) }, (_, index) => ({
+      id: `${presetId(preset)}#${index + 1}`,
+      agent: preset.agent,
+      model: preset.model,
+      effort: preset.effort,
+      preset: presetId(preset),
+      pool: poolOf(preset),
+      state: "idle" as const,
+      since: new Date().toISOString(),
+    })),
+  );
+
 /** The pools whose 5-hour usage factory can read, so a reserve can be kept on them. */
 export const USAGE_POOLS = ["claude", "anthropic", "openai-codex"] as const;
 

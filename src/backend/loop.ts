@@ -24,8 +24,7 @@ import { noFacts, readStream, type Facts } from "./stream.ts";
 import { fiveHour } from "./usage.ts";
 import { watch } from "./triggers.ts";
 import {
-  poolOf,
-  workersOf,
+  presetWorkers,
   presetId,
   TIERS,
   type Attempt,
@@ -786,28 +785,14 @@ type Turned =
   | { paused?: undefined; attempt: Attempt; text: string }
   | { paused: "asked" | "limited"; text: string };
 
-/** Each preset's workers, in settings order, with the run's counts over the settings'. */
+/** Each preset's workers with the preset it runs, with the run's counts over the settings'. */
 export function makeSlots(settings: Settings, counts: Record<string, number> = {}): Slot[] {
-  const presets = settings.presets.map((preset): [Preset, number] => [
-    preset,
-    counts[presetId(preset)] ?? workersOf(preset),
-  ]);
-  return presets.flatMap(([preset, count]) =>
-    Array.from({ length: count }, (_, index) => ({
-      preset,
-      quickFailures: 0,
-      worker: {
-        id: `${presetId(preset)}#${index + 1}`,
-        agent: preset.agent,
-        model: preset.model,
-        effort: preset.effort,
-        preset: presetId(preset),
-        pool: poolOf(preset),
-        state: "idle" as const,
-        since: new Date().toISOString(),
-      },
-    })),
-  );
+  const byId = new Map(settings.presets.map((preset) => [presetId(preset), preset]));
+  return presetWorkers(settings.presets, counts).map((worker) => ({
+    worker,
+    preset: byId.get(worker.preset)!,
+    quickFailures: 0,
+  }));
 }
 
 /**

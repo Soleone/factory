@@ -3,7 +3,10 @@ import { AnimatePresence, motion } from "motion/react";
 import { useState, type ReactNode, type Ref } from "react";
 import { api, type Act } from "@/api";
 import {
+  presetWorkers,
   type Job,
+  type Pool as PoolUsage,
+  type Preset,
   type Settings,
   type Snapshot,
   type Status,
@@ -63,14 +66,24 @@ const DOT: Record<Worker["state"], string> = {
   stopped: "bg-destructive",
 };
 
-/** Each provider's workers as same-size dots, a row per kind of worker, filled while one works. */
-function Pool({ status }: { status: Status }) {
+/**
+ * Each provider's workers as same-size dots, a row per kind of worker, filled while one works.
+ * While the factory is off it shows, muted, the workers the settings would start.
+ */
+function Pool({ status, presets }: { status: Status | null; presets: Preset[] }) {
+  const workers = status?.workers ?? presetWorkers(presets);
+  const pools =
+    status?.pools ??
+    [...new Set(workers.map((worker) => worker.pool))].map((name): PoolUsage => ({
+      name,
+      limits: 0,
+    }));
   return (
-    <aside className="flex flex-col gap-5 lg:col-start-2">
-      {status.pools.map((pool) => {
-        const workers = status.workers.filter((worker) => worker.pool === pool.name);
-        const busy = workers.filter((worker) => worker.job).length;
-        const kinds = [...new Set(workers.map((worker) => worker.preset))];
+    <aside className={`flex flex-col gap-5 lg:col-start-2 ${status ? "" : "opacity-60"}`}>
+      {pools.map((pool) => {
+        const inPool = workers.filter((worker) => worker.pool === pool.name);
+        const busy = inPool.filter((worker) => worker.job).length;
+        const kinds = [...new Set(inPool.map((worker) => worker.preset))];
         const pause =
           pool.stopped ??
           (pool.until
@@ -84,12 +97,12 @@ function Pool({ status }: { status: Status }) {
                 {providerOf(pool.name).name}
               </span>
               <span className="text-xs font-normal tabular-nums">
-                {busy} of {workers.length} busy
+                {status ? `${busy} of ${inPool.length} busy` : `${inPool.length} off`}
               </span>
             </h2>
             <ul className="flex flex-col gap-1.5">
               {kinds.map((kind) => {
-                const same = workers.filter((worker) => worker.preset === kind);
+                const same = inPool.filter((worker) => worker.preset === kind);
                 return (
                   <li key={kind} className="flex items-center justify-between gap-3">
                     <WorkerName of={same[0]} logo={false} />
@@ -105,16 +118,20 @@ function Pool({ status }: { status: Status }) {
                           />
                           <TooltipContent>
                             {worker.id},{" "}
-                            {worker.job
-                              ? "working"
-                              : worker.state === "idle"
-                                ? "ready"
-                                : worker.state}
-                            {worker.until
-                              ? ` until ${clock(worker.until)}`
-                              : worker.reason
-                                ? `: ${worker.reason}`
-                                : ` since ${clock(worker.since)}`}
+                            {!status
+                              ? "starts when the factory is on"
+                              : worker.job
+                                ? "working"
+                                : worker.state === "idle"
+                                  ? "ready"
+                                  : worker.state}
+                            {!status
+                              ? ""
+                              : worker.until
+                                ? ` until ${clock(worker.until)}`
+                                : worker.reason
+                                  ? `: ${worker.reason}`
+                                  : ` since ${clock(worker.since)}`}
                           </TooltipContent>
                         </Tooltip>
                       ))}
@@ -126,7 +143,7 @@ function Pool({ status }: { status: Status }) {
             {pool.limits > 0 && (
               <p className="text-xs text-muted-foreground">
                 hit its usage limit {pool.limits}
-                {status.limit === null ? "" : ` of ${status.limit}`} times
+                {status?.limit == null ? "" : ` of ${status.limit}`} times
               </p>
             )}
             {pause && <p className="text-xs text-warning">{pause}</p>}
@@ -261,8 +278,8 @@ export function QueueView({
   const running = on && status ? status.workers.filter((worker) => worker.job) : [];
 
   return (
-    <div className={`grid gap-8 pt-2 ${on && status ? "lg:grid-cols-[1fr_15rem]" : ""}`}>
-      {on && status && <Pool status={status} />}
+    <div className="grid gap-8 pt-2 lg:grid-cols-[1fr_15rem]">
+      <Pool status={on ? status : null} presets={settings.presets} />
       <div className="flex min-w-0 flex-col gap-8 lg:row-start-1">
         {running.length > 0 && (
           <Section title={`Running (${running.length})`}>
