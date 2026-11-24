@@ -1,9 +1,10 @@
 import { ExternalLinkIcon } from "lucide-react";
 import Markdown, { type MarkdownToJSX } from "markdown-to-jsx/react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "@/api";
 import type { Pr } from "@/backend/types.ts";
 import { Button } from "@/components/ui/button";
+import { diffRows } from "@/diff";
 import {
   Dialog,
   DialogDescription,
@@ -12,6 +13,13 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { AnchoredDialogContent } from "@/components/variants/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
@@ -115,15 +123,59 @@ function Details({ jobId, pr }: { jobId: string; pr: Pr }) {
         </div>
       </TabsContent>
       <TabsContent value="diff">
-        <pre tabIndex={0} className={SCROLL}>
-          {details.diff.split("\n").map((line, index) => (
-            <span key={index} className={`block ${diffLineClass(line)}`}>
-              {line || " "}
-            </span>
-          ))}
-        </pre>
+        <Diff diff={details.diff} />
       </TabsContent>
     </Tabs>
+  );
+}
+
+function Diff({ diff }: { diff: string }) {
+  const rows = diffRows(diff);
+  const files = rows.flatMap((row) => (row.file ? [row.file] : []));
+  const scroller = useRef<HTMLPreElement>(null);
+  const headers = useRef(new Map<string, HTMLElement>());
+
+  return (
+    <div className="flex flex-col gap-2">
+      {files.length > 1 && (
+        <Select<string>
+          onValueChange={(file) => {
+            const header = file ? headers.current.get(file) : undefined;
+            if (header && scroller.current) scroller.current.scrollTop = header.offsetTop;
+          }}
+        >
+          <SelectTrigger aria-label="Jump to file" className="max-w-full">
+            <SelectValue placeholder={`Jump to file (${files.length} changed)`} />
+          </SelectTrigger>
+          <SelectContent alignItemWithTrigger={false}>
+            {files.map((file) => (
+              <SelectItem key={file} value={file}>
+                {file}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
+      <pre ref={scroller} tabIndex={0} className={`${SCROLL} relative`}>
+        {rows.map((row, index) => (
+          <span
+            key={index}
+            ref={(element) => {
+              if (row.file && element) headers.current.set(row.file, element);
+            }}
+            className={`flex ${diffLineClass(row.text)}`}
+          >
+            <span className="w-[5ch] shrink-0 pr-2 text-right text-muted-foreground/60 select-none">
+              {row.old}
+            </span>
+            <span className="w-[5ch] shrink-0 pr-2 text-right text-muted-foreground/60 select-none">
+              {row.new}
+            </span>
+            <span>{row.text || " "}</span>
+          </span>
+        ))}
+      </pre>
+    </div>
   );
 }
 
