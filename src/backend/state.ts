@@ -225,7 +225,10 @@ export async function output(
     maxBuffer: 64 * 1024 * 1024,
   });
   run.child.stdin!.end(input);
-  const { stdout, stderr } = await run;
+  // What the command said on failure, rather than node's "Command failed" with the whole command line.
+  const { stdout, stderr } = await run.catch((error: Error & { stderr?: string }) => {
+    throw new Error(error.stderr?.trim() || error.message);
+  });
   // workwork reports failed finders here; they belong in the factory log.
   process.stderr.write(stderr);
   return stdout;
