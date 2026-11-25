@@ -40,8 +40,16 @@ const FINDERS = [
   { value: "batch tests", label: "Batches of related test files" },
 ];
 
-/** What workwork accepts as a blueprint's name. */
+/** What workwork accepts as a blueprint's name, its ID. */
 const NAME = /^[a-z0-9][a-z0-9-]*$/;
+const slug = (title: string) =>
+  title
+    // Ü becomes u rather than a dash.
+    .normalize("NFKD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 
 const BLANK: Omit<Blueprint, "custom"> = {
   name: "",
@@ -185,6 +193,8 @@ function BlueprintDialog({
   const [draft, setDraft] = useState(fields);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
+  /** Typed by hand, so the title no longer fills it in. */
+  const [ownId, setOwnId] = useState(false);
   const set = (change: Partial<typeof draft>) => setDraft({ ...draft, ...change });
   const creating = blueprint.name === "";
   const badName = draft.name !== "" && !NAME.test(draft.name);
@@ -192,12 +202,12 @@ function BlueprintDialog({
   const save = async () => {
     // Save stays clickable so a blank field gets named instead of the button just not reacting.
     const missing = [
-      !draft.name && "Name",
+      !draft.name && "Title",
       !draft.prompt.trim() && "Prompt",
       !draft.done.trim() && "Done when",
     ].filter(Boolean);
     if (missing.length) return setError(`Fill in ${missing.join(", ")}.`);
-    if (badName) return setError("The name takes lowercase letters, digits and dashes only.");
+    if (badName) return setError("The ID takes lowercase letters, digits and dashes only.");
     setSaving(true);
     setError(undefined);
     try {
@@ -237,19 +247,40 @@ function BlueprintDialog({
         </DialogHeader>
         <fieldset disabled={!custom} className="contents">
           <FieldGroup>
+            <Field>
+              <FieldLabel htmlFor="blueprint-title">Title</FieldLabel>
+              {/* workwork calls it the description: what lists and tooltips show, never the agent. */}
+              <Input
+                id="blueprint-title"
+                placeholder="Tidy up naming"
+                value={draft.description}
+                onChange={(event) =>
+                  set({
+                    description: event.target.value,
+                    ...(creating && !ownId && { name: slug(event.target.value) }),
+                  })
+                }
+              />
+            </Field>
             <div className="grid gap-4 sm:grid-cols-2">
               <Field data-invalid={badName}>
-                <FieldLabel htmlFor="blueprint-name">Name</FieldLabel>
+                <FieldLabel htmlFor="blueprint-name">ID</FieldLabel>
                 <Input
                   id="blueprint-name"
-                  placeholder="naming"
+                  placeholder="tidy-up-naming"
                   disabled={!creating}
                   aria-invalid={badName}
                   value={draft.name}
-                  onChange={(event) => set({ name: event.target.value })}
+                  onChange={(event) => {
+                    // Cleared, it follows the title again.
+                    setOwnId(event.target.value !== "");
+                    set({ name: event.target.value });
+                  }}
                 />
                 {creating && (
-                  <FieldDescription>Lowercase letters, digits and dashes.</FieldDescription>
+                  <FieldDescription>
+                    Made from the title. Lowercase letters, digits and dashes.
+                  </FieldDescription>
                 )}
               </Field>
               <Field>
@@ -287,15 +318,6 @@ function BlueprintDialog({
                   ))}
                 </SelectContent>
               </Select>
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="blueprint-description">Description</FieldLabel>
-              <Input
-                id="blueprint-description"
-                placeholder="One sentence on what it does"
-                value={draft.description}
-                onChange={(event) => set({ description: event.target.value })}
-              />
             </Field>
             <Field>
               <FieldLabel htmlFor="blueprint-prompt">Prompt</FieldLabel>
