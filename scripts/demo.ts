@@ -102,7 +102,7 @@ function demoGoal(at: string, run: string): Job[] {
     {
       ...BLANK,
       id: "goal",
-      item: { ...item("goal/export", "Export to every format"), blueprint: "goal" },
+      item: item("goal/export", "Export to every format"),
       source: "goal",
       added: at,
       state: "blocked",
@@ -843,6 +843,7 @@ function dispatch(
   if (!job) throw new Error(`No demo job ${id}`);
   switch (action) {
     case "remove":
+    case "cancel":
       job.state = "removed";
       break;
     case "pin":
@@ -858,9 +859,6 @@ function dispatch(
     case "pause":
       job.state = "blocked";
       job.blocked = "paused";
-      break;
-    case "cancel":
-      job.state = "removed";
       break;
     case "replan":
       job.notes.push({
