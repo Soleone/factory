@@ -386,36 +386,33 @@ export async function run(options: RunOptions): Promise<string> {
         if (pool.until === until) Object.assign(pool, { until: undefined, reserved: undefined });
         continue;
       }
-      let job: Job | undefined;
-      let result: Turned | undefined;
+      let job: Job;
+      let live: Live | undefined;
       if (handed) {
-        ({ job } = handed);
-        set(worker, { state: "working", job: job.id });
-        log(`${worker.id} takes over ${job.id} from run ${handed.live.begun.run}`);
-        const taken = job;
-        result = await attempt(slot, job, handed.live).catch((error: Error) => broke(taken, error));
+        ({ job, live } = handed);
         handed = undefined;
+        set(worker, { state: "working", job: job.id });
+        log(`${worker.id} takes over ${job.id} from run ${live.begun.run}`);
       } else {
-        job = pick(slot);
-        if (!job) {
+        const picked = pick(slot);
+        if (!picked) {
           if (worker.state !== "idle") set(worker, { state: "idle" });
           await nap(options.pollMs ?? 3000);
           continue;
         }
+        job = picked;
         startJob(state, job.id, worker.agent, worker.preset);
         set(worker, { state: "working", job: job.id });
         log(`${worker.id} starts ${job.id}: ${job.item.label} ${job.item.id}`);
-        const taken = job;
-        result = job.image
-          ? await imageAttempt(slot, job)
-          : await attempt(slot, job, readLive(state, job.id)).catch((error: Error) =>
-              broke(taken, error),
-            );
+        if (!job.image) live = readLive(state, job.id);
       }
+      const result =
+        job.image && !live
+          ? await imageAttempt(slot, job)
+          : await attempt(slot, job, live).catch((error: Error) => broke(job, error));
       if (!result) {
         // The run stopped: before the agent started the job goes back; a running agent is handed off.
-        const live = readLive(state, job.id);
-        if (!live?.pid) record(state, { type: "requeue", id: job.id });
+        if (!readLive(state, job.id)?.pid) record(state, { type: "requeue", id: job.id });
         break;
       }
       // Hold the pool before putting the job back where any eligible worker can see it.
@@ -527,13 +524,7 @@ export async function run(options: RunOptions): Promise<string> {
       live = begun.live;
     } else if (!live.pid) {
       if (stopping) return undefined;
-      live = nextTurn(
-        live,
-        resumeText(
-          live,
-          readJobs(state).find((each) => each.id === job.id)!,
-        ),
-      );
+      live = nextTurn(live, resumeText(live, reread(job)));
     }
     const agentOf = () =>
       makeAgent(worker.agent, live!.begun, {
@@ -565,9 +556,7 @@ export async function run(options: RunOptions): Promise<string> {
           facts.error &&
           claudeStartupRejected(text, facts.error) &&
           (await cleanWorktree(live.worktree)) &&
-          !readJobs(state)
-            .find((each) => each.id === job.id)!
-            .notes.some((note) => note.attempt === job.attempts.length + 1)
+          !reread(job).notes.some((note) => note.attempt === job.attempts.length + 1)
         ) {
           return {
             paused: "limited",
@@ -590,7 +579,7 @@ export async function run(options: RunOptions): Promise<string> {
         live = restart(job, live);
         continue;
       }
-      const fresh = readJobs(state).find((each) => each.id === job.id)!;
+      const fresh = reread(job);
       const said = fresh.notes.filter((note) => note.attempt === fresh.attempts.length + 1);
       // A question since the last answer: this turn asked it.
       const answered = said.findLastIndex(
@@ -829,7 +818,7 @@ export async function run(options: RunOptions): Promise<string> {
     );
     const whole = readFileSync(live.begun.log, "utf8");
     const facts = readStream(whole);
-    const fresh = readJobs(state).find((each) => each.id === job.id)!;
+    const fresh = reread(job);
     const result = fresh.notes.findLast(
       (note) => note.kind === "result" && note.attempt === fresh.attempts.length + 1,
     );
@@ -863,6 +852,11 @@ export async function run(options: RunOptions): Promise<string> {
       if (failed !== undefined)
         return `The gate \`${gate}\` failed. The last lines of its output:\n\n\`\`\`\n${failed}\n\`\`\`\n\nFix this; the gates run again when you stop.`;
     }
+  }
+
+  /** The job as recorded now: the agent's notes and answers arrive while it runs. */
+  function reread(job: Job): Job {
+    return readJobs(state).find((each) => each.id === job.id)!;
   }
 
   function envFor(job: Job, worktree: string): Record<string, string> {
