@@ -1,4 +1,4 @@
-import { fileURLToPath } from "node:url";
+import * as url from "node:url";
 import type { Outcome, Tuning } from "./types.ts";
 
 /** A headless coding agent: how to start it (the prompt goes on stdin) and what its usage limit looks like. */
@@ -79,7 +79,7 @@ export function agent(name: string, { model, effort }: Tuning = {}, session?: Se
 // Beside this file when run from source, beside cli.mjs once packed. Resolved on use, not at load:
 // the page imports this module for AGENT_NAMES and node:url isn't there in the browser.
 const askExtension = () =>
-  fileURLToPath(
+  url.fileURLToPath(
     new URL(import.meta.url.endsWith(".ts") ? "./pi-ask.ts" : "./pi-ask.mjs", import.meta.url),
   );
 
