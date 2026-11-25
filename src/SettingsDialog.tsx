@@ -9,6 +9,7 @@ import {
   USAGE_POOLS,
   type CommitIdentity,
   type Preset,
+  EXPANDER,
   type Settings,
   type Snapshot,
   type Tier,
@@ -47,6 +48,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { AGENT_NAMES } from "@/backend/agents.ts";
 import { agentName, repoName } from "@/format";
@@ -140,6 +142,7 @@ function SettingsForm({
           <TabsTrigger value="auto">Auto mode</TabsTrigger>
           <TabsTrigger value="github">GitHub</TabsTrigger>
           <TabsTrigger value="chat">Live Agent</TabsTrigger>
+          <TabsTrigger value="images">Images</TabsTrigger>
         </TabsList>
         <div className="mt-2 grid">
           <StackedTabsContent value="runs">
@@ -243,6 +246,23 @@ function SettingsForm({
                 onChange={(chat) => setDraft({ ...draft, chat })}
               />
             </FieldGroup>
+          </StackedTabsContent>
+          <StackedTabsContent value="images">
+            <Field>
+              <FieldLabel htmlFor="image-expander">How codex expands a short prompt</FieldLabel>
+              <Textarea
+                id="image-expander"
+                className="min-h-32"
+                placeholder={EXPANDER}
+                value={draft.imageExpander ?? ""}
+                onChange={(event) =>
+                  setDraft({ ...draft, imageExpander: event.target.value || undefined })
+                }
+              />
+              <FieldDescription>
+                Used when an image prompt is expanded first. Empty uses the text shown.
+              </FieldDescription>
+            </Field>
           </StackedTabsContent>
         </div>
       </Tabs>

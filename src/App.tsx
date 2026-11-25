@@ -36,6 +36,7 @@ import { inbox } from "@/inbox";
 import { NewGoalForm } from "@/NewGoalForm";
 import { NewJobForm } from "@/NewJobForm";
 import { InboxView } from "@/InboxView";
+import { ImagesView } from "@/ImagesView";
 
 // Links from before the tabs were merged still open what they named, before any view reads the query.
 const old = new URLSearchParams(location.search).get("tab");
@@ -222,6 +223,7 @@ function Factory({
                 Goals <Count n={goals} />
               </Tab>
               <Tab value="results">Results</Tab>
+              <Tab value="images">Images</Tab>
             </TabsList>
           </div>
           <Button variant="outline" size="sm" className="ml-auto" onClick={() => setAdding("job")}>
@@ -267,6 +269,9 @@ function Factory({
               </TabsContent>
             </Tabs>
           </div>
+        </TabsContent>
+        <TabsContent value="images">
+          <ImagesView snapshot={snapshot} act={act} projects={projects} />
         </TabsContent>
       </Tabs>
       <CloneDialog
@@ -321,7 +326,7 @@ function Factory({
 }
 
 /** The key after `g` that jumps to each tab. */
-const GO_KEYS = { inbox: "i", queue: "q", goals: "g", results: "r" };
+const GO_KEYS = { inbox: "i", queue: "q", goals: "g", results: "r", images: "m" };
 
 /** `g` then a tab's key jumps to that tab, unless the keys go to a field or a dialog. */
 function useGoKeys(go: (tab: string) => void) {

@@ -288,6 +288,7 @@ function seed(): DemoState {
       }),
     ),
     train: { result2: { step: "rebasing" } },
+    images: [],
     usage: {
       claude: {
         fiveHour: { used: 58, resets: Date.now() + 112 * 60_000 },

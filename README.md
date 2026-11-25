@@ -10,7 +10,7 @@ npm install -g @soleone/factory
 factory serve    # http://127.0.0.1:7040
 ```
 
-Needs node 22+, git, [workwork](https://github.com/Soleone/workwork) 0.3 or later, `gh`, and whichever of `claude` and `pi` you use, logged in.
+Needs node 22+, git, [workwork](https://github.com/Soleone/workwork) 0.3 or later, `gh`, and whichever of `claude` and `pi` you use, logged in. Images need `codex`, logged in to ChatGPT.
 
 ## How it works
 
@@ -66,6 +66,15 @@ factory result "<summary>" --confidence high --url LINK --followup "<task>" --un
 The prompt tells agents to decide what a reasonable engineer would and note the call. An assumption you answer with "fine" closes; any other answer queues a job to change it. A plain question pauses the job until you answer, on the page or with `factory answer`, and the same session picks up from there. Nobody may be awake to answer, so after 15 minutes without one the agent goes with its recommendation and records it as an assumption you can still overrule. `factory report` ends with what waits on you: unverified work and assumptions to confirm.
 
 On the page, everything that waits on you collects in the **Inbox**, which the page opens on while anything blocks work. On top, what holds work up until you act: questions, goal checkpoints and plans to approve, and jobs that failed twice. Below, what agents carried on past: PRs to merge, assumptions to confirm and work to verify. `factory inbox` prints the same two groups with their counts, each row with its job id and PR, from the running `factory serve` so PR states match the page. **Add work** gathers every way in: a job of your own, a goal, candidates and blueprints. Activity sits next to Results. `g` then `i`, `q`, `g` or `r` jumps to Inbox, Queue, Goals or Results.
+
+## Images
+
+The Images tab sends a prompt to `codex exec` and its built-in image_gen, right away, whether the factory is on or not, two prompts at a time. Pasting into the prompt adds reference images.
+
+- **Project:** with one picked, codex reads it for context and existing images to match, in a read-only sandbox. The images never go into the repo: each prompt's images stay in `images/<id>/` in the state folder.
+- **Expand the prompt first** (on by default) has codex write a full brief from a short prompt and generate from that; the page shows the brief. Settings → Images changes how it expands.
+- **Variants of each:** a prompt can ask for several images; this many of each come back, to pick from.
+- An image opens large, to download, use as a reference for the next prompt, or, in a project, queue a grunt job that copies it in and opens a PR.
 
 ## Live Agent
 

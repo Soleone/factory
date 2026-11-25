@@ -9,6 +9,15 @@ import { AGENT_NAMES } from "./agents.ts";
 import { chat } from "./chat.ts";
 import type { PiImage } from "./claude.ts";
 import { githubIdentity } from "./github.ts";
+import {
+  addImageRun,
+  imageRunner,
+  readImageRuns,
+  removeImageRun,
+  retryImageRun,
+  useImage,
+  type Pasted,
+} from "./images.ts";
 import { clonableRepos, cloneRepo, createRepo, localRepos, sourceRoot } from "./repos.ts";
 import { agentModels } from "./models.ts";
 import {
@@ -86,6 +95,10 @@ const TYPES: Record<string, string> = {
   ".css": "text/css",
   ".svg": "image/svg+xml",
   ".woff2": "font/woff2",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".webp": "image/webp",
+  ".gif": "image/gif",
 };
 
 /** The page and the API it uses: the same state and commands as the CLI, nothing more. */
@@ -109,6 +122,7 @@ export function serve(
     return `http://${host}:${port}`;
   });
   let stopMirror = mirrorTasks(state, readSettings(state), console.log);
+  const images = imageRunner(state);
   // Listing takes a second or two per agent, and the lists rarely change while serve runs.
   const models = new Map<string, Promise<Model[]>>();
   function modelsOf(name: string): Promise<Model[]> {
@@ -316,6 +330,25 @@ export function serve(
       return turnOn(state, runArgs(body));
     },
     "POST /api/off": () => turnOff(state),
+    "POST /api/images": (body: {
+      prompt: string;
+      repo?: string;
+      expand: boolean;
+      variants: number;
+      references: Pasted[];
+    }) => {
+      const run = addImageRun(state, body);
+      images.kick();
+      return run;
+    },
+    "POST /api/images/retry": (body: { id: string }) => {
+      const run = retryImageRun(state, body.id);
+      images.kick();
+      return run;
+    },
+    "POST /api/images/remove": (body: { id: string }) => removeImageRun(state, body.id),
+    "POST /api/images/use": (body: { id: string; file: string; where: string }) =>
+      useImage(state, body.id, body.file, body.where),
   };
 
   const server = createServer(async (request, response) => {
@@ -353,6 +386,8 @@ export function serve(
       const file = resolve(state, `.${path}`);
       if (file.startsWith(join(state, "runs") + sep) && isFile(file))
         return send(response, "text/plain; charset=utf-8", readFileSync(file));
+      if (file.startsWith(join(state, "images") + sep) && isFile(file) && TYPES[extname(file)])
+        return send(response, TYPES[extname(file)], readFileSync(file));
       const asset = resolve(WEB, `.${path}`);
       if (asset.startsWith(WEB + sep) && isFile(asset))
         return send(
@@ -360,7 +395,7 @@ export function serve(
           TYPES[extname(asset)] ?? "application/octet-stream",
           readFileSync(asset),
         );
-      if (path.startsWith("/api/") || path.startsWith("/runs/")) {
+      if (path.startsWith("/api/") || path.startsWith("/runs/") || path.startsWith("/images/")) {
         response.writeHead(404).end("not found");
         return;
       }
@@ -378,7 +413,10 @@ export function serve(
         .end(JSON.stringify({ error: (error as Error).message }));
     }
   })
-    .on("close", () => stopMirror())
+    .on("close", () => {
+      stopMirror();
+      images.stop();
+    })
     .listen(port, host, () => {
       console.log(`factory: serving http://${host}:${port}`);
       if (host !== "127.0.0.1" && host !== "localhost")
@@ -420,6 +458,7 @@ function snapshot(
     ),
     train,
     usage: usage(usagePools(settings)),
+    images: readImageRuns(state),
   };
 }
 

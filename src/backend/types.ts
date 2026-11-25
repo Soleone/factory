@@ -87,6 +87,36 @@ export type Settings = {
   triggers: { ci: boolean; label: string; reviews: boolean };
   /** Optional author and committer for Factory's worktrees. */
   commitIdentity?: CommitIdentity;
+  /** How codex expands a short image prompt into a full brief; unset: factory's own. */
+  imageExpander?: string;
+};
+
+/** How codex expands a short image prompt when the settings say nothing else. */
+export const EXPANDER =
+  "Keep every detail the user gave, and invent no extra subjects, text or branding. Cover the use case, subject, style or medium, composition and framing, lighting and mood, color palette, any text verbatim, and what to avoid.";
+
+/**
+ * One image prompt codex works, with the images it made. Its files live in images/<id>/ in the state
+ * folder, outside any repo: a project's images reach it only through a job the user queues.
+ */
+export type ImageRun = {
+  id: string;
+  added: string;
+  prompt: string;
+  /** The project codex reads for context and existing references; it changes nothing there. */
+  repo?: string;
+  /** Codex first expands the prompt into a full brief, which it then generates from. */
+  expand: boolean;
+  /** Images made of each distinct thing the prompt asks for, to pick the best from. */
+  variants: number;
+  /** Pasted reference images, file names in the run's folder. */
+  references: string[];
+  state: "queued" | "running" | "done" | "failed";
+  /** The brief codex generated from, when it expanded the prompt. */
+  brief?: string;
+  /** File names in the run's folder; variants of one image share a name. */
+  images: { file: string; name: string }[];
+  error?: string;
 };
 
 /** A workwork candidate, as `workwork --json` prints it. `id` is workwork's, not a job's. */
@@ -361,6 +391,8 @@ export type Snapshot = JobContext & {
   train: Record<string, TrainCar>;
   /** The last good usage read of each pool a run works on, by pool; a pool never read is missing. */
   usage: Record<string, ReadUsage>;
+  /** Image runs, newest first. */
+  images: ImageRun[];
 };
 
 export type ResultsPage = JobContext &

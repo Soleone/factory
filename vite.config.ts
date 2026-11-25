@@ -58,7 +58,7 @@ export default defineConfig(({ mode }) => ({
   server: {
     port: mode === "demo" ? 7042 : 7040,
     strictPort: true,
-    proxy: mode === "demo" ? undefined : { "/api": API, "/runs": API },
+    proxy: mode === "demo" ? undefined : { "/api": API, "/runs": API, "/images": API },
   },
   clearScreen: false,
   staged: { "*": "vp check --fix" },
