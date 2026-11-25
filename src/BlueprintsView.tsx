@@ -40,7 +40,7 @@ const FINDERS = [
   { value: "batch tests", label: "Batches of related test files" },
 ];
 
-/** What workwork accepts as a blueprint's name, its ID. */
+/** What workwork accepts as a blueprint's name. */
 const NAME = /^[a-z0-9][a-z0-9-]*$/;
 const slug = (title: string) =>
   title
@@ -193,7 +193,7 @@ function BlueprintDialog({
   const [draft, setDraft] = useState(fields);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
-  /** Typed by hand, so the title no longer fills it in. */
+  /** The name was typed by hand, so the title no longer fills it in. */
   const [ownId, setOwnId] = useState(false);
   const set = (change: Partial<typeof draft>) => setDraft({ ...draft, ...change });
   const creating = blueprint.name === "";
@@ -207,7 +207,7 @@ function BlueprintDialog({
       !draft.done.trim() && "Done when",
     ].filter(Boolean);
     if (missing.length) return setError(`Fill in ${missing.join(", ")}.`);
-    if (badName) return setError("The ID takes lowercase letters, digits and dashes only.");
+    if (badName) return setError("The name takes lowercase letters, digits and dashes only.");
     setSaving(true);
     setError(undefined);
     try {
@@ -264,7 +264,7 @@ function BlueprintDialog({
             </Field>
             <div className="grid gap-4 sm:grid-cols-2">
               <Field data-invalid={badName}>
-                <FieldLabel htmlFor="blueprint-name">ID</FieldLabel>
+                <FieldLabel htmlFor="blueprint-name">Name</FieldLabel>
                 <Input
                   id="blueprint-name"
                   placeholder="tidy-up-naming"
