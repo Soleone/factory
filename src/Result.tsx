@@ -1,5 +1,19 @@
-import { GitBranchIcon, GitMergeIcon, RotateCcwIcon, XIcon } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import {
+  ChevronDownIcon,
+  CodeIcon,
+  EyeIcon,
+  GitBranchIcon,
+  GitMergeIcon,
+  ImageIcon,
+  ListTreeIcon,
+  RotateCcwIcon,
+  ScaleIcon,
+  ScanSearchIcon,
+  TargetIcon,
+  WrenchIcon,
+  XIcon,
+} from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
 import { confirm } from "@/Confirm";
 import { api, type Act } from "@/api";
 import {
@@ -16,13 +30,42 @@ import {
 } from "@/backend/types.ts";
 import { Button } from "@/components/ui/button";
 import { DialogClose } from "@/components/ui/dialog";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/tooltip/tooltip";
 import { agentName, clock, itemTitle } from "@/format";
 import { Answer } from "@/JobNotes";
 import { CHECKS, TrainLine } from "@/PullRequest";
 import { Thumbnails } from "@/Images";
 import { Row } from "@/Row";
-import { ATTENTION, StatePill, TaskDetails, taskState } from "@/TaskDetails";
+import { ATTENTION, StatePill, stateTone, TaskDetails, taskState } from "@/TaskDetails";
+import { WorkerName } from "@/WorkerName";
+
+const PEEK = "factory.results.peek";
+
+/** The one result whose peek is open, remembered in this browser for coming back. */
+export function usePeek() {
+  const [peek, setPeek] = useState(() => {
+    try {
+      return localStorage.getItem(PEEK) ?? undefined;
+    } catch {
+      return undefined;
+    }
+  });
+  useEffect(() => {
+    try {
+      if (peek) localStorage.setItem(PEEK, peek);
+      else localStorage.removeItem(PEEK);
+    } catch {
+      // Private windows may refuse storage; the peek is then just forgotten.
+    }
+  }, [peek]);
+  // A peek closing as another opens must not close the new one.
+  return (id: string) => ({
+    peeking: peek === id,
+    onPeek: (open: boolean) =>
+      setPeek((current) => (open ? id : current === id ? undefined : current)),
+  });
+}
 
 export function canDismiss(job: Job) {
   return job.state === "done" || job.state === "failed" || job.state === "blocked";
@@ -53,6 +96,8 @@ export function Result({
   disabled: dismissing,
   leading,
   holding,
+  peeking,
+  onPeek,
 }: {
   job: Job;
   snapshot: Snapshot;
@@ -66,10 +111,13 @@ export function Result({
   /** Another agent to review its PR, unless it has a review already. */
   reviewer?: string;
   disabled: boolean;
-  /** A checkbox to select it, or an icon for what it waits on. */
-  leading: ReactNode;
+  /** A checkbox to select it; false keeps its room on a row that can't be selected. */
+  leading?: ReactNode;
   /** Unfinished jobs that wait for this one. */
   holding?: number;
+  /** Its peek is the one open in the list. */
+  peeking: boolean;
+  onPeek: (open: boolean) => void;
 }) {
   const [pending, setPending] = useState<"merge" | "rebase" | "close">();
   // A goal runs no attempt of its own, yet the Inbox lists its final PR.
@@ -107,7 +155,9 @@ export function Result({
         ) : (
           <GitMergeIcon data-icon="inline-start" />
         )}
-        {pending ? pendingLabel[pending] : primary === "rebase" ? "Rebase" : "Merge"}
+        <span data-label>
+          {pending ? pendingLabel[pending] : primary === "rebase" ? "Rebase" : "Merge"}
+        </span>
       </>
     );
     const props = { variant, size: "sm" as const, disabled, onClick: () => changePr(primary) };
@@ -127,7 +177,7 @@ export function Result({
       onClick={() => act(() => api.retry(job.id))}
     >
       <RotateCcwIcon data-icon="inline-start" />
-      {job.image ? "Generate again" : "Retry"}
+      <span data-label>{job.image ? "Regenerate" : "Retry"}</span>
     </Button>
   );
   const loses = dismissLoses(job);
@@ -146,11 +196,40 @@ export function Result({
   };
   const ask =
     job.state === "blocked" ? job.notes.findLast((note) => note.kind === "ask") : undefined;
+  const note = job.notes.findLast((each) => each.kind === "result")?.text;
+  const brief = job.attempts.findLast((attempt) => attempt.brief)?.brief;
+  const title = pr ? pr.title : job.item.title || job.item.id;
+  const peek = ask ? (
+    <Answer job={job} question={ask} act={act} />
+  ) : job.image && job.state === "done" ? (
+    <>
+      <Thumbnails job={job} size="size-28" />
+      {brief && <p className="text-muted-foreground">{brief}</p>}
+    </>
+  ) : job.state === "failed" && last?.error ? (
+    <>
+      <pre className="overflow-x-auto rounded-md bg-destructive/10 px-2 py-1.5 font-mono text-xs text-destructive">
+        {last.error}
+      </pre>
+      {question && (
+        <Button variant="outline" size="sm" className="self-start" onClick={() => onAsk(question)}>
+          Ask {agentName(asked)} why
+        </Button>
+      )}
+    </>
+  ) : (
+    note && <p>{note}</p>
+  );
 
   return (
     <Row
       marked={unread}
-      leading={leading || <span className="size-4" />}
+      leading={
+        <span className="flex items-center gap-2.5">
+          {leading === false ? <span className="size-4" /> : leading}
+          <KindIcon job={job} className={`size-4 ${stateTone(state)}`} />
+        </span>
+      }
       title={
         <>
           {unread && <span className="sr-only">New: </span>}
@@ -206,13 +285,17 @@ export function Result({
       }
       meta={
         <span className="flex min-w-0 items-center gap-2">
-          <StatePill
-            state={state}
-            label={
-              state === "failed" && last && last.outcome !== "failed" ? last.outcome : undefined
-            }
-          />
-          <Facts job={job} last={last} pr={pr} url={url} car={car} />
+          {state === "review" && open ? (
+            <ReviewPill level={pr.attention ?? job.item.attention} />
+          ) : (
+            <StatePill
+              state={state}
+              label={
+                state === "failed" && last && last.outcome !== "failed" ? last.outcome : undefined
+              }
+            />
+          )}
+          <Outcome job={job} last={last} pr={pr} url={url} car={car} />
           {holding ? (
             <span className="shrink-0 text-warning">
               holds {holding} {holding === 1 ? "job" : "jobs"}
@@ -220,40 +303,113 @@ export function Result({
           ) : null}
         </span>
       }
-      below={
-        ask ? <Answer job={job} question={ask} act={act} /> : job.image && <Thumbnails job={job} />
-      }
     >
-      {primaryButton("outline")}
-      {retry}
-      {canDismiss(job) && (
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label={`Dismiss ${itemTitle(job.item)}`}
-                disabled={disabled}
-                onClick={dismiss}
-              />
-            }
-          >
-            <XIcon aria-hidden="true" />
-          </TooltipTrigger>
-          <TooltipContent>
-            {loses
-              ? `Dismiss: hide from results and delete ${loses}`
-              : "Dismiss: hide from results, its PR stays as it is"}
-          </TooltipContent>
-        </Tooltip>
-      )}
+      {/* Every slot keeps its width on every row, so the columns line up down the list. */}
+      <span className="flex w-7 justify-center">
+        {peek && (
+          <Peek open={peeking} onOpenChange={onPeek}>
+            <p className="font-medium">{title}</p>
+            {peek}
+          </Peek>
+        )}
+      </span>
+      <span className="w-32 text-sm text-muted-foreground max-sm:hidden">
+        {last && <WorkerName of={{ agent: last.agent, model: last.model }} />}
+      </span>
+      <span className="w-16 text-right text-sm whitespace-nowrap text-muted-foreground tabular-nums max-sm:hidden">
+        {last && clock(last.end)}
+      </span>
+      {/* On a phone the action is its icon alone, so the title keeps room. */}
+      <span className="flex w-30 justify-end max-sm:w-8 max-sm:**:data-label:sr-only">
+        {primaryButton("outline") || retry}
+      </span>
+      <span className="flex w-7 justify-center">
+        {canDismiss(job) && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={`Dismiss ${itemTitle(job.item)}`}
+                  disabled={disabled}
+                  onClick={dismiss}
+                />
+              }
+            >
+              <XIcon aria-hidden="true" />
+            </TooltipTrigger>
+            <TooltipContent>
+              {loses
+                ? `Dismiss: hide from results and delete ${loses}`
+                : "Dismiss: hide from results, its PR stays as it is"}
+            </TooltipContent>
+          </Tooltip>
+        )}
+      </span>
     </Row>
   );
 }
 
-/** The one line a result needs to be triaged; everything else waits in its pop-up. */
-function Facts({
+/** What kind of work a job is, as the icon that leads its row. */
+function KindIcon({ job, className }: { job: Job; className: string }) {
+  const Icon = job.image
+    ? ImageIcon
+    : job.goal
+      ? TargetIcon
+      : job.item.blueprint === "review"
+        ? ScanSearchIcon
+        : job.branchOf
+          ? WrenchIcon
+          : job.of
+            ? ListTreeIcon
+            : CodeIcon;
+  return <Icon aria-hidden="true" className={className} />;
+}
+
+/**
+ * A result's extra content, a question, its images or its error, floating over the list from a
+ * chevron, so the row never changes height. Left or Right closes it again, like Escape.
+ */
+function Peek({
+  open,
+  onOpenChange,
+  children,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  children: ReactNode;
+}) {
+  return (
+    <Popover open={open} onOpenChange={onOpenChange}>
+      <PopoverTrigger
+        data-peek
+        render={
+          <Button variant="ghost" size="icon-sm" aria-label={open ? "Show less" : "Show more"} />
+        }
+      >
+        <ChevronDownIcon
+          aria-hidden="true"
+          className={`transition-transform ${open ? "rotate-180" : ""}`}
+        />
+      </PopoverTrigger>
+      <PopoverContent
+        align="end"
+        className="w-[min(36rem,calc(100vw-2rem))]"
+        onKeyDown={(event) => {
+          const target = event.target as HTMLElement;
+          if (target.closest("input, textarea")) return;
+          if (event.key === "ArrowLeft" || event.key === "ArrowRight") onOpenChange(false);
+        }}
+      >
+        <div className="flex flex-col gap-3">{children}</div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/** What a result came to, in one order for every kind: the deciding fact first, free text last. */
+function Outcome({
   job,
   last,
   pr,
@@ -267,12 +423,12 @@ function Facts({
   car?: TrainCar;
 }) {
   const result = job.notes.findLast((note) => note.kind === "result");
+  const ask =
+    job.state === "blocked" ? job.notes.findLast((note) => note.kind === "ask") : undefined;
   const checks = pr?.state === "OPEN" && pr.checks !== "none" && CHECKS[pr.checks];
+  const images = job.attempts.flatMap((attempt) => attempt.images ?? []).length;
   const facts: ReactNode[] = url
     ? [
-        pr?.state === "OPEN" && (
-          <Attention key="attention" level={pr.attention ?? job.item.attention} />
-        ),
         pr && (
           <>
             <span className="text-success">+{pr.additions}</span>{" "}
@@ -296,39 +452,64 @@ function Facts({
         </a>,
       ]
     : [job.state === "failed" && job.attempts.length > 1 && `${job.attempts.length} attempts`];
-  // Free text goes last, so truncating it never hides who ran the job or when.
-  const text =
-    job.state === "failed"
+  // Free text goes last, so truncating it never hides a number.
+  const text = ask
+    ? `${agentName(job.agent ?? "agent")} asks: ${ask.text}`
+    : job.state === "failed"
       ? last?.error && (
           <span key="error" className="text-destructive">
             {last.error.split("\n")[0]}
           </span>
         )
       : job.image
-        ? job.state === "done" &&
-          `${job.attempts.flatMap((attempt) => attempt.images ?? []).length} images`
+        ? job.state === "done" && `${images} ${images === 1 ? "image" : "images"}`
         : !url && job.state === "done" && (result?.text ?? "nothing to change");
   return (
-    <span className="min-w-0 truncate">
-      {[...facts, last && agentName(last.agent), last && clock(last.end), text]
-        .filter(Boolean)
-        .map((fact, index) => (
+    <>
+      {job.image && job.state === "done" && <Thumbnails job={job} size="size-4.5" />}
+      <span className="min-w-0 truncate">
+        {[...facts, text].filter(Boolean).map((fact, index) => (
           <span key={index}>
             {index > 0 && " · "}
             {fact}
           </span>
         ))}
-    </span>
+      </span>
+    </>
   );
 }
 
-/** How much of the user's attention a PR asks for, explained on hover. */
-function Attention({ level }: { level: string }) {
+const ATTENTION_LOOK: Record<string, { Icon: typeof EyeIcon; className: string }> = {
+  skim: { Icon: EyeIcon, className: "bg-muted text-foreground" },
+  // Outlined, so it stays apart from the filled yellow of a question waiting for you.
+  decide: {
+    Icon: ScaleIcon,
+    className: "bg-warning/15 text-warning ring-1 ring-warning/45 ring-inset",
+  },
+};
+
+/** A PR waiting for review, as how much review it needs; the reason on hover. */
+function ReviewPill({ level }: { level?: string }) {
+  if (!level) return <StatePill state="review" />;
+  const look = ATTENTION_LOOK[level];
   return (
     <Tooltip>
-      <TooltipTrigger render={<span className="underline decoration-dotted underline-offset-2" />}>
-        {level}
-      </TooltipTrigger>
+      <TooltipTrigger
+        render={
+          <StatePill
+            state="review"
+            className={look?.className}
+            label={
+              look && (
+                <>
+                  <look.Icon aria-hidden="true" />
+                  {level}
+                </>
+              )
+            }
+          />
+        }
+      />
       <TooltipContent>Attention: {ATTENTION[level] ?? level}</TooltipContent>
     </Tooltip>
   );

@@ -44,22 +44,22 @@ const madeBy = (job: Job) => job.attempts.flatMap((attempt) => attempt.images ??
 /** Starts a new image job with this image as a reference; absent where Add work isn't at hand. */
 export const UseAsReference = createContext<((image: AgentImage) => void) | undefined>(undefined);
 
-/** A result row's look at what an image job made: its latest images, small. */
-export function Thumbnails({ job }: { job: Job }) {
+/** The latest attempt's images, each `size` across. */
+export function Thumbnails({ job, size }: { job: Job; size: string }) {
   const latest = job.attempts.findLast((attempt) => attempt.images?.length)?.images ?? [];
   if (latest.length === 0) return null;
   return (
-    <div className="flex gap-1.5 pt-1.5">
+    <span className="flex shrink-0 gap-1">
       {latest.map((image) => (
         <img
           key={image.file}
           src={imageUrl(job, image.file)}
           alt={image.name}
           loading="lazy"
-          className="size-14 rounded-md border object-cover"
+          className={`${size} rounded-sm border object-cover`}
         />
       ))}
-    </div>
+    </span>
   );
 }
 

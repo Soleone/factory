@@ -1,30 +1,18 @@
-import {
-  CheckCheckIcon,
-  CheckIcon,
-  CircleXIcon,
-  EyeIcon,
-  FlagIcon,
-  GitPullRequestIcon,
-  LightbulbIcon,
-  MessageCircleQuestionIcon,
-} from "lucide-react";
+import { CheckCheckIcon, CheckIcon, EyeIcon, FlagIcon, LightbulbIcon } from "lucide-react";
 import { api, type Act } from "@/api";
 import type { Snapshot } from "@/backend/types.ts";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { holds, inbox, type InboxItem } from "@/inbox";
 import { canBoard, MergeButton, mergeTrain } from "@/PullRequest";
-import { Result, reviewerOf } from "@/Result";
+import { Result, reviewerOf, usePeek } from "@/Result";
 import { Row } from "@/Row";
 import { RowGroup } from "@/components/variants/item";
 import { AssumeAnswer, TaskDetails } from "@/TaskDetails";
 import { Said } from "@/JobNotes";
 
 const ICON = {
-  ask: <MessageCircleQuestionIcon className="size-4 text-warning" />,
   checkpoint: <FlagIcon className="size-4 text-warning" />,
-  failed: <CircleXIcon className="size-4 text-destructive" />,
-  review: <GitPullRequestIcon className="size-4 text-success" />,
   assume: <LightbulbIcon className="size-4 text-warning" />,
   unverified: <EyeIcon className="size-4 text-muted-foreground" />,
 };
@@ -42,6 +30,7 @@ export function InboxView({
   onOpenGoal: (id: string) => void;
 }) {
   const { stopped, ready } = inbox(snapshot);
+  const peek = usePeek();
   if (stopped.length + ready.length === 0)
     return (
       <Empty>
@@ -65,6 +54,7 @@ export function InboxView({
       act={act}
       onAsk={onAsk}
       onOpenGoal={onOpenGoal}
+      peek={peek}
     />
   );
 
@@ -109,12 +99,14 @@ function InboxRow({
   act,
   onAsk,
   onOpenGoal,
+  peek,
 }: {
   item: InboxItem;
   snapshot: Snapshot;
   act: Act;
   onAsk: (question: string) => void;
   onOpenGoal: (id: string) => void;
+  peek: ReturnType<typeof usePeek>;
 }) {
   const { job } = item;
   const title = <TaskDetails item={job.item} job={job} snapshot={snapshot} act={act} />;
@@ -133,7 +125,7 @@ function InboxRow({
           unread={false}
           reviewer={reviewerOf(job, snapshot)}
           disabled={false}
-          leading={ICON[item.kind]}
+          {...peek(job.id)}
           holding={holds(job, snapshot.jobs)}
         />
       );

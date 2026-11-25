@@ -11,7 +11,7 @@ import {
   LoaderCircleIcon,
 } from "lucide-react";
 import Markdown from "markdown-to-jsx/react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type ComponentProps, type ReactNode } from "react";
 import { api, type Act } from "@/api";
 import { prUrl, type Item, type Job, type Snapshot } from "@/backend/types.ts";
 import {
@@ -52,7 +52,7 @@ const STATES = {
   },
   running: {
     Icon: LoaderCircleIcon,
-    icon: "animate-spin text-primary",
+    icon: "text-primary",
     pill: "bg-primary/15 text-primary",
   },
   blocked: {
@@ -95,14 +95,32 @@ const LABELS: Partial<Record<TaskState, string>> = {
 /** The same mark for a task's state on every tab. */
 export function StateIcon({ state }: { state: TaskState }) {
   const { Icon, icon } = STATES[state];
-  return <Icon role="img" aria-label={state} className={`size-4 shrink-0 ${icon}`} />;
+  return (
+    <Icon
+      role="img"
+      aria-label={state}
+      className={`size-4 shrink-0 ${icon} ${state === "running" ? "animate-spin" : ""}`}
+    />
+  );
 }
 
-/** The state in words, colored like its icon; `label` says more where the row knows more. */
-export function StatePill({ state, label }: { state: TaskState; label?: string }) {
+/** The color a state's icon has, for other icons that carry the state. */
+export const stateTone = (state: TaskState) => STATES[state].icon;
+
+/**
+ * The state in words, colored like its icon; `label` says more where the row knows more, and
+ * `className` recolors it. Takes a span's props, so it can be a tooltip's trigger.
+ */
+export function StatePill({
+  state,
+  label,
+  className,
+  ...props
+}: { state: TaskState; label?: ReactNode } & ComponentProps<"span">) {
   return (
     <span
-      className={`inline-flex h-5 items-center rounded-full px-2 text-xs font-medium whitespace-nowrap ${STATES[state].pill}`}
+      {...props}
+      className={`inline-flex h-5 items-center gap-1 rounded-full px-2 text-xs font-medium whitespace-nowrap [&_svg]:size-3 ${className ?? STATES[state].pill}`}
     >
       {label ?? LABELS[state] ?? state}
     </span>

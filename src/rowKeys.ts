@@ -6,7 +6,7 @@ const PREVIOUS = new Set(["k", "ArrowUp"]);
 /**
  * Keys for every list of rows on screen, in the open dialog if there is one, else the page:
  * j/k or the arrows move between rows, Home/End jump to the ends, Enter opens the row's title,
- * and Tab from a row reaches its buttons. Arrows only move from a row, so menus, tabs and toggle
+ * Right opens or closes its peek, and Tab from a row reaches its buttons. Arrows only move from a row, so menus, tabs and toggle
  * groups keep their own.
  */
 export function useRowKeys() {
@@ -20,6 +20,12 @@ export function useRowKeys() {
       if (event.key === "Enter" && onRow) {
         event.preventDefault();
         openRow(current);
+        return;
+      }
+      const peek = event.key === "ArrowRight" && current?.querySelector<HTMLElement>("[data-peek]");
+      if (peek) {
+        event.preventDefault();
+        peek.click();
         return;
       }
       const arrow = event.key.startsWith("Arrow") || event.key === "Home" || event.key === "End";

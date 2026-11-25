@@ -1,5 +1,5 @@
 export const clock = (iso: string) =>
-  new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 
 export function ago(iso: string): string {
   const minutes = Math.round((Date.now() - Date.parse(iso)) / 60_000);

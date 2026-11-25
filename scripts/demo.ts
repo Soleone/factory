@@ -66,6 +66,7 @@ function demoGoal(at: string, run: string): Job[] {
   ) => ({
     run,
     agent: preset.startsWith("opus") ? "claude" : "pi",
+    model: preset.startsWith("opus") ? "opus" : "openai/gpt-6.2-sol",
     preset,
     start: new Date(Date.parse(at) - 40 * 60_000).toISOString(),
     end: new Date(Date.parse(at) - 20 * 60_000).toISOString(),
@@ -288,6 +289,7 @@ function seed(): DemoState {
           {
             run,
             agent: "pi",
+            model: "openai/gpt-6.2-sol",
             start: new Date(Date.parse(at) - (index + 1) * 120_000).toISOString(),
             end: at,
             outcome: failed ? "failed" : "done",

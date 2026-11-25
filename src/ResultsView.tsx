@@ -12,7 +12,7 @@ import { RowGroup } from "@/components/variants/item";
 import { ProjectsFilter } from "@/ProjectsFilter";
 import { itemTitle } from "@/format";
 import { canBoard, MergeButton, mergeTrain } from "@/PullRequest";
-import { canDismiss, dismissLoses, Result, reviewerOf } from "@/Result";
+import { canDismiss, dismissLoses, Result, reviewerOf, usePeek } from "@/Result";
 import { Spinner } from "@/components/ui/spinner";
 
 /** Keep the previous window while appending; never apply a response from an old filter. */
@@ -122,6 +122,7 @@ export function ResultsView({
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [dismissing, setDismissing] = useState(false);
   const seen = useLastSeen();
+  const peek = usePeek();
   const [finishedOpen, setFinishedOpen] = useState(true);
   const [limit, setLimit] = useState(RESULTS_BATCH_SIZE);
   const [refresh, setRefresh] = useState(0);
@@ -271,6 +272,7 @@ export function ResultsView({
               unread={seen !== "" && lastEnd(job) > seen}
               reviewer={reviewerOf(job, snapshot)}
               disabled={dismissing && selected.has(job.id)}
+              {...peek(job.id)}
               leading={
                 canDismiss(job) && (
                   <NeutralCheckbox
