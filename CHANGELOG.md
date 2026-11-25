@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.8.2](https://github.com/Soleone/factory/compare/v0.8.1...v0.8.2) (2026-11-25)
+
+### Features
+
+* **results:** fill the new-error pill solid red ([fcc751f](https://github.com/Soleone/factory/commit/fcc751fce1cc99616a0f1d9bf6ab859f2485a37e))
+* **results:** hand a rebase that conflicts to an agent instead of the user ([db3e303](https://github.com/Soleone/factory/commit/db3e303efe61f86e4c94b23f01c91d4558be83fb))
+* **results:** show a failed merge, rebase or close on its own row ([5f33aac](https://github.com/Soleone/factory/commit/5f33aac06ff75b25866a869f0c7496257eed53d2))
+* **ui:** one project filter for every tab, next to the tabs ([9c1df27](https://github.com/Soleone/factory/commit/9c1df27536382001569155db5b1e1ab78ad5b66e))
+
 ## [0.8.1](https://github.com/Soleone/factory/compare/v0.8.0...v0.8.1) (2026-11-25)
 
 ### Bug Fixes
