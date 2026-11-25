@@ -1,9 +1,23 @@
-import { createContext, useContext, useState, type ClipboardEvent } from "react";
-import { ImagePlusIcon, XIcon } from "lucide-react";
+import {
+  createContext,
+  useContext,
+  useState,
+  type ClipboardEvent,
+  type ComponentProps,
+} from "react";
+import {
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  DownloadIcon,
+  FolderInputIcon,
+  ImagePlusIcon,
+  XIcon,
+} from "lucide-react";
 import { api, type Act } from "@/api";
 import { IMAGE_AGENT } from "@/backend/agents.ts";
 import { workersOf, type Job, type MadeImage, type Snapshot } from "@/backend/types.ts";
 import type { AgentImage } from "@/components/soleone/agent";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/tooltip/tooltip";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
@@ -109,8 +123,8 @@ export function Gallery({ job, act }: { job: Job; act: Act }) {
             act={act}
             onReference={
               onReference &&
-              (async () => {
-                onReference(await fetchImage(imageUrl(job, shown)));
+              (async (file) => {
+                onReference(await fetchImage(imageUrl(job, file)));
                 setShown(undefined);
               })
             }
@@ -270,7 +284,10 @@ export function ImageForm({
   );
 }
 
-/** One image large, with what to do with it: open it, reuse it as a reference, or add it to the project. */
+/**
+ * One image large, arrows or the side buttons browsing the job's others, with one bar of what to
+ * do with it: reuse it as a reference, download it, or add it to the project.
+ */
 function ImageDialog({
   job,
   file,
@@ -280,66 +297,135 @@ function ImageDialog({
   job: Job;
   file: string;
   act: Act;
-  onReference?: () => Promise<void>;
+  onReference?: (file: string) => Promise<void>;
 }) {
-  const image = madeBy(job).find((each) => each.file === file);
+  const images = madeBy(job);
+  const [index, setIndex] = useState(() => images.findIndex((each) => each.file === file));
   const [where, setWhere] = useState("");
-  const [queued, setQueued] = useState(false);
+  const [queued, setQueued] = useState<string[]>([]);
+  const image = images[index];
+  const url = imageUrl(job, image.file);
+  const project = job.item.repo && repoName(job.item.repo);
+  const move = (by: number) => {
+    setIndex((at) => (at + by + images.length) % images.length);
+    setWhere("");
+  };
 
   return (
-    <AnchoredDialogContent className="sm:max-w-4xl">
+    <AnchoredDialogContent
+      className="sm:max-w-4xl"
+      onKeyDown={(event) => {
+        if (event.altKey || event.ctrlKey || event.metaKey) return;
+        // The details dialog behind listens for number keys on the document to switch tabs.
+        if (/^[1-9]$/.test(event.key)) event.stopPropagation();
+        if ((event.target as HTMLElement).closest("input")) return;
+        if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+          event.preventDefault();
+          move(event.key === "ArrowLeft" ? -1 : 1);
+        }
+      }}
+    >
       <DialogHeader>
-        <DialogTitle>{image?.name || "Image"}</DialogTitle>
+        <DialogTitle>
+          {image.name || "Image"}
+          {images.length > 1 && (
+            <span
+              role="status"
+              className="ml-2 text-sm font-normal text-muted-foreground tabular-nums"
+            >
+              {index + 1} / {images.length}
+            </span>
+          )}
+        </DialogTitle>
       </DialogHeader>
-      <a href={imageUrl(job, file)} target="_blank" rel="noreferrer">
-        <img
-          src={imageUrl(job, file)}
-          alt={image?.name ?? ""}
-          className="mx-auto max-h-[60dvh] rounded-lg object-contain"
-        />
-      </a>
+      {/* A fixed height, so the bar below stays put while browsing images of other shapes. */}
+      <div className="relative flex h-[60dvh] items-center justify-center">
+        <a href={url} target="_blank" rel="noreferrer" className="contents">
+          <img
+            src={url}
+            alt={image.name}
+            className="max-h-full max-w-full rounded-lg object-contain"
+          />
+        </a>
+        {images.length > 1 && (
+          <>
+            <Button
+              variant="outline"
+              size="icon"
+              aria-label="Previous image"
+              className="absolute left-0"
+              onClick={() => move(-1)}
+            >
+              <ChevronLeftIcon />
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              aria-label="Next image"
+              className="absolute right-0"
+              onClick={() => move(1)}
+            >
+              <ChevronRightIcon />
+            </Button>
+          </>
+        )}
+      </div>
       <div className="flex flex-wrap items-center gap-2">
         {onReference && (
-          <Button variant="outline" onClick={() => act(onReference)}>
-            Use as reference
-          </Button>
+          <IconAction label="Use as reference" onClick={() => act(() => onReference(image.file))}>
+            <ImagePlusIcon />
+          </IconAction>
         )}
-        <Button
-          variant="outline"
-          render={<a href={imageUrl(job, file)} download={`${job.id}-${file}`} />}
-        >
-          Download
-        </Button>
-      </div>
-      {job.item.repo && (
-        <Field>
-          <FieldLabel htmlFor="image-where">Add to {repoName(job.item.repo)}</FieldLabel>
-          <div className="flex gap-2">
+        <IconAction label="Download" render={<a href={url} download={`${job.id}-${image.file}`} />}>
+          <DownloadIcon />
+        </IconAction>
+        {project && (
+          <>
             <Input
-              id="image-where"
+              aria-label={`Where it goes in ${project}`}
+              // A phone gives it a row of its own, above the buttons.
+              className="flex-1 max-sm:order-first max-sm:basis-full"
               placeholder="Where it goes and what uses it (optional)"
               value={where}
               onChange={(event) => setWhere(event.target.value)}
             />
-            <Button
-              disabled={queued}
-              onClick={() =>
-                act(async () => {
-                  await api.useImage(job.id, file, where);
-                  setQueued(true);
-                })
-              }
-            >
-              {queued ? "Queued" : "Queue job"}
-            </Button>
-          </div>
-          <FieldDescription>
-            A grunt job copies it into the project and opens a PR. Until then it stays out of the
-            repo.
-          </FieldDescription>
-        </Field>
-      )}
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    disabled={queued.includes(image.file)}
+                    onClick={() =>
+                      act(async () => {
+                        await api.useImage(job.id, image.file, where);
+                        setQueued((files) => [...files, image.file]);
+                      })
+                    }
+                  />
+                }
+              >
+                <FolderInputIcon data-icon="inline-start" />
+                {queued.includes(image.file) ? "Queued" : `Add to ${project}`}
+              </TooltipTrigger>
+              <TooltipContent>
+                A grunt job copies it into {project} and opens a PR. Until then it stays out of the
+                repo.
+              </TooltipContent>
+            </Tooltip>
+          </>
+        )}
+      </div>
     </AnchoredDialogContent>
+  );
+}
+
+function IconAction({ label, ...props }: { label: string } & ComponentProps<typeof Button>) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={<Button variant="outline" size="icon" aria-label={label} {...props} />}
+      />
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
   );
 }
 
