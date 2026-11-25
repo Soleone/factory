@@ -29,8 +29,8 @@ import {
   type Snapshot,
   type TrainCar,
 } from "@/backend/types.ts";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { AlarmBadge } from "@/components/variants/badge";
 import { DialogClose } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/tooltip/tooltip";
@@ -523,7 +523,7 @@ function PrErrorFact({ job, url, act }: { job: Job; url: string; act: Act }) {
               className="cursor-pointer text-destructive underline decoration-dotted underline-offset-3"
             />
           ) : (
-            <Badge variant="destructive" render={<button type="button" />} />
+            <AlarmBadge render={<button type="button" />} />
           )
         }
       >

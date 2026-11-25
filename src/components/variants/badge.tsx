@@ -8,3 +8,8 @@ export function AccentBadge({ className, ...props }: ComponentProps<typeof Badge
     <Badge className={cn("bg-(--om-accent) text-(--om-dark-background)", className)} {...props} />
   );
 }
+
+/** A badge filled with the destructive color, for a failure the user hasn't seen yet. */
+export function AlarmBadge({ className, ...props }: ComponentProps<typeof Badge>) {
+  return <Badge className={cn("bg-destructive text-background", className)} {...props} />;
+}
