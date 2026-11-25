@@ -192,7 +192,11 @@ function Running({ worker, job, title }: { worker?: Worker; job: Job; title: Rea
                 .join(" · ")}
             </span>
           ) : (
-            <span>Still working while the factory is off; turn it on to pick it back up.</span>
+            <span>
+              {job.exited
+                ? "Finished while the factory was off; turn it on to record the result."
+                : "Still working while the factory is off; turn it on to pick it back up."}
+            </span>
           )}
           {step && (
             <span className="text-foreground">

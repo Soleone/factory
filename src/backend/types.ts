@@ -323,6 +323,8 @@ export type Job = Tuning & {
   escalations: number;
   /** An attempt is under way, maybe paused for an answer or a limit; its agent's session continues. */
   open: boolean;
+  /** Set for the page: its handed-off agent has exited, and the next run records what it did. */
+  exited?: true;
 };
 
 export type Worker = Tuning & {

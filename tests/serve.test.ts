@@ -38,6 +38,19 @@ import {
 } from "./harness.ts";
 
 describe("the factory", () => {
+  test("a running job tells the page once its handed-off agent has exited", () => {
+    const state = mkdtempSync(join(scratch, "exited-"));
+    const dir = join(state, "attempt");
+    mkdirSync(join(state, "running"), { recursive: true });
+    mkdirSync(dir);
+    writeFileSync(join(state, "running", "job1.json"), JSON.stringify({ dir }));
+    const job = { id: "job1", state: "running", attempts: [] } as unknown as Job;
+    expect(webJob(state, job).exited).toBeUndefined();
+    writeFileSync(join(dir, "exit"), "0");
+    expect(webJob(state, job).exited).toBe(true);
+    expect(webJob(state, { ...job, state: "done" }).exited).toBeUndefined();
+  });
+
   test("GitHub profile suggestions do not save; commit identity can be saved, reloaded and cleared", async () => {
     const state = mkdtempSync(join(scratch, "state-"));
     const bin = mkdtempSync(join(scratch, "profile-"));

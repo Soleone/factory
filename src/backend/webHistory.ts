@@ -1,5 +1,7 @@
-import { relative } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { join, relative } from "node:path";
 import { inbox } from "../inbox.ts";
+import { livePath } from "./state.ts";
 import {
   ACTIVITY_LIMIT,
   itemKey,
@@ -97,7 +99,13 @@ export function webJob(state: string, job: Job): Job {
   return {
     ...job,
     attempts: job.attempts.map((attempt) => ({ ...attempt, log: relative(state, attempt.log) })),
+    ...(job.state === "running" && agentExited(state, job.id) && { exited: true }),
   };
+}
+
+function agentExited(state: string, id: string): boolean {
+  const live = livePath(state, id);
+  return existsSync(live) && existsSync(join(JSON.parse(readFileSync(live, "utf8")).dir, "exit"));
 }
 
 export function resultsPage(

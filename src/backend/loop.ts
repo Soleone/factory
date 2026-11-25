@@ -776,6 +776,8 @@ export async function run(options: RunOptions): Promise<string> {
     let read = live.offset;
     let quiet = Date.now();
     let timedOut = false;
+    // Exited before this run took it over: the pid may be some other process's by now, so leave it be.
+    const exitedEarlier = existsSync(exit);
     agents.add(pid);
     try {
       // The exit file first: after a long hand-off the pid may be some other process's by now.
@@ -804,7 +806,7 @@ export async function run(options: RunOptions): Promise<string> {
       agents.delete(pid);
     }
     // Whatever the agent left running in its group goes with it.
-    killGroup(pid);
+    if (!exitedEarlier) killGroup(pid);
     const text = slice(live.begun.log, live.offset, size(live.begun.log));
     // No exit file: something killed the agent and its shell.
     const code = existsSync(exit) ? Number(readFileSync(exit, "utf8")) : 1;
@@ -890,6 +892,7 @@ export async function run(options: RunOptions): Promise<string> {
       slots.find((each) => each.worker.preset === live.begun.preset && !handed.has(each)) ??
       slots.find((each) => each.worker.agent === live.begun.agent && !handed.has(each));
     if (slot) handed.set(slot, { job, live });
+    else log(`${job.id} waits for a ${live.begun.agent} worker to take over its agent`);
   }
   process.on("SIGTERM", handOff);
   process.on("SIGINT", kill);
