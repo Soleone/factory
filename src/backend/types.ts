@@ -103,7 +103,7 @@ export const EXPANDER =
   "Keep every detail the user gave, and invent no extra subjects, text or branding. Cover the use case, subject, style or medium, composition and framing, lighting and mood, color palette, any text verbatim, and what to avoid.";
 
 /** What an image job asks codex for. Its files live in images/<job id>/ in the state folder, outside any repo. */
-export type ImageSpec = {
+type ImageSpec = {
   /** Codex first expands the prompt into a full brief, which it then generates from. */
   expand: boolean;
   /** Images made of each distinct thing the prompt asks for, to pick the best from. */

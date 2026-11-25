@@ -20,7 +20,7 @@ const TIMEOUT = 15 * MINUTE;
 /** What codex prints when the ChatGPT plan's usage runs out. */
 const LIMIT = /usage limit|usage_limit_reached|rate_limit_exceeded/i;
 
-export const imageFolder = (state: string, id: string) => join(state, "images", id);
+const imageFolder = (state: string, id: string) => join(state, "images", id);
 
 /** A pasted image, base64 without the data: prefix. */
 export type Pasted = { data: string; mimeType: string };
@@ -98,7 +98,7 @@ export function useImage(state: string, id: string, file: string, where: string)
 }
 
 /** What codex is told: generate, don't touch files, and report the brief and images in a fixed form. */
-export function codexPrompt(job: Job, expander: string): string {
+function codexPrompt(job: Job, expander: string): string {
   const { expand, variants, references } = job.image!;
   return [
     "Use your built-in image_gen tool. Don't use a Python or API fallback, and don't write, copy or move any files: the images stay where image_gen saves them.",
