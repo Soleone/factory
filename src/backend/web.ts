@@ -34,7 +34,7 @@ import {
   retryJob,
 } from "./jobs.ts";
 import { turnOff, turnOn } from "./power.ts";
-import { closePr, mergePr, prCache, readPrDetails, rebasePr } from "./review.ts";
+import { closePr, Conflicts, mergePr, prCache, readPrDetails, rebasePr } from "./review.ts";
 import {
   approveGoal,
   cancelGoal,
@@ -297,8 +297,16 @@ export function serve(
     "POST /api/jobs/rebase": async (_, id) => {
       const { url, pr } = await openPr(id);
       if (!canRebase(pr)) throw new Error(`${url} isn't ready to rebase: see it on GitHub`);
-      await rebasePr(url, readSettings(state).commitIdentity);
+      let conflicts: string[] | undefined;
+      try {
+        await rebasePr(url, readSettings(state).commitIdentity);
+      } catch (error) {
+        if (!(error instanceof Conflicts)) throw error;
+        conflicts = error.files;
+        queueConflicts(state, id, url, conflicts);
+      }
       await prs.fresh(url);
+      return { conflicts };
     },
     "POST /api/train": (body: { ids: string[] }) =>
       train.start(body.ids.map((id) => ({ id, url: jobPr(id) }))),

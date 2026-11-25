@@ -105,9 +105,7 @@ export class Conflicts extends Error {
   // A plain field: `pn dev` runs this file under Node's type stripping, which rejects parameter properties.
   readonly files: string[];
   constructor(files: string[]) {
-    super(
-      `Rebase stopped. Resolve these conflicts manually; no changes were pushed:\n${files.join("\n")}`,
-    );
+    super(`Rebase stopped on conflicts in ${files.join(", ")}; nothing was pushed`);
     this.files = files;
   }
 }

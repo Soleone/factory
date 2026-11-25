@@ -19,6 +19,7 @@ import { api, type Act } from "@/api";
 import {
   canMerge,
   canRebase,
+  conflictsJob,
   onTrain,
   prUrl,
   reviewTier,
@@ -127,7 +128,9 @@ export function Result({
   const state = taskState(job, snapshot.prs);
   const open = pr?.state === "OPEN";
   const disabled = dismissing || pending !== undefined || onTrain(car);
-  const primary = pr && (canRebase(pr) ? "rebase" : canMerge(pr) ? "merge" : undefined);
+  const resolving = conflictsJob(job, snapshot.jobs);
+  const primary =
+    pr && !resolving && (canRebase(pr) ? "rebase" : canMerge(pr) ? "merge" : undefined);
   const question =
     car?.step === "skipped"
       ? `The merge train skipped ${url}, "${itemTitle(job.item)}": ${car.reason}. Why, and what should I do about it?`
@@ -295,7 +298,7 @@ export function Result({
               }
             />
           )}
-          <Outcome job={job} last={last} pr={pr} url={url} car={car} />
+          <Outcome job={job} last={last} pr={pr} url={url} car={car} resolving={resolving} />
           {holding ? (
             <span className="shrink-0 text-warning">
               holds {holding} {holding === 1 ? "job" : "jobs"}
@@ -415,12 +418,15 @@ function Outcome({
   pr,
   url,
   car,
+  resolving,
 }: {
   job: Job;
   last?: Attempt;
   pr?: Pr;
   url?: string;
   car?: TrainCar;
+  /** The job resolving its PR's conflicts. */
+  resolving?: Job;
 }) {
   const result = job.notes.findLast((note) => note.kind === "result");
   const ask =
@@ -440,11 +446,19 @@ function Outcome({
             {checks.label}
           </span>
         ),
-        pr?.state === "OPEN" && pr.conflicts && (
-          <span key="conflicts" className="text-destructive">
-            conflicts
-          </span>
-        ),
+        pr?.state === "OPEN" &&
+          pr.conflicts &&
+          (resolving ? (
+            <span key="conflicts" className="text-warning">
+              {resolving.state === "running"
+                ? "agent resolving conflicts"
+                : "conflicts: agent queued"}
+            </span>
+          ) : (
+            <span key="conflicts" className="text-destructive">
+              conflicts
+            </span>
+          )),
         pr?.draft && "draft",
         car && <TrainLine key="train" car={car} />,
         <a key="pr" href={url} target="_blank" rel="noreferrer" className="hover:underline">

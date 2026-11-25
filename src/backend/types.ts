@@ -478,6 +478,15 @@ export const canMerge = (pr: Pr) =>
 
 export const canRebase = (pr: Pr) => pr.state === "OPEN" && pr.conflicts === true && !pr.fork;
 
+/** The job queued or running to resolve the job's PR conflicts, if there is one. */
+export const conflictsJob = (job: Job, jobs: Job[]) =>
+  jobs.find(
+    (other) =>
+      other.item.blueprint === "conflicts" &&
+      itemKey(other.item) === itemKey(job.item) &&
+      (other.state === "queued" || other.state === "running"),
+  );
+
 /** The longest chain of unfinished jobs that wait on each job, itself included. */
 export function chains(jobs: Map<string, Job>): Map<string, number> {
   const waiting = new Map<string, Job[]>();

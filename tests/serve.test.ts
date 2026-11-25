@@ -1013,14 +1013,11 @@ esac; done`,
         const response = await fetch(`${url}/api/jobs/${job.id}/rebase`, { method: "POST" });
         const after = sh(origin, "git", "rev-parse", "refs/heads/workwork/a");
         if (conflict) {
-          expect(response.status).toBe(400);
-          expect(await response.json()).toEqual({
-            error:
-              "Rebase stopped. Resolve these conflicts manually; no changes were pushed:\nshared.txt",
-          });
+          // Nothing is pushed; an agent is queued to resolve the conflicts instead.
+          expect(await response.json()).toEqual({ conflicts: ["shared.txt"] });
           expect(after).toBe(before);
 
-          // The train skips it the same way and queues an agent to resolve the conflicts, once.
+          // The train skips it the same way, and the agent stays queued once.
           for (let start = 0; start < 2; start++) {
             await fetch(`${url}/api/train`, {
               method: "POST",

@@ -543,11 +543,15 @@ async function merge(ids: string[]): Promise<void> {
 
 /** Rebases or closes a job's PR through serve, which checks it with GitHub and keeps the page's copy fresh. */
 async function prAction(action: "rebase" | "close", id: string | undefined): Promise<void> {
-  await callServe(`/api/jobs/${need(id, "a job")}/${action}`, {});
-  console.log(action === "rebase" ? `rebased ${id}'s PR` : `closed ${id}'s PR`);
+  const done = (await callServe(`/api/jobs/${need(id, "a job")}/${action}`, {})) as {
+    conflicts?: string[];
+  } | null;
+  if (done?.conflicts)
+    console.log(`conflicts in ${done.conflicts.join(", ")}; queued an agent to resolve them`);
+  else console.log(action === "rebase" ? `rebased ${id}'s PR` : `closed ${id}'s PR`);
 }
 
-async function callServe(path: string, body: object): Promise<void> {
+async function callServe(path: string, body: object): Promise<unknown> {
   const serve = serveUrl();
   const response = await fetch(`${serve}${path}`, {
     method: "POST",
@@ -556,6 +560,7 @@ async function callServe(path: string, body: object): Promise<void> {
     throw new Error(`no factory serve at ${serve}: factory serve does this`);
   });
   if (!response.ok) throw new Error(((await response.json()) as { error: string }).error);
+  return response.json();
 }
 
 /** The page's snapshot, so the inbox sees the PR states serve has fetched, as the page does. */
