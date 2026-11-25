@@ -1,5 +1,14 @@
 import { execFile } from "node:child_process";
-import { existsSync, openSync, closeSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+  existsSync,
+  openSync,
+  closeSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -178,37 +187,68 @@ function upgradeAuto(auto: LegacyAuto = {}): Partial<Settings["auto"]> {
 }
 
 const candidatesPath = (state: string) => join(state, "candidates.json");
-const refreshLock = (state: string) => join(state, "candidates.lock");
+/** One lock per target, so one repo can be refreshed while another, or all of them, is. */
+const refreshLock = (state: string, repo?: string) =>
+  join(
+    state,
+    repo
+      ? `candidates-${createHash("sha1").update(repo).digest("hex").slice(0, 12)}.lock`
+      : "candidates.lock",
+  );
 
 export function readCandidates(state: string): Candidates | undefined {
   if (!existsSync(candidatesPath(state))) return undefined;
-  const { at, items } = JSON.parse(readFileSync(candidatesPath(state), "utf8"));
-  return { at, items: items.map(upgradeItem) };
+  const { at, items, repoAt } = JSON.parse(readFileSync(candidatesPath(state), "utf8"));
+  return { at, items: items.map(upgradeItem), repoAt: repoAt ?? {} };
 }
 
-export function refreshingCandidates(state: string): boolean {
-  if (!existsSync(refreshLock(state))) return false;
-  return alive(Number(readFileSync(refreshLock(state), "utf8")));
+/** What's being asked for right now: every repo, and repos one at a time. */
+export function refreshingCandidates(state: string): { all: boolean; repos: string[] } {
+  const holders = readdirSync(state)
+    .filter((name) => /^candidates(-\w+)?\.lock$/.test(name))
+    .flatMap((name) => {
+      const [pid, repo = ""] = readFileSync(join(state, name), "utf8").split("\n");
+      return alive(Number(pid)) ? [repo] : [];
+    });
+  return { all: holders.includes(""), repos: holders.filter(Boolean) };
 }
 
-/** Asks workwork again, unless some process (the factory or serve) already is. */
-export async function refreshCandidates(state: string, workwork: string): Promise<void> {
-  if (refreshingCandidates(state)) return;
-  rmSync(refreshLock(state), { force: true });
+/**
+ * Asks workwork again, for one repo or, without `repo`, every repo under $SRC, unless some process
+ * (the factory or serve) already is. One repo takes under a minute; every repo takes many.
+ */
+export async function refreshCandidates(
+  state: string,
+  workwork: string,
+  repo?: string,
+): Promise<void> {
+  const lock = refreshLock(state, repo);
+  if (existsSync(lock) && alive(Number(readFileSync(lock, "utf8").split("\n")[0]))) return;
+  rmSync(lock, { force: true });
   try {
-    closeSync(openSync(refreshLock(state), "wx"));
+    closeSync(openSync(lock, "wx"));
   } catch (error) {
     // Another process took the lock between the check and here.
     if ((error as NodeJS.ErrnoException).code === "EEXIST") return;
     throw error;
   }
-  writeFileSync(refreshLock(state), `${process.pid}\n`);
+  writeFileSync(lock, `${process.pid}\n${repo ?? ""}`);
   try {
-    const items: Item[] = JSON.parse(await output(workwork, ["--all", "--json"], process.cwd()));
-    const candidates: Candidates = { at: new Date().toISOString(), items };
+    const args = repo ? ["--json"] : ["--all", "--json"];
+    const found: Item[] = JSON.parse(await output(workwork, args, repo ?? process.cwd()));
+    const at = new Date().toISOString();
+    // Read again after the wait: another refresh may have written in the meantime.
+    const cached = readCandidates(state);
+    const candidates: Candidates = repo
+      ? {
+          at: cached?.at ?? "",
+          items: [...(cached?.items ?? []).filter((item) => item.repo !== repo), ...found],
+          repoAt: { ...cached?.repoAt, [repo]: at },
+        }
+      : { at, items: found, repoAt: {} };
     writeFileSync(candidatesPath(state), JSON.stringify(candidates));
   } finally {
-    rmSync(refreshLock(state), { force: true });
+    rmSync(lock, { force: true });
   }
 }
 

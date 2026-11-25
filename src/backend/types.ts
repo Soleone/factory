@@ -139,8 +139,15 @@ export function upgradeItem(item: LegacyItem): Item {
 /** A candidate's identity across workwork runs. */
 export const itemKey = (item: Pick<Item, "repo" | "id">) => `${item.repo} ${item.id}`;
 
-/** `workwork --all --json` takes minutes, so its answer is kept here for browsing and auto mode. */
-export type Candidates = { at: string; items: Item[] };
+/**
+ * `workwork --all --json` takes minutes, so its answer is kept here for browsing and auto mode.
+ * `at` is the last time every repo was asked; `repoAt` when single repos were asked since.
+ */
+export type Candidates = { at: string; items: Item[]; repoAt: Record<string, string> };
+
+/** When the repo's candidates were last asked for, alone or with every repo. */
+export const scannedAt = (candidates: Pick<Candidates, "at" | "repoAt">, repo: string) =>
+  [candidates.at, candidates.repoAt[repo]].filter(Boolean).sort().at(-1);
 
 /** A blueprint as `workwork blueprints --json` prints it. `custom` ones are the user's own. */
 export type Blueprint = {
@@ -385,7 +392,11 @@ export type Snapshot = JobContext & {
   settings: Settings;
   /** Attempt logs are paths the server serves, relative to the state folder. */
   jobs: Job[];
-  candidates: { at: string | null; count: number; refreshing: boolean };
+  /** `at`: when any of them last changed. */
+  candidates: {
+    at: string | null;
+    refreshing: { all: boolean; repos: string[] };
+  };
   /** What GitHub last said about each job's PR, by URL; a PR not fetched yet is missing. */
   prs: Record<string, Pr>;
   /** Where each job on the merge train is, by job id; gone when serve restarts. */

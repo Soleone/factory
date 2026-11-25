@@ -325,7 +325,7 @@ function seed(): DemoState {
       auto: { on: true, attention: ["none"], blueprints: [], repos: [] },
       triggers: { ci: true, label: "factory", reviews: true },
     },
-    candidates: { at, count: items.length, refreshing: false },
+    candidates: { at, refreshing: { all: false, repos: [] } },
     prs: Object.fromEntries(
       jobs.flatMap((job, index) => {
         const url = prUrl(job);
@@ -676,6 +676,7 @@ function dispatch(
     case "GET /api/candidates":
       return {
         at: snapshot.candidates.at,
+        repoAt: {},
         items,
         repos: [...new Set(items.map((item) => item.repo))].sort(),
         root: "/home/me/src",

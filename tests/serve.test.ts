@@ -111,7 +111,13 @@ describe("the factory", () => {
     const candidates = async () => (await fetch(`${url}/candidates`)).json();
     const projects = async () => (await fetch(`${url}/projects`)).json();
     try {
-      expect(await candidates()).toEqual({ at: null, items: [], repos: [], root: source });
+      expect(await candidates()).toEqual({
+        at: null,
+        repoAt: {},
+        items: [],
+        repos: [],
+        root: source,
+      });
       expect(await projects()).toEqual([]);
       const response = await fetch(`${url}/repos/clone`, {
         method: "POST",
@@ -124,9 +130,13 @@ describe("the factory", () => {
       const query = new URLSearchParams({ repo: repos[0] });
       const results = await (await fetch(`${url}/results?${query.toString()}`)).json();
       expect(results).toMatchObject({ repo: repos[0], running: [], finished: [], total: 0 });
-      await expect
-        .poll(candidates)
-        .toEqual({ at: expect.any(String), items: [], repos, root: source });
+      await expect.poll(candidates).toEqual({
+        at: null,
+        repoAt: { [repos[0]]: expect.any(String) },
+        items: [],
+        repos,
+        root: source,
+      });
     } finally {
       server.close();
       if (previousSource === undefined) delete process.env.SRC;
@@ -182,6 +192,49 @@ describe("the factory", () => {
       expect(readJobs(base.state).map((job) => [job.item.title, job.tier, job.source])).toEqual([
         ["Compare runs", "builder", "pick"],
       ]);
+    } finally {
+      server.close();
+    }
+  });
+
+  test("serve asks workwork about one project alone and keeps every other project's candidates", async () => {
+    const state = mkdtempSync(join(scratch, "state-"));
+    const [mine, other] = [
+      mkdtempSync(join(scratch, "mine-")),
+      mkdtempSync(join(scratch, "other-")),
+    ];
+    const item = (repo: string, id: string) => ({
+      repo,
+      label: repo,
+      id,
+      blueprint: "bug-sweep",
+      attention: "skim",
+      title: id,
+    });
+    const at = "2026-01-01T00:00:00.000Z";
+    writeFileSync(
+      join(state, "candidates.json"),
+      JSON.stringify({ at, items: [item(mine, "old"), item(other, "kept")] }),
+    );
+    const bin = mkdtempSync(join(scratch, "bin-"));
+    script(bin, "workwork", `[ "$1" = --json ] && echo '${JSON.stringify([item(mine, "new")])}'`);
+    process.env.PATH = `${bin}:${process.env.PATH}`;
+    const server = serve(state, 0, "127.0.0.1", () => ({}));
+    await once(server, "listening");
+    const { port } = server.address() as AddressInfo;
+    const url = `http://127.0.0.1:${port}/api`;
+    const refresh = (repo: string) =>
+      fetch(`${url}/candidates/refresh`, { method: "POST", body: JSON.stringify({ repo }) });
+    try {
+      expect((await refresh(join(scratch, "elsewhere"))).status).toBe(400);
+      expect((await refresh(mine)).status).toBe(200);
+      await expect
+        .poll(async () => (await fetch(`${url}/candidates`)).json())
+        .toMatchObject({
+          at,
+          repoAt: { [mine]: expect.any(String) },
+          items: [item(other, "kept"), item(mine, "new")],
+        });
     } finally {
       server.close();
     }

@@ -129,8 +129,8 @@ export function serve(
       );
     return models.get(name)!;
   }
-  function refresh() {
-    void refreshCandidates(state, "workwork").catch((error: Error) =>
+  function refresh(repo?: string) {
+    void refreshCandidates(state, "workwork", repo).catch((error: Error) =>
       console.error(`factory: workwork failed: ${error.message}`),
     );
   }
@@ -190,15 +190,23 @@ export function serve(
     "GET /api/candidates": () => {
       const cached = readCandidates(state);
       const items = cached?.items ?? [];
-      return { at: cached?.at ?? null, items, repos: projectPaths(items), root: sourceRoot() };
+      return {
+        at: cached?.at || null,
+        repoAt: cached?.repoAt ?? {},
+        items,
+        repos: projectPaths(items),
+        root: sourceRoot(),
+      };
     },
-    "POST /api/candidates/refresh": () => {
-      refresh();
+    /** Every repo, or with `repo` just that one, which is much quicker. */
+    "POST /api/candidates/refresh": (body: { repo?: string }) => {
+      if (body.repo && !projectPaths(readCandidates(state)?.items ?? []).includes(body.repo))
+        throw new Error(`${body.repo} isn't a project under ${sourceRoot()}`);
+      refresh(body.repo);
     },
     "GET /api/repos": () => clonableRepos(),
     "POST /api/repos/clone": async (body: { name: string }) => {
-      await cloneRepo(body.name);
-      refresh();
+      refresh(await cloneRepo(body.name));
     },
     /** A goal from a brief, in a repo under $SRC or, with `project`, a new one. */
     "POST /api/goals": async (body: {
@@ -429,8 +437,11 @@ function snapshot(
     jobs: jobs.map((job) => webJob(state, job)),
     ...jobContext(all, jobs),
     candidates: {
-      at: candidates?.at ?? null,
-      count: candidates?.items.length ?? 0,
+      // When any repo's changed, so the page knows to load them again.
+      at:
+        [candidates?.at ?? "", ...Object.values(candidates?.repoAt ?? {})].reduce((latest, each) =>
+          each > latest ? each : latest,
+        ) || null,
       refreshing: refreshingCandidates(state),
     },
     prs: jobPrs(jobs, (urls) =>

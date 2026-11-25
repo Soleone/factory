@@ -39,11 +39,15 @@ export const api = {
   },
   projects: (signal: AbortSignal) => call<string[]>("GET", "/api/projects", undefined, signal),
   candidates: () =>
-    call<{ at: string | null; items: Candidates["items"]; repos: string[]; root: string }>(
-      "GET",
-      "/api/candidates",
-    ),
-  refreshCandidates: () => call("POST", "/api/candidates/refresh"),
+    call<{
+      at: string | null;
+      repoAt: Candidates["repoAt"];
+      items: Candidates["items"];
+      repos: string[];
+      root: string;
+    }>("GET", "/api/candidates"),
+  /** Every repo's candidates, or with `repo` just that one's, which is much quicker. */
+  refreshCandidates: (repo?: string) => call("POST", "/api/candidates/refresh", { repo }),
   blueprints: () => call<Blueprint[]>("GET", "/api/blueprints"),
   /** Saves one of the user's own, replacing theirs of the same name. */
   saveBlueprint: (blueprint: Omit<Blueprint, "custom">) =>

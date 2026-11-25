@@ -1,7 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, type Act } from "@/api";
 import { ChevronDownIcon, RefreshCwIcon } from "lucide-react";
-import type { Item, Job, Pin, Settings, Snapshot } from "@/backend/types.ts";
+import {
+  scannedAt,
+  type Candidates,
+  type Item,
+  type Job,
+  type Pin,
+  type Settings,
+  type Snapshot,
+} from "@/backend/types.ts";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
 import {
@@ -26,11 +34,15 @@ import { PinMenuItems } from "@/PinMenu";
 import { Row, Section } from "@/Row";
 import { NeutralCheckbox } from "@/components/variants/checkbox";
 import { RowGroup } from "@/components/variants/item";
-import { StateIcon, StatePill, TaskDetails, taskState } from "@/TaskDetails";
+import { StateIcon, StatePill, TaskDetails, taskState, type TaskState } from "@/TaskDetails";
 
 const ALL = "";
 const PAGE = 100;
 const key = (item: { repo: string; id: string }) => `${item.repo} ${item.id}`;
+/** Under way or waiting on its PR: queueing it again would do the same work twice. */
+const UNDER_WAY: TaskState[] = ["queued", "running", "blocked", "review"];
+/** Finished without a failure: workwork no longer lists it, unless it was asked before the job ended. */
+const HANDLED: TaskState[] = ["merged", "done", "unchanged"];
 
 /** Everything workwork found, by blueprint, to pick from. */
 export function CandidatesView({
@@ -47,6 +59,7 @@ export function CandidatesView({
   onProjectChange: (project: string | null) => void;
 }) {
   const [items, setItems] = useState<Item[]>([]);
+  const [scans, setScans] = useState<Pick<Candidates, "at" | "repoAt">>({ at: "", repoAt: {} });
   const [blueprint, setBlueprint] = useState(ALL);
   const [attention, setAttention] = useState(["none", "skim", "decide"]);
   const [search, setSearch] = useState("");
@@ -55,12 +68,18 @@ export function CandidatesView({
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   /** What each blueprint does, by name; empty until workwork answers. */
   const [described, setDescribed] = useState(new Map<string, string>());
-  const { at, count, refreshing } = snapshot.candidates;
+  const { at } = snapshot.candidates;
+  const refreshing =
+    snapshot.candidates.refreshing.all ||
+    (project !== null && snapshot.candidates.refreshing.repos.includes(project));
+  const refresh = () => act(() => api.refreshCandidates(project ?? undefined));
 
   useEffect(() => {
     let ignore = false;
-    void api.candidates().then(({ items }) => {
-      if (!ignore) setItems(items);
+    void api.candidates().then(({ items, at, repoAt }) => {
+      if (ignore) return;
+      setItems(items);
+      setScans({ at: at ?? "", repoAt });
     });
     return () => {
       ignore = true;
@@ -82,7 +101,29 @@ export function CandidatesView({
     return byItem;
   }, [snapshot.jobs]);
 
-  const inRepo = project === null ? items : items.filter((item) => item.repo === project);
+  // A job that ended after workwork last looked at its repo leaves a stale candidate; one that
+  // ended before means workwork offers it again, like a sweep of code that changed since.
+  const stale = (item: Item) => {
+    const job = jobs.get(key(item));
+    const scanned = scannedAt(scans, item.repo);
+    const ended = job?.attempts.at(-1)?.end;
+    return (
+      !!job &&
+      HANDLED.includes(taskState(job, snapshot.prs)) &&
+      !!ended &&
+      (!scanned || ended > scanned)
+    );
+  };
+  /** The job a candidate is already in, if it's still under way. */
+  const pending = (item: Item) => {
+    const job = jobs.get(key(item));
+    return job && UNDER_WAY.includes(taskState(job, snapshot.prs)) ? job : undefined;
+  };
+
+  const inProject = project === null ? items : items.filter((item) => item.repo === project);
+  const inRepo = inProject.filter((item) => !stale(item));
+  const handled = inProject.length - inRepo.length;
+  const lastScan = project === null ? scans.at : scannedAt(scans, project);
   const blueprintCounts = new Map<string, number>();
   for (const item of inRepo)
     blueprintCounts.set(item.blueprint, (blueprintCounts.get(item.blueprint) ?? 0) + 1);
@@ -98,8 +139,10 @@ export function CandidatesView({
       ),
   );
   const queue = (wanted: Item[], pin?: Pin) => act(() => api.queue(wanted, pin));
-  const open = matches.filter((item) => !jobs.has(key(item)));
-  const selection = items.filter((item) => selected.has(key(item)) && !jobs.has(key(item)));
+  const open = matches.filter((item) => !pending(item));
+  const selection = items.filter(
+    (item) => selected.has(key(item)) && !pending(item) && !stale(item),
+  );
   const allOpenSelected = open.length > 0 && open.every((item) => selected.has(key(item)));
 
   const select = (wanted: Item[], checked: boolean) => {
@@ -118,15 +161,17 @@ export function CandidatesView({
       <EmptyHeader>
         <EmptyTitle>{refreshing ? "Asking workwork" : "No candidates yet"}</EmptyTitle>
         <EmptyDescription>
-          {refreshing
-            ? "workwork is looking through every repo under $SRC. That takes a few minutes."
-            : project === null
-              ? "Ask workwork for candidates across your repos. It takes a few minutes."
-              : `There are no candidates for ${repoName(project)}.`}
+          {project === null
+            ? refreshing
+              ? "workwork is looking through every repo under $SRC. That takes a few minutes."
+              : "Ask workwork for candidates across your repos. It takes a few minutes."
+            : refreshing
+              ? `workwork is looking through ${repoName(project)}. That takes under a minute.`
+              : `There are no candidates for ${repoName(project)}${handled ? ` left: ${handled} handled since workwork last looked` : ""}.`}
         </EmptyDescription>
       </EmptyHeader>
       <EmptyContent>
-        <Button variant="outline" disabled={refreshing} onClick={() => act(api.refreshCandidates)}>
+        <Button variant="outline" disabled={refreshing} onClick={refresh}>
           {refreshing && <Spinner />} Ask workwork
         </Button>
       </EmptyContent>
@@ -167,7 +212,9 @@ export function CandidatesView({
           }}
         />
         <span className="flex flex-1 items-center justify-end gap-2 text-sm text-muted-foreground">
-          {refreshing ? "Asking workwork…" : `${count} candidates${at ? `, ${ago(at)}` : ""}`}
+          {refreshing
+            ? "Asking workwork…"
+            : `${inRepo.length} candidates${lastScan ? `, ${ago(lastScan)}` : ""}`}
           <Tooltip>
             <TooltipTrigger
               render={
@@ -176,7 +223,7 @@ export function CandidatesView({
                   size="icon-sm"
                   aria-label="Refresh candidates"
                   disabled={refreshing}
-                  onClick={() => void act(api.refreshCandidates)}
+                  onClick={() => void refresh()}
                 />
               }
             >
@@ -185,7 +232,13 @@ export function CandidatesView({
               />
             </TooltipTrigger>
             <TooltipContent>
-              {refreshing ? "Asking workwork, takes a few minutes" : "Ask workwork again"}
+              {project === null
+                ? refreshing
+                  ? "Asking workwork about every repo, takes a few minutes"
+                  : "Ask workwork about every repo again, takes a few minutes"
+                : refreshing
+                  ? `Asking workwork about ${repoName(project)}`
+                  : `Ask workwork about ${repoName(project)} again, under a minute`}
             </TooltipContent>
           </Tooltip>
         </span>
@@ -259,13 +312,15 @@ export function CandidatesView({
                   )}
                   <span>
                     {matches.length} matching, {open.length} not queued yet
+                    {handled > 0 && `, ${handled} handled since workwork last looked`}
                   </span>
                 </span>
               }
             >
               <RowGroup>
                 {matches.slice(0, shown).map((item) => {
-                  const job = jobs.get(key(item));
+                  const job = pending(item);
+                  const last = job ? undefined : jobs.get(key(item));
                   const queueButton = (
                     <QueueButton
                       label="Queue"
@@ -300,7 +355,14 @@ export function CandidatesView({
                       meta={
                         <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
                           <StatePill state={taskState(job, snapshot.prs)} />
-                          {[item.blueprint, item.attention, item.id].join(" · ")}
+                          {[
+                            item.blueprint,
+                            item.attention,
+                            item.id,
+                            last && `last run ${taskState(last, snapshot.prs)}`,
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")}
                         </span>
                       }
                     >

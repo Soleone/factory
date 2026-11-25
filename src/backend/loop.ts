@@ -292,7 +292,8 @@ export async function run(options: RunOptions): Promise<string> {
       readJobs(state).filter((job) => job.source === "auto" && job.state === "queued").length;
     if (wanted() <= 0) return;
     const cached = readCandidates(state);
-    if (!cached || Date.now() - Date.parse(cached.at) > STALE_CANDIDATES)
+    // A repo asked for alone leaves `at` empty until every repo is.
+    if (!cached?.at || Date.now() - Date.parse(cached.at) > STALE_CANDIDATES)
       await refreshCandidates(state, options.workwork);
     const candidates = readCandidates(state);
     if (!candidates) return;
