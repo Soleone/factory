@@ -39,7 +39,8 @@ export function Row({
       size="sm"
       tabIndex={-1}
       data-row
-      className="relative overflow-hidden has-[[data-slot=item-title]_:is(button,a)]:cursor-pointer"
+      // shrink-0: overflow-hidden drops the flex min height, so a scrolling list would crush rows.
+      className="relative shrink-0 overflow-hidden has-[[data-slot=item-title]_:is(button,a)]:cursor-pointer"
       onClick={(event) => {
         const row = event.currentTarget;
         const target = event.target as HTMLElement;
