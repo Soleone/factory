@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.8.0](https://github.com/Soleone/factory/compare/v0.7.2...v0.8.0) (2026-11-25)
+
+### Features
+
+* **blueprints:** a Title on top, with the ID made from it below ([236e467](https://github.com/Soleone/factory/commit/236e46783b65d18ec22dc6fc8c232323f106016d))
+* **candidates:** refresh only the selected project, re-offer finished work ([8e25efd](https://github.com/Soleone/factory/commit/8e25efd733f1095c9970b5c2c1dfed12743c13c5))
+* **candidates:** scan one blueprint, dismiss in batches, fold batches, show sweep progress ([da6f269](https://github.com/Soleone/factory/commit/da6f269328e8102096842e75a3d218bbacd11827))
+* **demo:** a sample image job with two icon variants and a codex worker ([331f882](https://github.com/Soleone/factory/commit/331f8820c01498e420e1bd4d388c966b88747e30))
+* **images:** browse a job's images with arrows, and act on one from a single bar ([076ea82](https://github.com/Soleone/factory/commit/076ea8281b6cfcb07083086c085b9215023cfa9e))
+* **images:** generate images with codex, outside the repo, to pick from ([0ac4e35](https://github.com/Soleone/factory/commit/0ac4e35f214432926cde46e2b7d99d5ac0693c1c))
+* **images:** image prompts are queue jobs for codex workers ([e53763a](https://github.com/Soleone/factory/commit/e53763a710ab9538f0139f35f27d41b9d1095814))
+* **results:** give every result row fixed slots and a floating peek ([9a9c68c](https://github.com/Soleone/factory/commit/9a9c68c6797fe9a6c365c894590a546f93884955))
+* **workers:** pinned-only workers take just the jobs pinned to them ([9778d05](https://github.com/Soleone/factory/commit/9778d05c8f3cd18ff5389c0904167434d2eeb581))
+
+### Bug Fixes
+
+* **blueprints:** call the field under Title Name, not ID ([d88647d](https://github.com/Soleone/factory/commit/d88647de8b3c90bb30573c1e0c46693ef286cfd8))
+* **blueprints:** keep the draft and show why a save failed ([a1c1e6f](https://github.com/Soleone/factory/commit/a1c1e6fe19c29376f01d579cedf757a00cbb0389))
+* drag lists only from their grip so touching a row scrolls on mobile ([7b36b21](https://github.com/Soleone/factory/commit/7b36b210353ca6c80e272c01e0dd7199d209333a))
+* give the reorder grip a finger-sized touch target ([71ccb52](https://github.com/Soleone/factory/commit/71ccb520053bfac25db3212d0ef54fc4d674cdc9))
+* load the page under vite dev, which reads named node:url imports on load ([7208a0b](https://github.com/Soleone/factory/commit/7208a0bbe94ef307105f36ba4ac9e7e74695c6a7))
+* **queue:** keep handed-off jobs under Running while the factory is off ([78c6903](https://github.com/Soleone/factory/commit/78c69033b4cf8ff5f217f5f093cf879a5fcdffea))
+* **release:** keep internal image helpers private ([d3cd42d](https://github.com/Soleone/factory/commit/d3cd42daa39cd8cef16d31880e3c717508a7cbfb))
+* report a failed command by what it printed, not node's command line ([c06df1d](https://github.com/Soleone/factory/commit/c06df1d29678056a438014674a3a21edfba5094c))
+* **rows:** truncate a long title instead of running it under the actions ([ec7fd2f](https://github.com/Soleone/factory/commit/ec7fd2f299d10d9391ca7b9cd0baee3c5d584e5b))
+* **ui:** block the dialog beneath a nested one ([025d7f8](https://github.com/Soleone/factory/commit/025d7f837c85cb58763498330da38d5e6e424d4d))
+* **ui:** keep rows full height in a scrolling list ([64a14f8](https://github.com/Soleone/factory/commit/64a14f8cb80620d9c3cc8fbf95bc2c46e4ae5b69))
+
 ## [0.7.2](https://github.com/Soleone/factory/compare/v0.7.1...v0.7.2) (2026-11-24)
 
 ### Features
