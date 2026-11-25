@@ -308,10 +308,12 @@ export async function run(options: RunOptions): Promise<string> {
     const pool = pools.get(worker.pool)!;
     return !pool.until && !pool.stopped && (worker === self || worker.state === "idle");
   };
+  /** The slots that take queue and role work: all but the pinned-only ones. */
+  const shared = slots.filter((slot) => !slot.preset.pinnedOnly);
   const free = (preset: string, self: Worker) =>
-    slots.some(({ worker }) => worker.preset === preset && available(worker, self));
+    shared.some(({ worker }) => worker.preset === preset && available(worker, self));
   const usable = (preset: string) =>
-    slots.some(
+    shared.some(
       ({ worker }) =>
         worker.preset === preset &&
         worker.agent !== IMAGE_AGENT &&
@@ -333,12 +335,17 @@ export async function run(options: RunOptions): Promise<string> {
   }
 
   /** The next job this worker takes, decided without awaiting anything, so two workers never take one. */
-  function pick({ worker }: Slot): Job | undefined {
+  function pick({ worker, preset }: Slot): Job | undefined {
     const jobs = readJobs(state);
     for (const job of jobs) {
       if (!ready(job, jobs)) continue;
       // Codex workers make images and nothing else, and only they do.
       if ((worker.agent === IMAGE_AGENT) !== Boolean(job.image)) continue;
+      if (preset.pinnedOnly) {
+        const owner = job.open ? readLive(state, job.id)?.begun.preset : job.preset;
+        if (owner === worker.preset) return job;
+        continue;
+      }
       if (job.open) {
         // A paused attempt goes on with its own session, so only its preset can take it, or its
         // agent when this run doesn't have that preset.
@@ -365,7 +372,7 @@ export async function run(options: RunOptions): Promise<string> {
    * when it names one. A pin on a preset this run has no worker for lands here, on the pin's tuning.
    */
   const firstFree = (agent: string | undefined, self: Worker) =>
-    slots.find(({ worker }) => (agent ?? worker.agent) === worker.agent && available(worker, self))
+    shared.find(({ worker }) => (agent ?? worker.agent) === worker.agent && available(worker, self))
       ?.worker;
 
   async function work(slot: Slot, handed?: Handed): Promise<void> {

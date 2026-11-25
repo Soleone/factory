@@ -1,5 +1,5 @@
 import { type ComponentProps, Fragment, useEffect, useState } from "react";
-import { GripVerticalIcon, PlusIcon, Settings2, XIcon } from "lucide-react";
+import { GripVerticalIcon, PinIcon, PlusIcon, Settings2, XIcon } from "lucide-react";
 import { api, type Act } from "@/api";
 import { ReorderHandle } from "@/ReorderHandle";
 import {
@@ -47,6 +47,8 @@ import {
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { Toggle } from "@/components/ui/toggle";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/tooltip/tooltip";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -299,9 +301,10 @@ function WorkerFields({
     <FieldGroup>
       <FieldDescription>
         The queue goes to the first free worker, top to bottom. The number is how many run at once
-        (empty: 1); 0 keeps one for the arrow next to Queue only. k ctx is the context size, in
-        thousands of tokens, where the agent compacts (empty: 90 for Haiku, 200 otherwise). Codex
-        workers make images and take no other jobs.
+        (empty: 1); 0 keeps one for the arrow next to Queue only. The pin gives it workers that take
+        only jobs pinned to it with that arrow. k ctx is the context size, in thousands of tokens,
+        where the agent compacts (empty: 90 for Haiku, 200 otherwise). Codex workers make images and
+        take no other jobs.
       </FieldDescription>
       <ol className="flex flex-col gap-2">
         {value.map((preset, index) => (
@@ -313,7 +316,7 @@ function WorkerFields({
               setDragging(undefined);
             }}
             onDragEnd={() => setDragging(undefined)}
-            className="grid grid-cols-[auto_5.5rem_minmax(0,1fr)_6.5rem_3.5rem_4.5rem_auto] items-center gap-2 *:w-full"
+            className="grid grid-cols-[auto_5.5rem_minmax(0,1fr)_6.5rem_3.5rem_4.5rem_auto_auto] items-center gap-2 *:w-full"
           >
             <span
               draggable
@@ -364,6 +367,23 @@ function WorkerFields({
                 })
               }
             />
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Toggle
+                    size="sm"
+                    aria-label="Pinned jobs only"
+                    pressed={preset.pinnedOnly ?? false}
+                    onPressedChange={(pinnedOnly) =>
+                      set(index, { ...preset, pinnedOnly: pinnedOnly || undefined })
+                    }
+                  />
+                }
+              >
+                <PinIcon />
+              </TooltipTrigger>
+              <TooltipContent>Takes only jobs pinned to it, never the queue's</TooltipContent>
+            </Tooltip>
             <Button
               type="button"
               variant="ghost"
@@ -478,13 +498,14 @@ function RoleFields({
       <FieldDescription>
         A role is a kind of work and the workers that do it, first choice on top. Goals give each
         node a role. A queue item can get one from the arrow next to Queue; without one it takes any
-        free worker, as does a role with nothing listed. Only workers that run (a count above 0) can
-        be added.
+        free worker, as does a role with nothing listed. Only workers that run (a count above 0) and
+        aren't pinned-only can be added.
       </FieldDescription>
       {TIERS.map((tier) => {
         const list = value[tier];
         const free = presets.filter(
-          (preset) => workersOf(preset) > 0 && !list.includes(presetId(preset)),
+          (preset) =>
+            workersOf(preset) > 0 && !preset.pinnedOnly && !list.includes(presetId(preset)),
         );
         return (
           <Field key={tier}>
@@ -526,6 +547,9 @@ function RoleFields({
                     )}
                     {byId.has(id) && workersOf(byId.get(id)!) === 0 && (
                       <span className="text-muted-foreground">not running</span>
+                    )}
+                    {byId.get(id)?.pinnedOnly && (
+                      <span className="text-muted-foreground">pinned only</span>
                     )}
                   </span>
                   <Button

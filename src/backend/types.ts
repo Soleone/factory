@@ -12,6 +12,8 @@ export type Preset = Tuning & {
   pool?: string;
   /** Process slots a run gives it; unset: 1. At 0 it runs nothing on its own, only jobs pinned to it. */
   workers?: number;
+  /** Its workers take only jobs pinned to it, never the queue's or a role's. */
+  pinnedOnly?: boolean;
   /** Context tokens at which the runner compacts; unset: 90k for Haiku, 200k otherwise. */
   compactAt?: number;
   /** Turns factory adds to an attempt after a failed gate or an unfinished exit. */

@@ -103,6 +103,23 @@ describe("the factory", () => {
     expect(job.attempts).toMatchObject([{ outcome: "done", preset: "c", model: "opus" }]);
   });
 
+  test("a pinned-only worker takes the jobs pinned to it and leaves the queue's and its role's", async () => {
+    const base = setup(["a", "b", "c"]);
+    agents({ claude: RESULT });
+    tiered(base.state, {
+      presets: [
+        { agent: "claude", model: "haiku", id: "haiku", pinnedOnly: true },
+        { agent: "claude", id: "c" },
+      ],
+      tiers: { communicator: [], builder: [], grunt: ["haiku", "c"] },
+    });
+    base.pick("a");
+    base.pick("b", { tier: "grunt" });
+    base.pick("c", { preset: "haiku", agent: "claude", model: "haiku" });
+    const jobs = await work(options(base, {}));
+    expect(jobs.map((job) => job.attempts[0].preset)).toEqual(["c", "c", "haiku"]);
+  });
+
   test("agents and gates get the repo's env, with {worktree} filled in", async () => {
     const base = setup(["a"]);
     agents({ claude: `echo "target=$CARGO_TARGET_DIR"; ${RESULT}` });
