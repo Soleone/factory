@@ -63,7 +63,8 @@ export function Row({
       {leading && <ItemMedia>{leading}</ItemMedia>}
       {/* min-w-0 lets long text truncate instead of wrapping the content under the icon. */}
       <ItemContent className="min-w-0">
-        <ItemTitle>{title}</ItemTitle>
+        {/* Capped, so a long title truncates instead of running under the actions. */}
+        <ItemTitle className="max-w-full">{title}</ItemTitle>
         {meta && <ItemDescription>{meta}</ItemDescription>}
         {below}
       </ItemContent>
