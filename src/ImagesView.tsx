@@ -32,55 +32,38 @@ const imageUrl = (job: Job, file: string) => `/images/${job.id}/${file}`;
 /** Every image the job's attempts made, oldest first. */
 const madeBy = (job: Job) => job.attempts.flatMap((attempt) => attempt.images ?? []);
 
-/** Image jobs for codex workers, and what they made: generated outside every repo, to pick from. */
+/** What image jobs made: generated outside every repo, to pick from. */
 export function ImagesView({
   snapshot,
   act,
-  projects,
+  onReference,
 }: {
   snapshot: Snapshot;
   act: Act;
-  projects: string[];
+  /** Starts a new image job with this one as a reference. */
+  onReference: (image: AgentImage) => void;
 }) {
-  const [references, setReferences] = useState<AgentImage[]>([]);
   const [shown, setShown] = useState<{ job: Job; file: string }>();
   const job = shown && snapshot.images.find((each) => each.id === shown.job.id);
-  const codexWorkers = snapshot.settings.presets.some(
-    (preset) => preset.agent === IMAGE_AGENT && workersOf(preset) > 0,
-  );
-  const when = !codexWorkers
-    ? "Add a codex worker under Settings, Workers to run them."
-    : snapshot.on
-      ? "A codex worker takes it from the queue."
-      : "They run while the factory is on.";
 
   return (
-    <div className="flex flex-col gap-8 pt-2">
-      <ImageForm
-        act={act}
-        projects={projects}
-        references={references}
-        onReferencesChange={setReferences}
-        when={when}
-      />
+    <div className="flex flex-col gap-6 pt-2">
       {snapshot.images.length === 0 ? (
         <Empty>
           <EmptyHeader>
             <EmptyTitle>No images yet</EmptyTitle>
-            <EmptyDescription>What codex generates shows up here.</EmptyDescription>
+            <EmptyDescription>Queue an image job under Add work, Image.</EmptyDescription>
           </EmptyHeader>
         </Empty>
       ) : (
-        <div className="flex flex-col gap-6">
-          {snapshot.images.map((each) => (
-            <ImageJob
-              key={each.id}
-              job={each}
-              act={act}
-              onOpen={(file) => setShown({ job: each, file })}
-            />
-          ))}
-        </div>
+        snapshot.images.map((each) => (
+          <ImageJob
+            key={each.id}
+            job={each}
+            act={act}
+            onOpen={(file) => setShown({ job: each, file })}
+          />
+        ))
       )}
       <Dialog open={job !== undefined} onOpenChange={(open) => !open && setShown(undefined)}>
         {job && shown && (
@@ -90,9 +73,8 @@ export function ImagesView({
             file={shown.file}
             act={act}
             onReference={async () => {
-              setReferences([...references, await fetchImage(imageUrl(job, shown.file))]);
+              onReference(await fetchImage(imageUrl(job, shown.file)));
               setShown(undefined);
-              window.scrollTo({ top: 0, behavior: "smooth" });
             }}
           />
         )}
@@ -101,25 +83,35 @@ export function ImagesView({
   );
 }
 
-function ImageForm({
+/** Queues an image job for codex workers. */
+export function ImageForm({
+  snapshot,
   act,
   projects,
   references,
   onReferencesChange,
-  when,
+  onQueued,
 }: {
+  snapshot: Snapshot;
   act: Act;
   projects: string[];
   references: AgentImage[];
   onReferencesChange: (references: AgentImage[]) => void;
-  /** Whether and when a queued image runs. */
-  when: string;
+  onQueued: () => void;
 }) {
   const [repo, setRepo] = useState(NO_PROJECT);
   const [prompt, setPrompt] = useState("");
   const [expand, setExpand] = useState(true);
   const [variants, setVariants] = useState(1);
   const [pasteError, setPasteError] = useState<string>();
+  const codexWorkers = snapshot.settings.presets.some(
+    (preset) => preset.agent === IMAGE_AGENT && workersOf(preset) > 0,
+  );
+  const when = !codexWorkers
+    ? "Add a codex worker under Settings, Workers to run them."
+    : snapshot.on
+      ? "A codex worker takes it from the queue."
+      : "They run while the factory is on.";
 
   function paste(event: ClipboardEvent<HTMLTextAreaElement>) {
     const files = [...event.clipboardData.files].filter((file) => file.type.startsWith("image/"));
@@ -141,97 +133,103 @@ function ImageForm({
         variants,
         references,
       });
-      setPrompt("");
       onReferencesChange([]);
+      onQueued();
     });
 
   return (
-    <FieldGroup>
-      <Field>
-        <FieldLabel htmlFor="image-prompt">Prompt</FieldLabel>
-        <Textarea
-          id="image-prompt"
-          className="min-h-24"
-          placeholder="What to draw. Paste images here to use them as references."
-          value={prompt}
-          onChange={(event) => setPrompt(event.target.value)}
-          onPaste={paste}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && prompt.trim())
-              void submit();
-          }}
-        />
-        {references.length > 0 && (
-          <div className="flex flex-wrap gap-2">
-            {references.map((image, index) => (
-              <div key={index} className="relative">
-                <img
-                  src={`data:${image.mimeType};base64,${image.data}`}
-                  alt={`Reference ${index + 1}`}
-                  className="size-14 rounded-md border object-cover"
-                />
-                <Button
-                  variant="secondary"
-                  size="icon-xs"
-                  className="absolute -top-1.5 -right-1.5"
-                  aria-label={`Remove reference ${index + 1}`}
-                  onClick={() => onReferencesChange(references.filter((each) => each !== image))}
-                >
-                  <XIcon />
-                </Button>
-              </div>
-            ))}
-          </div>
-        )}
-        <FieldDescription>{pasteError ?? `Ctrl+Enter queues it. ${when}`}</FieldDescription>
-      </Field>
-      <div className="flex flex-wrap items-end gap-x-6 gap-y-4">
-        <Field className="w-56">
-          <FieldLabel>Project</FieldLabel>
-          <Select
-            items={[
-              { value: NO_PROJECT, label: "No project" },
-              ...projects.map((path) => ({ value: path, label: repoName(path) })),
-            ]}
-            value={repo}
-            onValueChange={(value) => setRepo(value ?? NO_PROJECT)}
-          >
-            <SelectTrigger aria-label="Project">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent alignItemWithTrigger={false}>
-              <SelectItem value={NO_PROJECT}>No project</SelectItem>
-              {projects.map((path) => (
-                <SelectItem key={path} value={path}>
-                  {repoName(path)}
-                </SelectItem>
+    <div className="flex flex-col gap-6">
+      <p className="text-sm text-muted-foreground">
+        Images from codex, kept outside the repo until you add one. They show under Results, Images.{" "}
+        {when}
+      </p>
+      <FieldGroup>
+        <Field>
+          <FieldLabel htmlFor="image-prompt">Prompt</FieldLabel>
+          <Textarea
+            id="image-prompt"
+            className="min-h-24"
+            placeholder="What to draw. Paste images here to use them as references."
+            value={prompt}
+            onChange={(event) => setPrompt(event.target.value)}
+            onPaste={paste}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && prompt.trim())
+                void submit();
+            }}
+          />
+          {references.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {references.map((image, index) => (
+                <div key={index} className="relative">
+                  <img
+                    src={`data:${image.mimeType};base64,${image.data}`}
+                    alt={`Reference ${index + 1}`}
+                    className="size-14 rounded-md border object-cover"
+                  />
+                  <Button
+                    variant="secondary"
+                    size="icon-xs"
+                    className="absolute -top-1.5 -right-1.5"
+                    aria-label={`Remove reference ${index + 1}`}
+                    onClick={() => onReferencesChange(references.filter((each) => each !== image))}
+                  >
+                    <XIcon />
+                  </Button>
+                </div>
               ))}
-            </SelectContent>
-          </Select>
+            </div>
+          )}
+          <FieldDescription>{pasteError ?? "Ctrl+Enter queues it."}</FieldDescription>
         </Field>
-        <Field className="w-auto">
-          <FieldLabel>Variants of each</FieldLabel>
-          <ToggleGroup
-            variant="outline"
-            value={[String(variants)]}
-            onValueChange={(value) => value[0] && setVariants(Number(value[0]))}
-          >
-            {["1", "2", "3", "4"].map((value) => (
-              <ToggleGroupItem key={value} value={value} aria-label={`${value} variants`}>
-                {value}
-              </ToggleGroupItem>
-            ))}
-          </ToggleGroup>
-        </Field>
-        <Field orientation="horizontal" className="w-auto">
-          <Switch id="image-expand" checked={expand} onCheckedChange={setExpand} />
-          <FieldLabel htmlFor="image-expand">Expand the prompt first</FieldLabel>
-        </Field>
-        <Button className="ml-auto" disabled={!prompt.trim()} onClick={submit}>
-          <ImagePlusIcon /> Queue
-        </Button>
-      </div>
-    </FieldGroup>
+        <div className="flex flex-wrap items-end gap-x-6 gap-y-4">
+          <Field className="w-56">
+            <FieldLabel>Project</FieldLabel>
+            <Select
+              items={[
+                { value: NO_PROJECT, label: "No project" },
+                ...projects.map((path) => ({ value: path, label: repoName(path) })),
+              ]}
+              value={repo}
+              onValueChange={(value) => setRepo(value ?? NO_PROJECT)}
+            >
+              <SelectTrigger aria-label="Project">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent alignItemWithTrigger={false}>
+                <SelectItem value={NO_PROJECT}>No project</SelectItem>
+                {projects.map((path) => (
+                  <SelectItem key={path} value={path}>
+                    {repoName(path)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field className="w-auto">
+            <FieldLabel>Variants of each</FieldLabel>
+            <ToggleGroup
+              variant="outline"
+              value={[String(variants)]}
+              onValueChange={(value) => value[0] && setVariants(Number(value[0]))}
+            >
+              {["1", "2", "3", "4"].map((value) => (
+                <ToggleGroupItem key={value} value={value} aria-label={`${value} variants`}>
+                  {value}
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
+          </Field>
+          <Field orientation="horizontal" className="w-auto">
+            <Switch id="image-expand" checked={expand} onCheckedChange={setExpand} />
+            <FieldLabel htmlFor="image-expand">Expand the prompt first</FieldLabel>
+          </Field>
+          <Button className="ml-auto" disabled={!prompt.trim()} onClick={submit}>
+            <ImagePlusIcon /> Queue
+          </Button>
+        </div>
+      </FieldGroup>
+    </div>
   );
 }
 

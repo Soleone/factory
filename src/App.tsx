@@ -36,16 +36,17 @@ import { inbox } from "@/inbox";
 import { NewGoalForm } from "@/NewGoalForm";
 import { NewJobForm } from "@/NewJobForm";
 import { InboxView } from "@/InboxView";
-import { ImagesView } from "@/ImagesView";
+import { ImageForm, ImagesView } from "@/ImagesView";
+import type { AgentImage } from "@/components/soleone/agent";
 
 // Links from before the tabs were merged still open what they named, before any view reads the query.
 const old = new URLSearchParams(location.search).get("tab");
 if (old === "candidates" || old === "blueprints") {
   setQueryParam("tab", "queue");
   setQueryParam("add", old);
-} else if (old === "activity") {
+} else if (old === "activity" || old === "images") {
   setQueryParam("tab", "results");
-  setQueryParam("view", "activity");
+  setQueryParam("view", old);
 }
 
 export function App() {
@@ -119,6 +120,8 @@ function Factory({
   const [projects, setProjects] = useState<string[]>([]);
   const [projectRefresh, setProjectRefresh] = useState(0);
   const [cloneOpen, setCloneOpen] = useState(false);
+  /** The new image job's references, kept while the dialog is closed so a picked image can join them. */
+  const [references, setReferences] = useState<AgentImage[]>([]);
   const cloneTrigger = useRef<HTMLButtonElement>(null);
   const candidatesAt = snapshot.candidates.at;
 
@@ -223,7 +226,6 @@ function Factory({
                 Goals <Count n={goals} />
               </Tab>
               <Tab value="results">Results</Tab>
-              <Tab value="images">Images</Tab>
             </TabsList>
           </div>
           <Button variant="outline" size="sm" className="ml-auto" onClick={() => setAdding("job")}>
@@ -253,6 +255,7 @@ function Factory({
               <TabsList variant="line">
                 <TabsTrigger value="results">Results</TabsTrigger>
                 <TabsTrigger value="activity">Activity</TabsTrigger>
+                <TabsTrigger value="images">Images</TabsTrigger>
               </TabsList>
               <TabsContent value="results">
                 <ResultsView
@@ -267,11 +270,18 @@ function Factory({
               <TabsContent value="activity">
                 <ActivityView snapshot={snapshot} act={act} />
               </TabsContent>
+              <TabsContent value="images">
+                <ImagesView
+                  snapshot={snapshot}
+                  act={act}
+                  onReference={(image) => {
+                    setReferences([...references, image]);
+                    setAdding("image");
+                  }}
+                />
+              </TabsContent>
             </Tabs>
           </div>
-        </TabsContent>
-        <TabsContent value="images">
-          <ImagesView snapshot={snapshot} act={act} projects={projects} />
         </TabsContent>
       </Tabs>
       <CloneDialog
@@ -290,6 +300,7 @@ function Factory({
             <TabsList variant="line">
               <TabsTrigger value="job">Job</TabsTrigger>
               <TabsTrigger value="goal">Goal</TabsTrigger>
+              <TabsTrigger value="image">Image</TabsTrigger>
               <TabsTrigger value="candidates">Candidates</TabsTrigger>
               <TabsTrigger value="blueprints">Blueprints</TabsTrigger>
             </TabsList>
@@ -315,6 +326,16 @@ function Factory({
             <ScrollingTabsContent value="job">
               <NewJobForm act={act} onQueued={() => setAdding("")} />
             </ScrollingTabsContent>
+            <ScrollingTabsContent value="image">
+              <ImageForm
+                snapshot={snapshot}
+                act={act}
+                projects={projects}
+                references={references}
+                onReferencesChange={setReferences}
+                onQueued={() => setAdding("")}
+              />
+            </ScrollingTabsContent>
             <ScrollingTabsContent value="blueprints">
               <BlueprintsView act={act} />
             </ScrollingTabsContent>
@@ -326,7 +347,7 @@ function Factory({
 }
 
 /** The key after `g` that jumps to each tab. */
-const GO_KEYS = { inbox: "i", queue: "q", goals: "g", results: "r", images: "m" };
+const GO_KEYS = { inbox: "i", queue: "q", goals: "g", results: "r" };
 
 /** `g` then a tab's key jumps to that tab, unless the keys go to a field or a dialog. */
 function useGoKeys(go: (tab: string) => void) {

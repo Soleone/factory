@@ -301,7 +301,7 @@ function WorkerFields({
         The queue goes to the first free worker, top to bottom. The number is how many run at once
         (empty: 1); 0 keeps one for the arrow next to Queue only. k ctx is the context size, in
         thousands of tokens, where the agent compacts (empty: 90 for Haiku, 200 otherwise). Codex
-        workers make the Images tab's images and take no other jobs.
+        workers make images and take no other jobs.
       </FieldDescription>
       <ol className="flex flex-col gap-2">
         {value.map((preset, index) => (
