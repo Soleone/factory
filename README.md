@@ -180,7 +180,7 @@ The page is built on the [kit](https://github.com/Soleone/kit) web stack: Vite+,
 
 ### Try the UI with dummy data
 
-Run `pnpm dev:demo` and open [factory (demo)](http://localhost:7042). Browse sample candidates, reorder the queue, retry a failed job, review sample PRs, open the sample goal's graph, or try the run and settings controls. Turn on shows simulated workers without executing any jobs.
+Run `pnpm dev:demo` and open [factory (demo)](http://localhost:7042). Browse sample candidates, reorder the queue, retry a failed job, review sample PRs, open the sample goal's graph, look at a sample image job's variants, or try the run and settings controls. Turn on shows simulated workers without executing any jobs.
 
 The demo does not start `factory serve`, call `workwork` or GitHub, or read or write your real Factory state. Changes are shared across tabs and reset when you restart the demo server.
 

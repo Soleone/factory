@@ -196,6 +196,65 @@ function demoGoal(at: string, run: string): Job[] {
   ];
 }
 
+/** A codex image job that made two variants of an app icon, served by `demoImage`. */
+function demoImageJob(at: string, run: string): Job {
+  const id = "image1";
+  const prompt = "An app icon for atlas: a folded map with a location pin";
+  return {
+    ...BLANK,
+    id,
+    item: {
+      repo: "/demo/atlas",
+      label: "atlas",
+      id: `image-${id}`,
+      blueprint: "image",
+      attention: "none",
+      title: `Image: ${prompt}`,
+    },
+    source: "pick",
+    agent: "codex",
+    added: at,
+    state: "done",
+    prompt,
+    image: { expand: true, variants: 2, references: [] },
+    attempts: [
+      {
+        run,
+        agent: "codex",
+        preset: "codex",
+        start: new Date(Date.parse(at) - 60_000).toISOString(),
+        end: at,
+        outcome: "done",
+        log: `runs/${run}/${id}-1/log`,
+        brief:
+          "A square app icon with rounded corners. A map folded in three panels, seen slightly from above, with a bold location pin standing on the middle panel. Flat vector style, two or three colors, no text, readable at 32 pixels.",
+        images: [
+          { file: "1-1.svg", name: "atlas app icon" },
+          { file: "1-2.svg", name: "atlas app icon" },
+        ],
+      },
+    ],
+    notes: [],
+  };
+}
+
+/** The demo image job's variants: the same icon in two palettes. */
+function demoImage(file: string): string | undefined {
+  const palette = {
+    "1-1.svg": ["#1e3a5f", "#f4c95d", "#e85d4a"],
+    "1-2.svg": ["#f3efe6", "#4f8a6e", "#2b2b2b"],
+  }[file];
+  if (!palette) return undefined;
+  const [background, map, pin] = palette;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="112" fill="${background}"/>
+  <path d="M96 168 L192 136 L320 168 L416 136 L416 360 L320 392 L192 360 L96 392 Z" fill="${map}"/>
+  <path d="M192 136 L192 360 M320 168 L320 392" stroke="${background}" stroke-opacity="0.35" stroke-width="10"/>
+  <path d="M256 128 C206 128 176 166 176 208 C176 264 256 336 256 336 C256 336 336 264 336 208 C336 166 306 128 256 128 Z" fill="${pin}"/>
+  <circle cx="256" cy="208" r="30" fill="${background}"/>
+</svg>`;
+}
+
 type DemoState = Omit<Snapshot, "reviewed" | "queuedFollowups">;
 
 function seed(): DemoState {
@@ -240,6 +299,7 @@ function seed(): DemoState {
         notes: DEMO_NOTES[index]?.map((note) => ({ at, attempt: 1, ...note })) ?? [],
       };
     }),
+    demoImageJob(at, run),
     ...demoGoal(at, run),
   ];
   return {
@@ -253,6 +313,7 @@ function seed(): DemoState {
         { agent: "claude", model: "opus", effort: "high", id: "opus", workers: 0 },
         { agent: "pi", model: "openai/gpt-6.2-sol", effort: "high", id: "sol", workers: 2 },
         { agent: "pi", model: "openai-codex/gpt-6-luna", effort: "max", id: "luna", workers: 3 },
+        { agent: "codex", id: "codex" },
       ],
       limit: 2,
       reserves: {},
@@ -535,6 +596,14 @@ export function demoApi(): Plugin {
       const snapshot = seed();
       server.middlewares.use(async (request, response, next) => {
         const { pathname: path, searchParams } = new URL(request.url ?? "/", "http://localhost");
+        if (path.startsWith("/images/")) {
+          const [, , id, file] = path.split("/");
+          const image = snapshot.jobs.some((job) => job.id === id && job.image)
+            ? demoImage(file)
+            : undefined;
+          response.writeHead(image ? 200 : 404, { "content-type": "image/svg+xml" });
+          return response.end(image ?? "");
+        }
         if (path.startsWith("/runs/")) {
           const attempt = snapshot.jobs
             .flatMap((job) => job.attempts)
@@ -616,6 +685,9 @@ function dispatch(
       throw new Error("The demo doesn't plan or import goals.");
     case "POST /api/jobs/own":
       throw new Error("The demo doesn't queue jobs of your own.");
+    case "POST /api/images":
+    case "POST /api/images/use":
+      throw new Error("The demo doesn't generate or add images.");
     case "POST /api/candidates/refresh":
       snapshot.candidates.at = new Date().toISOString();
       return null;
