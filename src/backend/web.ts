@@ -438,10 +438,6 @@ function snapshot(
     ),
     train,
     usage: usage(usagePools(settings)),
-    images: all
-      .filter((job) => job.image && job.state !== "removed")
-      .map((job) => webJob(state, job))
-      .reverse(),
   };
 }
 

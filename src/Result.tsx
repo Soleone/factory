@@ -20,6 +20,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/to
 import { agentName, clock, itemTitle } from "@/format";
 import { Answer } from "@/JobNotes";
 import { CHECKS, TrainLine } from "@/PullRequest";
+import { Thumbnails } from "@/Images";
 import { Row } from "@/Row";
 import { ATTENTION, StatePill, TaskDetails, taskState } from "@/TaskDetails";
 
@@ -27,7 +28,11 @@ export function canDismiss(job: Job) {
   return job.state === "done" || job.state === "failed" || job.state === "blocked";
 }
 
-export const hasBranch = (job: Job) => job.attempts.some((attempt) => attempt.branch);
+/** What dismissing deletes besides the result, if anything. */
+export function dismissLoses(job: Job) {
+  if (job.image) return "its images";
+  if (job.attempts.some((attempt) => attempt.branch)) return "its unpushed branch";
+}
 
 /** The role to review the job's PR, unless it is a review or a fix of one, or has one already. */
 export function reviewerOf(job: Job, snapshot: Snapshot) {
@@ -114,7 +119,7 @@ export function Result({
       <Button {...props}>{label}</Button>
     );
   };
-  const retry = job.state === "failed" && (
+  const retry = (job.state === "failed" || (job.image && job.state === "done")) && (
     <Button
       variant="outline"
       size="sm"
@@ -122,15 +127,16 @@ export function Result({
       onClick={() => act(() => api.retry(job.id))}
     >
       <RotateCcwIcon data-icon="inline-start" />
-      Retry
+      {job.image ? "Generate again" : "Retry"}
     </Button>
   );
+  const loses = dismissLoses(job);
   const dismiss = async () => {
     if (
-      hasBranch(job) &&
+      loses &&
       !(await confirm({
         title: "Dismiss this result?",
-        description: "Its unpushed branch is deleted too.",
+        description: `This deletes ${loses} too.`,
         action: "Dismiss",
         destructive: true,
       }))
@@ -214,7 +220,9 @@ export function Result({
           ) : null}
         </span>
       }
-      below={ask && <Answer job={job} question={ask} act={act} />}
+      below={
+        ask ? <Answer job={job} question={ask} act={act} /> : job.image && <Thumbnails job={job} />
+      }
     >
       {primaryButton("outline")}
       {retry}
@@ -234,8 +242,8 @@ export function Result({
             <XIcon aria-hidden="true" />
           </TooltipTrigger>
           <TooltipContent>
-            {job.attempts.some((attempt) => attempt.branch)
-              ? "Dismiss: hide from results and delete its unpushed branch"
+            {loses
+              ? `Dismiss: hide from results and delete ${loses}`
               : "Dismiss: hide from results, its PR stays as it is"}
           </TooltipContent>
         </Tooltip>
@@ -296,7 +304,10 @@ function Facts({
             {last.error.split("\n")[0]}
           </span>
         )
-      : !url && job.state === "done" && (result?.text ?? "nothing to change");
+      : job.image
+        ? job.state === "done" &&
+          `${job.attempts.flatMap((attempt) => attempt.images ?? []).length} images`
+        : !url && job.state === "done" && (result?.text ?? "nothing to change");
   return (
     <span className="min-w-0 truncate">
       {[...facts, last && agentName(last.agent), last && clock(last.end), text]

@@ -1,14 +1,11 @@
-import { useState, type ClipboardEvent } from "react";
-import { ImagePlusIcon, RotateCcwIcon, Trash2Icon, XIcon } from "lucide-react";
+import { createContext, useContext, useState, type ClipboardEvent } from "react";
+import { ImagePlusIcon, XIcon } from "lucide-react";
 import { api, type Act } from "@/api";
 import { IMAGE_AGENT } from "@/backend/agents.ts";
 import { workersOf, type Job, type MadeImage, type Snapshot } from "@/backend/types.ts";
 import type { AgentImage } from "@/components/soleone/agent";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/tooltip/tooltip";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
@@ -19,63 +16,104 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { AnchoredDialogContent } from "@/components/variants/dialog";
-import { confirm } from "@/Confirm";
-import { ago, repoName } from "@/format";
+import { repoName } from "@/format";
 
 const NO_PROJECT = "none";
 const imageUrl = (job: Job, file: string) => `/images/${job.id}/${file}`;
 /** Every image the job's attempts made, oldest first. */
 const madeBy = (job: Job) => job.attempts.flatMap((attempt) => attempt.images ?? []);
 
-/** What image jobs made: generated outside every repo, to pick from. */
-export function ImagesView({
-  snapshot,
-  act,
-  onReference,
-}: {
-  snapshot: Snapshot;
-  act: Act;
-  /** Starts a new image job with this one as a reference. */
-  onReference: (image: AgentImage) => void;
-}) {
-  const [shown, setShown] = useState<{ job: Job; file: string }>();
-  const job = shown && snapshot.images.find((each) => each.id === shown.job.id);
+/** Starts a new image job with this image as a reference; absent where Add work isn't at hand. */
+export const UseAsReference = createContext<((image: AgentImage) => void) | undefined>(undefined);
+
+/** A result row's look at what an image job made: its latest images, small. */
+export function Thumbnails({ job }: { job: Job }) {
+  const latest = job.attempts.findLast((attempt) => attempt.images?.length)?.images ?? [];
+  if (latest.length === 0) return null;
+  return (
+    <div className="flex gap-1.5 pt-1.5">
+      {latest.map((image) => (
+        <img
+          key={image.file}
+          src={imageUrl(job, image.file)}
+          alt={image.name}
+          loading="lazy"
+          className="size-14 rounded-md border object-cover"
+        />
+      ))}
+    </div>
+  );
+}
+
+/** Everything an image job made, by what it shows, each opening large. */
+export function Gallery({ job, act }: { job: Job; act: Act }) {
+  const [shown, setShown] = useState<string>();
+  const onReference = useContext(UseAsReference);
+  const { variants } = job.image!;
+  const brief = job.attempts.findLast((attempt) => attempt.brief)?.brief;
+  const groups = new Map<string, MadeImage[]>();
+  for (const image of madeBy(job))
+    groups.set(image.name, [...(groups.get(image.name) ?? []), image]);
 
   return (
-    <div className="flex flex-col gap-6 pt-2">
-      {snapshot.images.length === 0 ? (
-        <Empty>
-          <EmptyHeader>
-            <EmptyTitle>No images yet</EmptyTitle>
-            <EmptyDescription>Queue an image job under Add work, Image.</EmptyDescription>
-          </EmptyHeader>
-        </Empty>
-      ) : (
-        snapshot.images.map((each) => (
-          <ImageJob
-            key={each.id}
-            job={each}
-            act={act}
-            onOpen={(file) => setShown({ job: each, file })}
-          />
-        ))
+    <div className="flex flex-col gap-4 pb-3">
+      {brief && (
+        <details className="text-sm">
+          <summary className="cursor-pointer text-muted-foreground">Expanded prompt</summary>
+          <p className="mt-2 whitespace-pre-line">{brief}</p>
+        </details>
       )}
-      <Dialog open={job !== undefined} onOpenChange={(open) => !open && setShown(undefined)}>
-        {job && shown && (
+      {job.state === "running" && (
+        <div className="flex flex-wrap gap-2">
+          {Array.from({ length: variants }, (_, index) => (
+            <Skeleton key={index} className="size-40" />
+          ))}
+        </div>
+      )}
+      {groups.size === 0 && job.state !== "running" && (
+        <p className="text-sm text-muted-foreground">No images yet.</p>
+      )}
+      {[...groups].map(([name, images]) => (
+        <div key={name} className="flex flex-col gap-1.5">
+          {name && groups.size > 1 && <p className="text-xs text-muted-foreground">{name}</p>}
+          <div className="flex flex-wrap gap-2">
+            {images.map((image) => (
+              <button
+                key={image.file}
+                type="button"
+                className="overflow-hidden rounded-lg border focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                aria-label={`Open ${name || image.file}`}
+                onClick={() => setShown(image.file)}
+              >
+                <img
+                  src={imageUrl(job, image.file)}
+                  alt={name}
+                  loading="lazy"
+                  className="size-40 object-cover"
+                />
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+      <Dialog open={shown !== undefined} onOpenChange={(open) => !open && setShown(undefined)}>
+        {shown && (
           <ImageDialog
-            key={`${job.id}/${shown.file}`}
+            key={shown}
             job={job}
-            file={shown.file}
+            file={shown}
             act={act}
-            onReference={async () => {
-              onReference(await fetchImage(imageUrl(job, shown.file)));
-              setShown(undefined);
-            }}
+            onReference={
+              onReference &&
+              (async () => {
+                onReference(await fetchImage(imageUrl(job, shown)));
+                setShown(undefined);
+              })
+            }
           />
         )}
       </Dialog>
@@ -140,8 +178,7 @@ export function ImageForm({
   return (
     <div className="flex flex-col gap-6">
       <p className="text-sm text-muted-foreground">
-        Images from codex, kept outside the repo until you add one. They show under Results, Images.{" "}
-        {when}
+        Images from codex, kept outside the repo until you add one. They show under Results. {when}
       </p>
       <FieldGroup>
         <Field>
@@ -233,126 +270,6 @@ export function ImageForm({
   );
 }
 
-function ImageJob({ job, act, onOpen }: { job: Job; act: Act; onOpen: (file: string) => void }) {
-  const { variants } = job.image!;
-  const brief = job.attempts.findLast((attempt) => attempt.brief)?.brief;
-  const error = job.state === "failed" ? job.attempts.at(-1)?.error : undefined;
-  const groups = new Map<string, MadeImage[]>();
-  for (const image of madeBy(job))
-    groups.set(image.name, [...(groups.get(image.name) ?? []), image]);
-  const remove = async () => {
-    if (
-      await confirm({
-        title: "Delete these images?",
-        description: "The job and every image it made are deleted.",
-        action: "Delete",
-        destructive: true,
-      })
-    )
-      await act(() => api.remove(job.id));
-  };
-
-  return (
-    <section className="flex flex-col gap-3">
-      <div className="flex items-start gap-2">
-        <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <p className="line-clamp-3 text-sm whitespace-pre-line">{job.prompt}</p>
-          <p className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            <StateBadge job={job} />
-            {job.item.repo && <span>{repoName(job.item.repo)}</span>}
-            <span>{ago(job.added)}</span>
-            {variants > 1 && <span>{variants} variants each</span>}
-          </p>
-        </div>
-        {(job.state === "done" || job.state === "failed") && (
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label="Generate again"
-                  onClick={() => act(() => api.retry(job.id))}
-                />
-              }
-            >
-              <RotateCcwIcon />
-            </TooltipTrigger>
-            <TooltipContent>Generate again</TooltipContent>
-          </Tooltip>
-        )}
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label="Delete"
-                disabled={job.state === "running"}
-                onClick={remove}
-              />
-            }
-          >
-            <Trash2Icon />
-          </TooltipTrigger>
-          <TooltipContent>Delete</TooltipContent>
-        </Tooltip>
-      </div>
-      {error && (
-        <p className="text-sm wrap-anywhere whitespace-pre-line text-destructive">{error}</p>
-      )}
-      {brief && (
-        <details className="text-sm">
-          <summary className="cursor-pointer text-muted-foreground">Expanded prompt</summary>
-          <p className="mt-2 whitespace-pre-line">{brief}</p>
-        </details>
-      )}
-      {job.state === "running" && (
-        <div className="flex flex-wrap gap-2">
-          {Array.from({ length: variants }, (_, index) => (
-            <Skeleton key={index} className="size-40" />
-          ))}
-        </div>
-      )}
-      {[...groups].map(([name, images]) => (
-        <div key={name} className="flex flex-col gap-1.5">
-          {name && groups.size > 1 && <p className="text-xs text-muted-foreground">{name}</p>}
-          <div className="flex flex-wrap gap-2">
-            {images.map((image) => (
-              <button
-                key={image.file}
-                type="button"
-                className="overflow-hidden rounded-lg border focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-                aria-label={`Open ${name || image.file}`}
-                onClick={() => onOpen(image.file)}
-              >
-                <img
-                  src={imageUrl(job, image.file)}
-                  alt={name}
-                  loading="lazy"
-                  className="size-40 object-cover"
-                />
-              </button>
-            ))}
-          </div>
-        </div>
-      ))}
-    </section>
-  );
-}
-
-function StateBadge({ job }: { job: Job }) {
-  if (job.state === "running")
-    return (
-      <Badge variant="outline">
-        <Spinner /> generating
-      </Badge>
-    );
-  if (job.state === "queued") return <Badge variant="outline">queued</Badge>;
-  if (job.state === "failed") return <Badge variant="destructive">failed</Badge>;
-  return null;
-}
-
 /** One image large, with what to do with it: open it, reuse it as a reference, or add it to the project. */
 function ImageDialog({
   job,
@@ -363,7 +280,7 @@ function ImageDialog({
   job: Job;
   file: string;
   act: Act;
-  onReference: () => Promise<void>;
+  onReference?: () => Promise<void>;
 }) {
   const image = madeBy(job).find((each) => each.file === file);
   const [where, setWhere] = useState("");
@@ -382,9 +299,11 @@ function ImageDialog({
         />
       </a>
       <div className="flex flex-wrap items-center gap-2">
-        <Button variant="outline" onClick={() => act(onReference)}>
-          Use as reference
-        </Button>
+        {onReference && (
+          <Button variant="outline" onClick={() => act(onReference)}>
+            Use as reference
+          </Button>
+        )}
         <Button
           variant="outline"
           render={<a href={imageUrl(job, file)} download={`${job.id}-${file}`} />}

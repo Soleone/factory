@@ -14,6 +14,7 @@ import { Answer, Outcome } from "@/JobNotes";
 import { PrBody, PrDiff, usePrDetails } from "@/PrReview";
 import { PrLine, TrainLine } from "@/PullRequest";
 import { About, AssumeAnswer, StateIcon, Task, TaskHeader, taskState } from "@/TaskDetails";
+import { Gallery } from "@/Images";
 import { TierBadge } from "@/TierBadge";
 
 /**
@@ -40,9 +41,17 @@ export function JobDetails({
   const pr = url ? snapshot.prs[url] : undefined;
   const entries = jobEntries(job);
   const asked = job.state === "blocked";
-  const tabs = ["summary", "prompt", "log", ...(pr ? ["description", "diff"] : [])];
+  const tabs = [
+    ...(job.image ? ["images"] : []),
+    "summary",
+    "prompt",
+    "log",
+    ...(pr ? ["description", "diff"] : []),
+  ];
   // A running job has nothing to sum up yet, so it opens on what it's doing.
-  const [tab, setTab] = useState(job.state === "running" ? "log" : "summary");
+  const [tab, setTab] = useState(
+    job.image ? "images" : job.state === "running" ? "log" : "summary",
+  );
   const details = usePrDetails(job.id, tab === "description" || tab === "diff");
 
   useEffect(() => {
@@ -71,6 +80,7 @@ export function JobDetails({
       <Tabs className="min-h-0 flex-1" value={tab} onValueChange={setTab}>
         <div className="flex items-center gap-3 border-b">
           <TabsList variant="line">
+            {job.image && <TabsTrigger value="images">Images</TabsTrigger>}
             <TabsTrigger value="summary">
               Summary
               {asked && (
@@ -95,6 +105,9 @@ export function JobDetails({
             <Kbd>1</Kbd>–<Kbd>{tabs.length}</Kbd> to switch
           </span>
         </div>
+        <ScrollingTabsContent value="images">
+          {job.image && <Gallery job={job} act={act} />}
+        </ScrollingTabsContent>
         <ScrollingTabsContent value="summary">
           <Summary job={job} snapshot={snapshot} act={act} />
           <About item={item} blueprint={blueprint} />

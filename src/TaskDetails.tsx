@@ -115,7 +115,7 @@ export function StatePill({ state, label }: { state: TaskState; label?: string }
  */
 export function taskState(job: Job | undefined, prs: Snapshot["prs"]): TaskState {
   if (!job) return "candidate";
-  if (job.state !== "done") return job.state;
+  if (job.state !== "done" || job.image) return job.state;
   const url = prUrl(job);
   if (!url) return job.goal || job.of || job.attempts.at(-1)?.branch ? "done" : "unchanged";
   const pr = prs[url]?.state;

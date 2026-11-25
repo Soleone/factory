@@ -71,10 +71,10 @@ On the page, everything that waits on you collects in the **Inbox**, which the p
 
 Add work → Image queues image jobs: prompts for `codex exec` and its built-in image_gen. They wait in the queue like any job and run on **codex workers** (Settings → Workers, agent Codex), which take image jobs and nothing else, so they run overnight with the rest. A codex worker counts against the `openai-codex` pool, the same ChatGPT account as pi's openai-codex workers: a usage limit puts the job back and the worker sleeps until the reset, and a reserve on `openai-codex` holds it too. Pasting into the prompt adds reference images.
 
-- **Project:** with one picked, codex reads it for context and existing images to match, in a read-only sandbox. The images never go into the repo: each job's images stay in `images/<job id>/` in the state folder. Generate again runs a done job once more and adds its images to the ones before.
+- **Project:** with one picked, codex reads it for context and existing images to match, in a read-only sandbox. The images never go into the repo: each job's images stay in `images/<job id>/` in the state folder. Generate again adds its new images to the ones before.
 - **Expand the prompt first** (on by default) has codex write a full brief from a short prompt and generate from that; the page shows the brief. Settings → Images changes how it expands.
 - **Variants of each:** a prompt can ask for several images; this many of each come back, to pick from.
-- **Results → Images** shows what each job made. An image opens large, to download, use as a reference for the next prompt, or, in a project, queue a grunt job that copies it in and opens a PR.
+- **In Results** an image job is a row like any other, with its latest images small; its pop-up opens on all of them, and Generate again runs it once more. Dismissing it deletes its images. An image opens large, to download, use as a reference for the next prompt, or, in a project, queue a grunt job that copies it in and opens a PR.
 
 ## Live Agent
 

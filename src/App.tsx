@@ -36,7 +36,7 @@ import { inbox } from "@/inbox";
 import { NewGoalForm } from "@/NewGoalForm";
 import { NewJobForm } from "@/NewJobForm";
 import { InboxView } from "@/InboxView";
-import { ImageForm, ImagesView } from "@/ImagesView";
+import { ImageForm, UseAsReference } from "@/Images";
 import type { AgentImage } from "@/components/soleone/agent";
 
 // Links from before the tabs were merged still open what they named, before any view reads the query.
@@ -44,10 +44,10 @@ const old = new URLSearchParams(location.search).get("tab");
 if (old === "candidates" || old === "blueprints") {
   setQueryParam("tab", "queue");
   setQueryParam("add", old);
-} else if (old === "activity" || old === "images") {
+} else if (old === "activity") {
   setQueryParam("tab", "results");
-  setQueryParam("view", old);
-}
+  setQueryParam("view", "activity");
+} else if (old === "images") setQueryParam("tab", "results");
 
 export function App() {
   const { snapshot, error, dismiss, act } = useFactory();
@@ -169,180 +169,181 @@ function Factory({
           .join(" · ")
       : "";
 
+  const useAsReference = (image: AgentImage) => {
+    setReferences([...references, image]);
+    setAdding("image");
+  };
+
   return (
-    <div className="mx-auto flex min-h-svh w-full max-w-5xl flex-col gap-6 p-4">
-      <header className="flex flex-wrap items-center gap-x-4 gap-y-3">
-        <div className="flex flex-1 items-center gap-2">
-          <h1 className="flex items-center gap-2 font-heading text-xl font-semibold">
-            <Logo working={on} />
-            Factory
-          </h1>
-          {on ? <AccentBadge>on</AccentBadge> : <Badge variant="outline">off</Badge>}
-          {Object.entries(snapshot.usage).map(([pool, usage]) => (
-            <UsageRing
-              key={pool}
-              provider={pool === "openai-codex" ? "openai" : "claude"}
-              fiveHour={left(usage.fiveHour)}
-              sevenDay={left(usage.sevenDay)}
-              asOf={staleAt(usage.at)}
-            />
-          ))}
-          <span className="text-sm text-muted-foreground">{run}</span>
-        </div>
-        <Controls snapshot={snapshot} act={act} />
-        <Button ref={cloneTrigger} variant="outline" size="sm" onClick={() => setCloneOpen(true)}>
-          <GitForkIcon /> Clone
-        </Button>
-        <div className="flex items-center gap-1">
-          <ThemePicker />
-          <SettingsDialog snapshot={snapshot} act={act} />
-        </div>
-      </header>
-      {error && (
-        <div role="alert" className="flex items-start gap-2 text-sm text-destructive">
-          <p className="flex-1 wrap-anywhere whitespace-pre-line">{error}</p>
-          <Button variant="ghost" size="icon-xs" aria-label="Dismiss" onClick={onDismiss}>
-            <XIcon />
-          </Button>
-        </div>
-      )}
-      <Tabs value={tab} onValueChange={setTab}>
-        <div className="flex items-center gap-2">
-          {/* The tabs don't fit a phone; they scroll on their own rather than the page. */}
-          <div className="min-w-0 overflow-x-auto overflow-y-hidden">
-            <TabsList>
-              <Tab value="inbox">
-                Inbox
-                {stopped.length > 0 ? (
-                  <AccentBadge>{stopped.length + ready.length}</AccentBadge>
-                ) : (
-                  <Count n={ready.length} />
-                )}
-              </Tab>
-              <Tab value="queue">
-                Queue <Count n={lined} />
-              </Tab>
-              <Tab value="goals">
-                Goals <Count n={goals} />
-              </Tab>
-              <Tab value="results">Results</Tab>
-            </TabsList>
+    <UseAsReference value={useAsReference}>
+      <div className="mx-auto flex min-h-svh w-full max-w-5xl flex-col gap-6 p-4">
+        <header className="flex flex-wrap items-center gap-x-4 gap-y-3">
+          <div className="flex flex-1 items-center gap-2">
+            <h1 className="flex items-center gap-2 font-heading text-xl font-semibold">
+              <Logo working={on} />
+              Factory
+            </h1>
+            {on ? <AccentBadge>on</AccentBadge> : <Badge variant="outline">off</Badge>}
+            {Object.entries(snapshot.usage).map(([pool, usage]) => (
+              <UsageRing
+                key={pool}
+                provider={pool === "openai-codex" ? "openai" : "claude"}
+                fiveHour={left(usage.fiveHour)}
+                sevenDay={left(usage.sevenDay)}
+                asOf={staleAt(usage.at)}
+              />
+            ))}
+            <span className="text-sm text-muted-foreground">{run}</span>
           </div>
-          <Button variant="outline" size="sm" className="ml-auto" onClick={() => setAdding("job")}>
-            <PlusIcon /> Add work
+          <Controls snapshot={snapshot} act={act} />
+          <Button ref={cloneTrigger} variant="outline" size="sm" onClick={() => setCloneOpen(true)}>
+            <GitForkIcon /> Clone
           </Button>
-        </div>
-        <TabsContent value="inbox">
-          <InboxView
-            snapshot={snapshot}
-            act={act}
-            onAsk={ask}
-            onOpenGoal={(id) => {
-              setQueryParam("goal", id);
-              setTab("goals");
-            }}
-          />
-        </TabsContent>
-        <TabsContent value="queue">
-          <QueueView snapshot={snapshot} act={act} onAdd={setAdding} />
-        </TabsContent>
-        <TabsContent value="goals">
-          <GoalsView snapshot={snapshot} act={act} />
-        </TabsContent>
-        <TabsContent value="results">
-          <div className="pt-2">
-            <Tabs value={view} onValueChange={setView}>
-              <TabsList variant="line">
-                <TabsTrigger value="results">Results</TabsTrigger>
-                <TabsTrigger value="activity">Activity</TabsTrigger>
-                <TabsTrigger value="images">Images</TabsTrigger>
+          <div className="flex items-center gap-1">
+            <ThemePicker />
+            <SettingsDialog snapshot={snapshot} act={act} />
+          </div>
+        </header>
+        {error && (
+          <div role="alert" className="flex items-start gap-2 text-sm text-destructive">
+            <p className="flex-1 wrap-anywhere whitespace-pre-line">{error}</p>
+            <Button variant="ghost" size="icon-xs" aria-label="Dismiss" onClick={onDismiss}>
+              <XIcon />
+            </Button>
+          </div>
+        )}
+        <Tabs value={tab} onValueChange={setTab}>
+          <div className="flex items-center gap-2">
+            {/* The tabs don't fit a phone; they scroll on their own rather than the page. */}
+            <div className="min-w-0 overflow-x-auto overflow-y-hidden">
+              <TabsList>
+                <Tab value="inbox">
+                  Inbox
+                  {stopped.length > 0 ? (
+                    <AccentBadge>{stopped.length + ready.length}</AccentBadge>
+                  ) : (
+                    <Count n={ready.length} />
+                  )}
+                </Tab>
+                <Tab value="queue">
+                  Queue <Count n={lined} />
+                </Tab>
+                <Tab value="goals">
+                  Goals <Count n={goals} />
+                </Tab>
+                <Tab value="results">Results</Tab>
               </TabsList>
-              <TabsContent value="results">
-                <ResultsView
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="ml-auto"
+              onClick={() => setAdding("job")}
+            >
+              <PlusIcon /> Add work
+            </Button>
+          </div>
+          <TabsContent value="inbox">
+            <InboxView
+              snapshot={snapshot}
+              act={act}
+              onAsk={ask}
+              onOpenGoal={(id) => {
+                setQueryParam("goal", id);
+                setTab("goals");
+              }}
+            />
+          </TabsContent>
+          <TabsContent value="queue">
+            <QueueView snapshot={snapshot} act={act} onAdd={setAdding} />
+          </TabsContent>
+          <TabsContent value="goals">
+            <GoalsView snapshot={snapshot} act={act} />
+          </TabsContent>
+          <TabsContent value="results">
+            <div className="pt-2">
+              <Tabs value={view} onValueChange={setView}>
+                <TabsList variant="line">
+                  <TabsTrigger value="results">Results</TabsTrigger>
+                  <TabsTrigger value="activity">Activity</TabsTrigger>
+                </TabsList>
+                <TabsContent value="results">
+                  <ResultsView
+                    snapshot={snapshot}
+                    act={act}
+                    onAsk={ask}
+                    projects={projects}
+                    project={project}
+                    onProjectChange={setProject}
+                  />
+                </TabsContent>
+                <TabsContent value="activity">
+                  <ActivityView snapshot={snapshot} act={act} />
+                </TabsContent>
+              </Tabs>
+            </div>
+          </TabsContent>
+        </Tabs>
+        <CloneDialog
+          act={act}
+          open={cloneOpen}
+          onOpenChange={setCloneOpen}
+          onCloned={() => setProjectRefresh((current) => current + 1)}
+          finalFocus={cloneTrigger}
+        />
+        <Dialog open={adding !== ""} onOpenChange={(open) => !open && setAdding("")}>
+          <TabbedDialogContent className="sm:max-w-3xl">
+            <DialogHeader>
+              <DialogTitle>Add work</DialogTitle>
+            </DialogHeader>
+            <Tabs className="min-h-0" value={adding} onValueChange={setAdding}>
+              <TabsList variant="line">
+                <TabsTrigger value="job">Job</TabsTrigger>
+                <TabsTrigger value="goal">Goal</TabsTrigger>
+                <TabsTrigger value="image">Image</TabsTrigger>
+                <TabsTrigger value="candidates">Candidates</TabsTrigger>
+                <TabsTrigger value="blueprints">Blueprints</TabsTrigger>
+              </TabsList>
+              <ScrollingTabsContent value="goal">
+                <NewGoalForm
+                  act={act}
+                  onCreated={(id) => {
+                    setAdding("");
+                    setQueryParam("goal", id);
+                    setTab("goals");
+                  }}
+                />
+              </ScrollingTabsContent>
+              <ScrollingTabsContent value="candidates" className="flex flex-col overflow-hidden">
+                <CandidatesView
                   snapshot={snapshot}
                   act={act}
-                  onAsk={ask}
                   projects={projects}
                   project={project}
                   onProjectChange={setProject}
                 />
-              </TabsContent>
-              <TabsContent value="activity">
-                <ActivityView snapshot={snapshot} act={act} />
-              </TabsContent>
-              <TabsContent value="images">
-                <ImagesView
+              </ScrollingTabsContent>
+              <ScrollingTabsContent value="job">
+                <NewJobForm act={act} onQueued={() => setAdding("")} />
+              </ScrollingTabsContent>
+              <ScrollingTabsContent value="image">
+                <ImageForm
                   snapshot={snapshot}
                   act={act}
-                  onReference={(image) => {
-                    setReferences([...references, image]);
-                    setAdding("image");
-                  }}
+                  projects={projects}
+                  references={references}
+                  onReferencesChange={setReferences}
+                  onQueued={() => setAdding("")}
                 />
-              </TabsContent>
+              </ScrollingTabsContent>
+              <ScrollingTabsContent value="blueprints">
+                <BlueprintsView act={act} />
+              </ScrollingTabsContent>
             </Tabs>
-          </div>
-        </TabsContent>
-      </Tabs>
-      <CloneDialog
-        act={act}
-        open={cloneOpen}
-        onOpenChange={setCloneOpen}
-        onCloned={() => setProjectRefresh((current) => current + 1)}
-        finalFocus={cloneTrigger}
-      />
-      <Dialog open={adding !== ""} onOpenChange={(open) => !open && setAdding("")}>
-        <TabbedDialogContent className="sm:max-w-3xl">
-          <DialogHeader>
-            <DialogTitle>Add work</DialogTitle>
-          </DialogHeader>
-          <Tabs className="min-h-0" value={adding} onValueChange={setAdding}>
-            <TabsList variant="line">
-              <TabsTrigger value="job">Job</TabsTrigger>
-              <TabsTrigger value="goal">Goal</TabsTrigger>
-              <TabsTrigger value="image">Image</TabsTrigger>
-              <TabsTrigger value="candidates">Candidates</TabsTrigger>
-              <TabsTrigger value="blueprints">Blueprints</TabsTrigger>
-            </TabsList>
-            <ScrollingTabsContent value="goal">
-              <NewGoalForm
-                act={act}
-                onCreated={(id) => {
-                  setAdding("");
-                  setQueryParam("goal", id);
-                  setTab("goals");
-                }}
-              />
-            </ScrollingTabsContent>
-            <ScrollingTabsContent value="candidates" className="flex flex-col overflow-hidden">
-              <CandidatesView
-                snapshot={snapshot}
-                act={act}
-                projects={projects}
-                project={project}
-                onProjectChange={setProject}
-              />
-            </ScrollingTabsContent>
-            <ScrollingTabsContent value="job">
-              <NewJobForm act={act} onQueued={() => setAdding("")} />
-            </ScrollingTabsContent>
-            <ScrollingTabsContent value="image">
-              <ImageForm
-                snapshot={snapshot}
-                act={act}
-                projects={projects}
-                references={references}
-                onReferencesChange={setReferences}
-                onQueued={() => setAdding("")}
-              />
-            </ScrollingTabsContent>
-            <ScrollingTabsContent value="blueprints">
-              <BlueprintsView act={act} />
-            </ScrollingTabsContent>
-          </Tabs>
-        </TabbedDialogContent>
-      </Dialog>
-    </div>
+          </TabbedDialogContent>
+        </Dialog>
+      </div>
+    </UseAsReference>
   );
 }
 

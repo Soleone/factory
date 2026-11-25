@@ -390,8 +390,6 @@ export type Snapshot = JobContext & {
   train: Record<string, TrainCar>;
   /** The last good usage read of each pool a run works on, by pool; a pool never read is missing. */
   usage: Record<string, ReadUsage>;
-  /** Image jobs of every state but removed, newest first, finished ones included. */
-  images: Job[];
 };
 
 export type ResultsPage = JobContext &

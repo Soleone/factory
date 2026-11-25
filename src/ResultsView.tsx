@@ -12,7 +12,7 @@ import { RowGroup } from "@/components/variants/item";
 import { ProjectsFilter } from "@/ProjectsFilter";
 import { itemTitle } from "@/format";
 import { canBoard, MergeButton, mergeTrain } from "@/PullRequest";
-import { canDismiss, hasBranch, Result, reviewerOf } from "@/Result";
+import { canDismiss, dismissLoses, Result, reviewerOf } from "@/Result";
 import { Spinner } from "@/components/ui/spinner";
 
 /** Keep the previous window while appending; never apply a response from an old filter. */
@@ -227,10 +227,10 @@ export function ResultsView({
 
   const dismissSelected = async () => {
     if (
-      selection.some(hasBranch) &&
+      selection.some(dismissLoses) &&
       !(await confirm({
         title: "Dismiss selected results?",
-        description: "Their unpushed branches are deleted too.",
+        description: "This deletes their unpushed branches and images too.",
         action: "Dismiss",
         destructive: true,
       }))
