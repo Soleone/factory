@@ -169,7 +169,8 @@ function Pool({ status, presets }: { status: Status | null; presets: Preset[] })
 }
 
 /** A job a worker has now, with the worker on it and what it does. */
-function Running({ worker, job, title }: { worker: Worker; job: Job; title: ReactNode }) {
+/** Without a worker the factory is off: the agent keeps working and the next run records it. */
+function Running({ worker, job, title }: { worker?: Worker; job: Job; title: ReactNode }) {
   const step = job.notes.findLast(
     (note) => note.kind === "step" && note.attempt === job.attempts.length + 1,
   );
@@ -180,22 +181,26 @@ function Running({ worker, job, title }: { worker: Worker; job: Job; title: Reac
       title={title}
       meta={
         <span className="flex flex-col gap-1">
-          <span className="flex flex-wrap items-center gap-2">
-            <WorkerName of={worker} />
-            {[
-              `${minutesSince(worker.since)} min`,
-              worker.context && `${Math.round(worker.context / 1000)}k context`,
-            ]
-              .filter(Boolean)
-              .join(" · ")}
-          </span>
+          {worker ? (
+            <span className="flex flex-wrap items-center gap-2">
+              <WorkerName of={worker} />
+              {[
+                `${minutesSince(worker.since)} min`,
+                worker.context && `${Math.round(worker.context / 1000)}k context`,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </span>
+          ) : (
+            <span>Still working while the factory is off; turn it on to pick it back up.</span>
+          )}
           {step && (
             <span className="text-foreground">
               {step.text}
               {step.of ? ` (${step.done ?? 0}/${step.of})` : ""}
             </span>
           )}
-          {worker.activity && <span>{worker.activity}</span>}
+          {worker?.activity && <span>{worker.activity}</span>}
           {said && (
             <span>
               {clock(said.at)} {said.kind}: {said.text}
@@ -296,7 +301,14 @@ export function QueueView({
     </Tooltip>
   );
 
-  const running = on && status ? status.workers.filter((worker) => worker.job) : [];
+  // Off, the agents it handed off keep working with no worker to show.
+  const running =
+    on && status
+      ? status.workers.flatMap((worker) => {
+          const job = worker.job && byId.get(worker.job);
+          return job ? [{ worker, job }] : [];
+        })
+      : jobs.filter((job) => job.state === "running").map((job) => ({ worker: undefined, job }));
 
   return (
     <div className="grid gap-8 pt-2 lg:grid-cols-[1fr_15rem]">
@@ -305,19 +317,9 @@ export function QueueView({
         {running.length > 0 && (
           <Section title={`Running (${running.length})`}>
             <RowGroup>
-              {running.map((worker) => {
-                const job = byId.get(worker.job!);
-                return (
-                  job && (
-                    <Running
-                      key={worker.id}
-                      worker={worker}
-                      job={job}
-                      title={details(job, false)}
-                    />
-                  )
-                );
-              })}
+              {running.map(({ worker, job }) => (
+                <Running key={job.id} worker={worker} job={job} title={details(job, false)} />
+              ))}
             </RowGroup>
           </Section>
         )}
