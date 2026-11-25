@@ -12,7 +12,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, join } from "node:path";
-import { agent as makeAgent, classify, resetTime, type Agent } from "./agents.ts";
+import { agent as makeAgent, classify, IMAGE_AGENT, resetTime, type Agent } from "./agents.ts";
+import { generate, type Generated } from "./images.ts";
 import {
   GitIdentityError,
   keepWork,
@@ -310,7 +311,12 @@ export async function run(options: RunOptions): Promise<string> {
   const free = (preset: string, self: Worker) =>
     slots.some(({ worker }) => worker.preset === preset && available(worker, self));
   const usable = (preset: string) =>
-    slots.some(({ worker }) => worker.preset === preset && !pools.get(worker.pool)!.stopped);
+    slots.some(
+      ({ worker }) =>
+        worker.preset === preset &&
+        worker.agent !== IMAGE_AGENT &&
+        !pools.get(worker.pool)!.stopped,
+    );
 
   /**
    * Which preset a tiered job runs on: the first in its tier's list (then higher tiers' when its goal
@@ -331,6 +337,8 @@ export async function run(options: RunOptions): Promise<string> {
     const jobs = readJobs(state);
     for (const job of jobs) {
       if (!ready(job, jobs)) continue;
+      // Codex workers make images and nothing else, and only they do.
+      if ((worker.agent === IMAGE_AGENT) !== Boolean(job.image)) continue;
       if (job.open) {
         // A paused attempt goes on with its own session, so only its preset can take it, or its
         // agent when this run doesn't have that preset.
@@ -397,9 +405,11 @@ export async function run(options: RunOptions): Promise<string> {
         set(worker, { state: "working", job: job.id });
         log(`${worker.id} starts ${job.id}: ${job.item.label} ${job.item.id}`);
         const taken = job;
-        result = await attempt(slot, job, readLive(state, job.id)).catch((error: Error) =>
-          broke(taken, error),
-        );
+        result = job.image
+          ? await imageAttempt(slot, job)
+          : await attempt(slot, job, readLive(state, job.id)).catch((error: Error) =>
+              broke(taken, error),
+            );
       }
       if (!result) {
         // The run stopped: before the agent started the job goes back; a running agent is handed off.
@@ -410,10 +420,12 @@ export async function run(options: RunOptions): Promise<string> {
       // Hold the pool before putting the job back where any eligible worker can see it.
       if (result.paused === "limited") hitLimit(pool, result.text);
       if (result.paused && result.rejected) {
-        const worktree = readLive(state, job.id)!.worktree;
-        await release(worktree).catch((error: Error) =>
-          log(`can't release ${worktree}: ${error.message.trim().split("\n")[0]}`),
-        );
+        // An image job has no worktree.
+        const worktree = readLive(state, job.id)?.worktree;
+        if (worktree)
+          await release(worktree).catch((error: Error) =>
+            log(`can't release ${worktree}: ${error.message.trim().split("\n")[0]}`),
+          );
         rmSync(livePath(state, job.id), { force: true });
         record(state, {
           type: "attempt",
@@ -607,6 +619,49 @@ export async function run(options: RunOptions): Promise<string> {
       live = nextTurn(live, problem);
       writeLive(state, job.id, live);
     }
+  }
+
+  /**
+   * An image job's attempt: one codex run, without a worktree or session. A limit puts the job back
+   * for after the reset. Undefined when the run stopped first; the job then goes back too.
+   */
+  async function imageAttempt({ worker }: Slot, job: Job): Promise<Turned | undefined> {
+    const dir = join(runDir, `${job.id}-${job.attempts.length + 1}`);
+    mkdirSync(dir, { recursive: true });
+    const begun: Begun = {
+      run: id,
+      agent: worker.agent,
+      model: job.model ?? worker.model,
+      effort: job.effort ?? worker.effort,
+      preset: worker.preset,
+      start: new Date().toISOString(),
+      log: join(dir, "log"),
+    };
+    const stopped = new AbortController();
+    const cut = () => stopped.abort();
+    wakers.add(cut);
+    if (stopping) cut();
+    // Like broke(): one job's trouble doesn't end the run.
+    const { outcome, error, images, brief }: Generated = await generate(
+      state,
+      job,
+      begun,
+      begun.log,
+      stopped.signal,
+    )
+      .catch((error: Error) => ({ outcome: "failed" as const, error: error.message }))
+      .finally(() => wakers.delete(cut));
+    if (!outcome) return undefined;
+    const ended: Attempt = {
+      ...begun,
+      end: new Date().toISOString(),
+      outcome,
+      error,
+      images,
+      brief,
+    };
+    if (outcome === "limited") return { paused: "limited", text: error ?? "", rejected: ended };
+    return { attempt: ended, text: "" };
   }
 
   /** Sets up a new attempt: worktree, prompt, session. */

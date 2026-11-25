@@ -1,7 +1,8 @@
 import { useState, type ClipboardEvent } from "react";
 import { ImagePlusIcon, RotateCcwIcon, Trash2Icon, XIcon } from "lucide-react";
 import { api, type Act } from "@/api";
-import type { ImageRun, Snapshot } from "@/backend/types.ts";
+import { IMAGE_AGENT } from "@/backend/agents.ts";
+import { workersOf, type Job, type MadeImage, type Snapshot } from "@/backend/types.ts";
 import type { AgentImage } from "@/components/soleone/agent";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/soleone/tooltip/tooltip";
 import { Badge } from "@/components/ui/badge";
@@ -27,9 +28,11 @@ import { confirm } from "@/Confirm";
 import { ago, repoName } from "@/format";
 
 const NO_PROJECT = "none";
-const imageUrl = (run: ImageRun, file: string) => `/images/${run.id}/${file}`;
+const imageUrl = (job: Job, file: string) => `/images/${job.id}/${file}`;
+/** Every image the job's attempts made, oldest first. */
+const madeBy = (job: Job) => job.attempts.flatMap((attempt) => attempt.images ?? []);
 
-/** Image prompts for codex, and what it made of each: generated outside every repo, to pick from. */
+/** Image jobs for codex workers, and what they made: generated outside every repo, to pick from. */
 export function ImagesView({
   snapshot,
   act,
@@ -40,8 +43,16 @@ export function ImagesView({
   projects: string[];
 }) {
   const [references, setReferences] = useState<AgentImage[]>([]);
-  const [shown, setShown] = useState<{ run: ImageRun; file: string }>();
-  const run = shown && snapshot.images.find((each) => each.id === shown.run.id);
+  const [shown, setShown] = useState<{ job: Job; file: string }>();
+  const job = shown && snapshot.images.find((each) => each.id === shown.job.id);
+  const codexWorkers = snapshot.settings.presets.some(
+    (preset) => preset.agent === IMAGE_AGENT && workersOf(preset) > 0,
+  );
+  const when = !codexWorkers
+    ? "Add a codex worker under Settings, Workers to run them."
+    : snapshot.on
+      ? "A codex worker takes it from the queue."
+      : "They run while the factory is on.";
 
   return (
     <div className="flex flex-col gap-8 pt-2">
@@ -50,6 +61,7 @@ export function ImagesView({
         projects={projects}
         references={references}
         onReferencesChange={setReferences}
+        when={when}
       />
       {snapshot.images.length === 0 ? (
         <Empty>
@@ -61,24 +73,24 @@ export function ImagesView({
       ) : (
         <div className="flex flex-col gap-6">
           {snapshot.images.map((each) => (
-            <RunCard
+            <ImageJob
               key={each.id}
-              run={each}
+              job={each}
               act={act}
-              onOpen={(file) => setShown({ run: each, file })}
+              onOpen={(file) => setShown({ job: each, file })}
             />
           ))}
         </div>
       )}
-      <Dialog open={run !== undefined} onOpenChange={(open) => !open && setShown(undefined)}>
-        {run && shown && (
+      <Dialog open={job !== undefined} onOpenChange={(open) => !open && setShown(undefined)}>
+        {job && shown && (
           <ImageDialog
-            key={`${run.id}/${shown.file}`}
-            run={run}
+            key={`${job.id}/${shown.file}`}
+            job={job}
             file={shown.file}
             act={act}
             onReference={async () => {
-              setReferences([...references, await fetchImage(imageUrl(run, shown.file))]);
+              setReferences([...references, await fetchImage(imageUrl(job, shown.file))]);
               setShown(undefined);
               window.scrollTo({ top: 0, behavior: "smooth" });
             }}
@@ -94,11 +106,14 @@ function ImageForm({
   projects,
   references,
   onReferencesChange,
+  when,
 }: {
   act: Act;
   projects: string[];
   references: AgentImage[];
   onReferencesChange: (references: AgentImage[]) => void;
+  /** Whether and when a queued image runs. */
+  when: string;
 }) {
   const [repo, setRepo] = useState(NO_PROJECT);
   const [prompt, setPrompt] = useState("");
@@ -168,7 +183,7 @@ function ImageForm({
             ))}
           </div>
         )}
-        <FieldDescription>{pasteError ?? "Ctrl+Enter generates."}</FieldDescription>
+        <FieldDescription>{pasteError ?? `Ctrl+Enter queues it. ${when}`}</FieldDescription>
       </Field>
       <div className="flex flex-wrap items-end gap-x-6 gap-y-4">
         <Field className="w-56">
@@ -213,50 +228,45 @@ function ImageForm({
           <FieldLabel htmlFor="image-expand">Expand the prompt first</FieldLabel>
         </Field>
         <Button className="ml-auto" disabled={!prompt.trim()} onClick={submit}>
-          <ImagePlusIcon /> Generate
+          <ImagePlusIcon /> Queue
         </Button>
       </div>
     </FieldGroup>
   );
 }
 
-function RunCard({
-  run,
-  act,
-  onOpen,
-}: {
-  run: ImageRun;
-  act: Act;
-  onOpen: (file: string) => void;
-}) {
-  const groups = new Map<string, ImageRun["images"]>();
-  for (const image of run.images)
+function ImageJob({ job, act, onOpen }: { job: Job; act: Act; onOpen: (file: string) => void }) {
+  const { variants } = job.image!;
+  const brief = job.attempts.findLast((attempt) => attempt.brief)?.brief;
+  const error = job.state === "failed" ? job.attempts.at(-1)?.error : undefined;
+  const groups = new Map<string, MadeImage[]>();
+  for (const image of madeBy(job))
     groups.set(image.name, [...(groups.get(image.name) ?? []), image]);
   const remove = async () => {
     if (
       await confirm({
         title: "Delete these images?",
-        description: "The prompt and every image it made are deleted.",
+        description: "The job and every image it made are deleted.",
         action: "Delete",
         destructive: true,
       })
     )
-      await act(() => api.removeImages(run.id));
+      await act(() => api.remove(job.id));
   };
 
   return (
     <section className="flex flex-col gap-3">
       <div className="flex items-start gap-2">
         <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <p className="line-clamp-3 text-sm whitespace-pre-line">{run.prompt}</p>
+          <p className="line-clamp-3 text-sm whitespace-pre-line">{job.prompt}</p>
           <p className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            <StateBadge run={run} />
-            {run.repo && <span>{repoName(run.repo)}</span>}
-            <span>{ago(run.added)}</span>
-            {run.variants > 1 && <span>{run.variants} variants each</span>}
+            <StateBadge job={job} />
+            {job.item.repo && <span>{repoName(job.item.repo)}</span>}
+            <span>{ago(job.added)}</span>
+            {variants > 1 && <span>{variants} variants each</span>}
           </p>
         </div>
-        {(run.state === "done" || run.state === "failed") && (
+        {(job.state === "done" || job.state === "failed") && (
           <Tooltip>
             <TooltipTrigger
               render={
@@ -264,7 +274,7 @@ function RunCard({
                   variant="ghost"
                   size="icon-sm"
                   aria-label="Generate again"
-                  onClick={() => act(() => api.retryImages(run.id))}
+                  onClick={() => act(() => api.retry(job.id))}
                 />
               }
             >
@@ -280,7 +290,7 @@ function RunCard({
                 variant="ghost"
                 size="icon-sm"
                 aria-label="Delete"
-                disabled={run.state === "running"}
+                disabled={job.state === "running"}
                 onClick={remove}
               />
             }
@@ -290,18 +300,18 @@ function RunCard({
           <TooltipContent>Delete</TooltipContent>
         </Tooltip>
       </div>
-      {run.error && (
-        <p className="text-sm wrap-anywhere whitespace-pre-line text-destructive">{run.error}</p>
+      {error && (
+        <p className="text-sm wrap-anywhere whitespace-pre-line text-destructive">{error}</p>
       )}
-      {run.brief && (
+      {brief && (
         <details className="text-sm">
           <summary className="cursor-pointer text-muted-foreground">Expanded prompt</summary>
-          <p className="mt-2 whitespace-pre-line">{run.brief}</p>
+          <p className="mt-2 whitespace-pre-line">{brief}</p>
         </details>
       )}
-      {(run.state === "queued" || run.state === "running") && (
+      {job.state === "running" && (
         <div className="flex flex-wrap gap-2">
-          {Array.from({ length: run.variants }, (_, index) => (
+          {Array.from({ length: variants }, (_, index) => (
             <Skeleton key={index} className="size-40" />
           ))}
         </div>
@@ -319,7 +329,7 @@ function RunCard({
                 onClick={() => onOpen(image.file)}
               >
                 <img
-                  src={imageUrl(run, image.file)}
+                  src={imageUrl(job, image.file)}
                   alt={name}
                   loading="lazy"
                   className="size-40 object-cover"
@@ -333,31 +343,31 @@ function RunCard({
   );
 }
 
-function StateBadge({ run }: { run: ImageRun }) {
-  if (run.state === "running")
+function StateBadge({ job }: { job: Job }) {
+  if (job.state === "running")
     return (
       <Badge variant="outline">
         <Spinner /> generating
       </Badge>
     );
-  if (run.state === "queued") return <Badge variant="outline">queued</Badge>;
-  if (run.state === "failed") return <Badge variant="destructive">failed</Badge>;
+  if (job.state === "queued") return <Badge variant="outline">queued</Badge>;
+  if (job.state === "failed") return <Badge variant="destructive">failed</Badge>;
   return null;
 }
 
 /** One image large, with what to do with it: open it, reuse it as a reference, or add it to the project. */
 function ImageDialog({
-  run,
+  job,
   file,
   act,
   onReference,
 }: {
-  run: ImageRun;
+  job: Job;
   file: string;
   act: Act;
   onReference: () => Promise<void>;
 }) {
-  const image = run.images.find((each) => each.file === file);
+  const image = madeBy(job).find((each) => each.file === file);
   const [where, setWhere] = useState("");
   const [queued, setQueued] = useState(false);
 
@@ -366,9 +376,9 @@ function ImageDialog({
       <DialogHeader>
         <DialogTitle>{image?.name || "Image"}</DialogTitle>
       </DialogHeader>
-      <a href={imageUrl(run, file)} target="_blank" rel="noreferrer">
+      <a href={imageUrl(job, file)} target="_blank" rel="noreferrer">
         <img
-          src={imageUrl(run, file)}
+          src={imageUrl(job, file)}
           alt={image?.name ?? ""}
           className="mx-auto max-h-[60dvh] rounded-lg object-contain"
         />
@@ -379,14 +389,14 @@ function ImageDialog({
         </Button>
         <Button
           variant="outline"
-          render={<a href={imageUrl(run, file)} download={`${run.id}-${file}`} />}
+          render={<a href={imageUrl(job, file)} download={`${job.id}-${file}`} />}
         >
           Download
         </Button>
       </div>
-      {run.repo && (
+      {job.item.repo && (
         <Field>
-          <FieldLabel htmlFor="image-where">Add to {repoName(run.repo)}</FieldLabel>
+          <FieldLabel htmlFor="image-where">Add to {repoName(job.item.repo)}</FieldLabel>
           <div className="flex gap-2">
             <Input
               id="image-where"
@@ -398,7 +408,7 @@ function ImageDialog({
               disabled={queued}
               onClick={() =>
                 act(async () => {
-                  await api.useImage(run.id, file, where);
+                  await api.useImage(job.id, file, where);
                   setQueued(true);
                 })
               }

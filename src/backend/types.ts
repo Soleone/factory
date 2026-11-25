@@ -35,7 +35,12 @@ export const workersOf = (preset: Preset) => preset.workers ?? 1;
 
 /** The account a preset's usage counts against: claude's, or pi's provider. */
 export const poolOf = (preset: Preset) =>
-  preset.pool ?? (preset.agent === "pi" ? (preset.model?.split("/")[0] ?? "pi") : preset.agent);
+  preset.pool ??
+  (preset.agent === "pi"
+    ? (preset.model?.split("/")[0] ?? "pi")
+    : preset.agent === "codex"
+      ? "openai-codex"
+      : preset.agent);
 
 /**
  * A model the settings offer for an agent: what --model takes, how to show it, and its efforts.
@@ -95,29 +100,18 @@ export type Settings = {
 export const EXPANDER =
   "Keep every detail the user gave, and invent no extra subjects, text or branding. Cover the use case, subject, style or medium, composition and framing, lighting and mood, color palette, any text verbatim, and what to avoid.";
 
-/**
- * One image prompt codex works, with the images it made. Its files live in images/<id>/ in the state
- * folder, outside any repo: a project's images reach it only through a job the user queues.
- */
-export type ImageRun = {
-  id: string;
-  added: string;
-  prompt: string;
-  /** The project codex reads for context and existing references; it changes nothing there. */
-  repo?: string;
+/** What an image job asks codex for. Its files live in images/<job id>/ in the state folder, outside any repo. */
+export type ImageSpec = {
   /** Codex first expands the prompt into a full brief, which it then generates from. */
   expand: boolean;
   /** Images made of each distinct thing the prompt asks for, to pick the best from. */
   variants: number;
-  /** Pasted reference images, file names in the run's folder. */
+  /** Pasted reference images, file names in the job's folder. */
   references: string[];
-  state: "queued" | "running" | "done" | "failed";
-  /** The brief codex generated from, when it expanded the prompt. */
-  brief?: string;
-  /** File names in the run's folder; variants of one image share a name. */
-  images: { file: string; name: string }[];
-  error?: string;
 };
+
+/** An image an attempt made, a file in the job's folder; variants of one image share a name. */
+export type MadeImage = { file: string; name: string };
 
 /** A workwork candidate, as `workwork --json` prints it. `id` is workwork's, not a job's. */
 export type Item = {
@@ -190,6 +184,9 @@ export type Attempt = {
   tokens?: Tokens;
   /** Needs the job had that no worker here could check. */
   missing?: string[];
+  /** An image job's: what it made, and the brief it generated from when it expanded the prompt. */
+  images?: MadeImage[];
+  brief?: string;
 };
 
 export type Confidence = "low" | "medium" | "high";
@@ -282,6 +279,8 @@ export type Job = Tuning & {
   machine?: boolean;
   /** Needs no worker had when it was done, until the user checks them. */
   unverified: string[];
+  /** An image job, which codex workers take and nothing else does; `prompt` is what to draw. */
+  image?: ImageSpec;
   goal?: Goal;
   /** Its key in the goal's plan. */
   key?: string;
@@ -391,8 +390,8 @@ export type Snapshot = JobContext & {
   train: Record<string, TrainCar>;
   /** The last good usage read of each pool a run works on, by pool; a pool never read is missing. */
   usage: Record<string, ReadUsage>;
-  /** Image runs, newest first. */
-  images: ImageRun[];
+  /** Image jobs of every state but removed, newest first, finished ones included. */
+  images: Job[];
 };
 
 export type ResultsPage = JobContext &

@@ -3,7 +3,7 @@ import { existsSync, openSync, closeSync, readFileSync, rmSync, writeFileSync } 
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { AGENT_NAMES } from "./agents.ts";
+import { AGENT_NAMES, WORKER_AGENTS } from "./agents.ts";
 import {
   presetId,
   TIERS,
@@ -87,8 +87,8 @@ export function checkSettings(
   if (!AGENT_NAMES.includes(settings.chat.agent))
     throw new Error(`unknown chat agent ${settings.chat.agent} (known: ${AGENT_NAMES.join(", ")})`);
   for (const preset of settings.presets) {
-    if (!AGENT_NAMES.includes(preset.agent))
-      throw new Error(`unknown preset agent ${preset.agent} (known: ${AGENT_NAMES.join(", ")})`);
+    if (!WORKER_AGENTS.includes(preset.agent))
+      throw new Error(`unknown preset agent ${preset.agent} (known: ${WORKER_AGENTS.join(", ")})`);
     if (preset.workers !== undefined && !(Number.isInteger(preset.workers) && preset.workers >= 0))
       throw new Error(`workers wants a whole number from 0, got ${preset.workers}`);
   }

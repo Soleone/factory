@@ -50,7 +50,7 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { AGENT_NAMES } from "@/backend/agents.ts";
+import { AGENT_NAMES, IMAGE_AGENT, WORKER_AGENTS } from "@/backend/agents.ts";
 import { agentName, repoName } from "@/format";
 import { ChatAgentFields, Choice, RunFields, TuningFields } from "@/RunFields";
 import { TierBadge } from "@/TierBadge";
@@ -175,7 +175,7 @@ function SettingsForm({
           </StackedTabsContent>
           <StackedTabsContent value="roles">
             <RoleFields
-              presets={draft.presets}
+              presets={draft.presets.filter((preset) => preset.agent !== IMAGE_AGENT)}
               value={draft.tiers}
               onChange={(tiers) => setDraft({ ...draft, tiers })}
             />
@@ -300,7 +300,8 @@ function WorkerFields({
       <FieldDescription>
         The queue goes to the first free worker, top to bottom. The number is how many run at once
         (empty: 1); 0 keeps one for the arrow next to Queue only. k ctx is the context size, in
-        thousands of tokens, where the agent compacts (empty: 90 for Haiku, 200 otherwise).
+        thousands of tokens, where the agent compacts (empty: 90 for Haiku, 200 otherwise). Codex
+        workers make the Images tab's images and take no other jobs.
       </FieldDescription>
       <ol className="flex flex-col gap-2">
         {value.map((preset, index) => (
@@ -327,7 +328,7 @@ function WorkerFields({
             <Choice
               label="Worker agent"
               className="w-full"
-              items={AGENT_NAMES.map((name) => ({ value: name, label: agentName(name) }))}
+              items={WORKER_AGENTS.map((name) => ({ value: name, label: agentName(name) }))}
               value={preset.agent}
               onChange={(agent) => agent && set(index, { agent, workers: preset.workers })}
             />

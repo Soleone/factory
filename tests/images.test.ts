@@ -1,49 +1,49 @@
 import { mkdtempSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vite-plus/test";
-import {
-  addImageRun,
-  imageRunner,
-  readImageRuns,
-  readReply,
-  useImage,
-} from "../src/backend/images.ts";
+import { addImageJob, readReply, useImage } from "../src/backend/images.ts";
 import { readJobs } from "../src/backend/jobs.ts";
-import type { ImageRun } from "../src/backend/types.ts";
-import { scratch, script } from "./harness.ts";
+import type { Job } from "../src/backend/types.ts";
+import { MINUTE, options, scratch, script, setup, tiered, work } from "./harness.ts";
 
 const PNG = Buffer.from("fake png").toString("base64");
 
-/** A fake codex that saves three images under its thread, like image_gen does, and replies with `reply`. */
-function fakeCodex(reply: string, thread = "t1"): { command: string; calls: string } {
+/**
+ * A fake codex on PATH that saves three images under its thread, like image_gen does, and replies
+ * with `reply`. `before` runs first; exiting there skips the images.
+ */
+function fakeCodex(reply: string, before = ""): string {
   const bin = mkdtempSync(join(scratch, "codex-"));
   const home = mkdtempSync(join(scratch, "codex-home-"));
   process.env.CODEX_HOME = home;
-  const made = join(home, "generated_images", thread);
+  const made = join(home, "generated_images", "t1");
   script(
     bin,
     "codex",
     [
       `echo "$*" > ${bin}/args; cat > ${bin}/prompt`,
+      before,
       `mkdir -p ${made}; echo a > ${made}/a.png; echo b > ${made}/b.png; echo c > ${made}/c.png`,
       // -o names the reply file: the argument after it.
       `while [ "$1" != "-o" ]; do shift; done; printf '%s\\n' '${reply}' > "$2"`,
-      `echo '{"type":"thread.started","thread_id":"${thread}"}'`,
+      `echo '{"type":"thread.started","thread_id":"t1"}'`,
     ].join("\n"),
   );
-  return { command: join(bin, "codex"), calls: bin };
+  process.env.PATH = `${bin}:${process.env.PATH}`;
+  return bin;
 }
 
-async function settled(state: string, id: string): Promise<ImageRun> {
-  for (let tries = 0; tries < 100; tries++) {
-    const run = readImageRuns(state).find((each) => each.id === id)!;
-    if (run.state === "done" || run.state === "failed") return run;
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-  throw new Error("the run never settled");
+/** A base whose only worker is codex. */
+function codexOnly() {
+  const base = setup(["a"]);
+  tiered(base.state, { presets: [{ agent: "codex" }] });
+  return base;
 }
 
-describe("image runs", () => {
+const settled = (id: string) => (jobs: Job[]) =>
+  ["done", "failed"].includes(jobs.find((job) => job.id === id)!.state);
+
+describe("image jobs", () => {
   test("codex's reply names each image and carries the brief", () => {
     const { brief, names } = readReply(
       "Done.\nBRIEF:\nA red apple,\nflat.\nIMAGE: /x/a.png | apple\nIMAGE: /x/b.png",
@@ -57,72 +57,91 @@ describe("image runs", () => {
     );
   });
 
-  test("a run in a project reads it without writing, and keeps codex's images in its own folder", async () => {
-    const state = mkdtempSync(join(scratch, "state-"));
-    const repo = mkdtempSync(join(scratch, "repo-"));
-    const codex = fakeCodex("BRIEF: big apple\nIMAGE: /g/a.png | apple\nIMAGE: /g/b.png | apple");
-    const run = addImageRun(state, {
+  test("a codex worker reads the project without writing, keeps codex's images outside it, and takes no other job", async () => {
+    const base = codexOnly();
+    const calls = fakeCodex("BRIEF: big apple\nIMAGE: /g/a.png | apple\nIMAGE: /g/b.png | apple");
+    const coding = base.pick("a");
+    const added = addImageJob(base.state, {
       prompt: "an apple",
-      repo,
+      repo: base.repo,
       expand: true,
       variants: 2,
       references: [{ data: PNG, mimeType: "image/png" }],
     });
-    const runner = imageRunner(state, codex.command);
-    try {
-      const done = await settled(state, run.id);
-      expect(done).toMatchObject({
-        state: "done",
+    const jobs = await work(options(base, {}), settled(added.id));
+    const job = jobs.find((each) => each.id === added.id)!;
+    expect(job).toMatchObject({ state: "done", agent: "codex" });
+    expect(job.attempts).toMatchObject([
+      {
+        outcome: "done",
         brief: "big apple",
         images: [
-          { file: "1.png", name: "apple" },
-          { file: "2.png", name: "apple" },
+          { file: "1-1.png", name: "apple" },
+          { file: "1-2.png", name: "apple" },
         ],
-      });
-      const folder = join(state, "images", run.id);
-      expect(readFileSync(join(folder, "1.png"), "utf8")).toBe("a\n");
-      const args = readFileSync(join(codex.calls, "args"), "utf8");
-      expect(args).toContain(`--sandbox read-only -C ${repo}`);
-      expect(args).toContain(`-i ${join(folder, "reference-1.png")}`);
-      const prompt = readFileSync(join(codex.calls, "prompt"), "utf8");
-      expect(prompt).toContain(`for the project at ${repo}`);
-      expect(prompt).toContain("2 variants of each");
-      expect(prompt).toContain("an apple");
+      },
+    ]);
+    expect(jobs.find((each) => each.id === coding.id)!.state).toBe("queued");
+    const folder = join(base.state, "images", job.id);
+    expect(readFileSync(join(folder, "1-1.png"), "utf8")).toBe("a\n");
+    const args = readFileSync(join(calls, "args"), "utf8");
+    expect(args).toContain(`--sandbox read-only -C ${base.repo}`);
+    expect(args).toContain(`-i ${join(folder, "reference-1.png")}`);
+    const prompt = readFileSync(join(calls, "prompt"), "utf8");
+    expect(prompt).toContain(`for the project at ${base.repo}`);
+    expect(prompt).toContain("2 variants of each");
+    expect(prompt).toContain("an apple");
 
-      const job = useImage(state, run.id, "2.png", "the hero on the landing page");
-      expect(readJobs(state).find((each) => each.id === job.id)).toMatchObject({
-        item: { repo },
-        tier: "grunt",
-      });
-      expect(job.prompt).toContain(join(folder, "2.png"));
-      expect(job.prompt).toContain("the hero on the landing page");
-    } finally {
-      runner.stop();
-    }
+    const use = useImage(base.state, job.id, "1-2.png", "the hero on the landing page");
+    expect(readJobs(base.state).find((each) => each.id === use.id)).toMatchObject({
+      item: { repo: base.repo },
+      tier: "grunt",
+    });
+    expect(use.prompt).toContain(join(folder, "1-2.png"));
+    expect(use.prompt).toContain("the hero on the landing page");
   });
 
-  test("a run fails when codex makes no image, with what codex said", async () => {
-    const state = mkdtempSync(join(scratch, "state-"));
-    const bin = mkdtempSync(join(scratch, "codex-"));
-    script(
-      bin,
-      "codex",
-      `cat > /dev/null; while [ "$1" != "-o" ]; do shift; done; echo "image_gen isn't available" > "$2"`,
+  test("a usage limit puts the image job back, and the worker sleeps until the reset", async () => {
+    const base = codexOnly();
+    const tried = join(scratch, `tried-${Date.now()}`);
+    fakeCodex(
+      "IMAGE: /g/a.png | apple",
+      `if [ ! -e ${tried} ]; then touch ${tried}; echo '{"type":"error","message":"You'"'"'ve hit your usage limit. Try again in 3h."}'; exit 1; fi`,
     );
-    const run = addImageRun(state, {
+    const added = addImageJob(base.state, {
+      prompt: "an apple",
+      expand: false,
+      variants: 1,
+      references: [],
+    });
+    const sleeps: number[] = [];
+    const jobs = await work(
+      { ...options(base, {}), sleep: async (ms) => void sleeps.push(ms) },
+      settled(added.id),
+    );
+    expect(jobs.find((each) => each.id === added.id)!.attempts).toMatchObject([
+      { outcome: "limited" },
+      { outcome: "done", images: [{ file: "2-1.png", name: "apple" }] },
+    ]);
+    expect(sleeps).toHaveLength(1);
+    expect(sleeps[0]).toBeGreaterThan(170 * MINUTE);
+  });
+
+  test("an image job fails when codex makes no image, with what codex said", async () => {
+    const base = codexOnly();
+    fakeCodex(
+      "",
+      `while [ "$1" != "-o" ]; do shift; done; echo "image_gen isn't available" > "$2"; exit 0`,
+    );
+    const added = addImageJob(base.state, {
       prompt: "a pear",
       expand: false,
       variants: 1,
       references: [],
     });
-    const runner = imageRunner(state, join(bin, "codex"));
-    try {
-      expect(await settled(state, run.id)).toMatchObject({
-        state: "failed",
-        error: "codex made no image: image_gen isn't available",
-      });
-    } finally {
-      runner.stop();
-    }
+    const jobs = await work(options(base, {}), settled(added.id));
+    const job = jobs.find((each) => each.id === added.id)!;
+    expect(job.state).toBe("failed");
+    expect(job.attempts.at(-1)!.error).toBe("codex made no image: image_gen isn't available");
   });
 });

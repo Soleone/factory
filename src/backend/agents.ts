@@ -20,10 +20,16 @@ const CLAUDE_ASK =
 
 export const AGENT_NAMES = Object.keys(LIMITS);
 
+/** Codex works no code here, only image jobs, on workers of its own. */
+export const IMAGE_AGENT = "codex";
+/** What a worker in the settings can be: a coding agent, or codex for images. */
+export const WORKER_AGENTS = [...AGENT_NAMES, IMAGE_AGENT];
+
 /** What each agent takes for effort: claude's --effort, pi's --thinking. */
 export const EFFORTS: Record<string, string[]> = {
   claude: ["low", "medium", "high", "xhigh", "max"],
   pi: ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
+  codex: ["minimal", "low", "medium", "high", "xhigh"],
 };
 
 /**
@@ -173,7 +179,7 @@ export function resetTime(text: string, now: number): number | undefined {
   const after = /try again in ~?(\d+)\s*(s|m|h)/i.exec(text);
   if (after) return now + Number(after[1]) * UNIT_MS[after[2].toLowerCase()];
   const clock =
-    /resets (?:at )?(?:([A-Z][a-z]{2}) (\d{1,2}),? )?(\d{1,2})(?::(\d{2}))?\s*([ap]m)(?: \(([^)]+)\))?/i.exec(
+    /(?:resets|try again) (?:at )?(?:([A-Z][a-z]{2})[a-z]* (\d{1,2})(?:st|nd|rd|th)?,? (?:\d{4} )?)?(\d{1,2})(?::(\d{2}))?\s*([ap]m)(?: \(([^)]+)\))?/i.exec(
       text,
     );
   if (!clock) return undefined;

@@ -9,15 +9,7 @@ import { AGENT_NAMES } from "./agents.ts";
 import { chat } from "./chat.ts";
 import type { PiImage } from "./claude.ts";
 import { githubIdentity } from "./github.ts";
-import {
-  addImageRun,
-  imageRunner,
-  readImageRuns,
-  removeImageRun,
-  retryImageRun,
-  useImage,
-  type Pasted,
-} from "./images.ts";
+import { addImageJob, useImage, type Pasted } from "./images.ts";
 import { clonableRepos, cloneRepo, createRepo, localRepos, sourceRoot } from "./repos.ts";
 import { agentModels } from "./models.ts";
 import {
@@ -122,7 +114,6 @@ export function serve(
     return `http://${host}:${port}`;
   });
   let stopMirror = mirrorTasks(state, readSettings(state), console.log);
-  const images = imageRunner(state);
   // Listing takes a second or two per agent, and the lists rarely change while serve runs.
   const models = new Map<string, Promise<Model[]>>();
   function modelsOf(name: string): Promise<Model[]> {
@@ -336,17 +327,7 @@ export function serve(
       expand: boolean;
       variants: number;
       references: Pasted[];
-    }) => {
-      const run = addImageRun(state, body);
-      images.kick();
-      return run;
-    },
-    "POST /api/images/retry": (body: { id: string }) => {
-      const run = retryImageRun(state, body.id);
-      images.kick();
-      return run;
-    },
-    "POST /api/images/remove": (body: { id: string }) => removeImageRun(state, body.id),
+    }) => addImageJob(state, body),
     "POST /api/images/use": (body: { id: string; file: string; where: string }) =>
       useImage(state, body.id, body.file, body.where),
   };
@@ -415,7 +396,6 @@ export function serve(
   })
     .on("close", () => {
       stopMirror();
-      images.stop();
     })
     .listen(port, host, () => {
       console.log(`factory: serving http://${host}:${port}`);
@@ -458,7 +438,10 @@ function snapshot(
     ),
     train,
     usage: usage(usagePools(settings)),
-    images: readImageRuns(state),
+    images: all
+      .filter((job) => job.image && job.state !== "removed")
+      .map((job) => webJob(state, job))
+      .reverse(),
   };
 }
 

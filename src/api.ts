@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from "react";
 import type {
   Blueprint,
   Candidates,
-  ImageRun,
   CommitIdentity,
   Job,
   Model,
@@ -114,17 +113,15 @@ export const api = {
   answerChat: (answer: { id: string } & DialogAnswer) => call("POST", "/api/chat/answer", answer),
   newChat: () => call("POST", "/api/chat/new"),
   openChat: (id: string) => call("POST", "/api/chat/open", { id }),
-  /** Codex generates it right away, whether the factory is on or not. */
+  /** Queues an image job, which a codex worker takes while the factory runs. */
   generateImages: (request: {
     prompt: string;
     repo?: string;
     expand: boolean;
     variants: number;
     references: AgentImage[];
-  }) => call<ImageRun>("POST", "/api/images", request),
-  retryImages: (id: string) => call<ImageRun>("POST", "/api/images/retry", { id }),
-  removeImages: (id: string) => call("POST", "/api/images/remove", { id }),
-  /** Queues a job that adds the image to the run's project by PR. */
+  }) => call<Job>("POST", "/api/images", request),
+  /** Queues a job that adds the image to the image job's project by PR. */
   useImage: (id: string, file: string, where: string) =>
     call<Job>("POST", "/api/images/use", { id, file, where }),
 };

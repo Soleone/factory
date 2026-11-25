@@ -68,6 +68,7 @@ export type NewJob = Pick<Job, "id" | "item" | "source"> &
       | "of"
       | "branchOf"
       | "front"
+      | "image"
     >
   >;
 
@@ -609,6 +610,7 @@ export function pinJob(state: string, id: string, pin: Pin): void {
 export async function removeJob(state: string, id: string): Promise<void> {
   const job = find(state, id, "queued", "blocked", "done", "failed");
   append(state, { at: new Date().toISOString(), type: "remove", id });
+  if (job.image) rmSync(join(state, "images", id), { recursive: true, force: true });
   const kept = job.attempts.flatMap((attempt) => attempt.branch ?? []);
   if (kept.length === 0) return;
   const branches = await output(
@@ -620,9 +622,10 @@ export async function removeJob(state: string, id: string): Promise<void> {
   if (left.length) await output("git", ["branch", "-D", ...left], job.item.repo);
 }
 
-/** A failed job goes back in the queue, and with it the jobs it held. */
+/** A failed job goes back in the queue, and with it the jobs it held; a done image job makes more. */
 export function retryJob(state: string, id: string): void {
-  find(state, id, "failed");
+  const image = readJobs(state).some((job) => job.id === id && job.image);
+  find(state, id, ...(image ? (["failed", "done"] as const) : (["failed"] as const)));
   append(state, { at: new Date().toISOString(), type: "retry", id });
 }
 
