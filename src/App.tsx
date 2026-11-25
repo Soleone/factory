@@ -28,6 +28,7 @@ import { Logo } from "@/Logo";
 import { JobDetails } from "@/JobDetails";
 import { ChatSwitcher, jobReferences, PlanView, useChat } from "@/PlanView";
 import { QueueView, queued } from "@/QueueView";
+import { ProjectsFilter } from "@/ProjectsFilter";
 import { ResultsView } from "@/ResultsView";
 import { SettingsDialog } from "@/SettingsDialog";
 import { clock, runStart } from "@/format";
@@ -110,13 +111,17 @@ function Factory({
   act: Act;
   onAsk: (question: string) => void;
 }) {
-  const { stopped, ready } = inbox(snapshot);
+  const [project, setProject] = useState<string | null>(null);
+  const scoped =
+    project === null
+      ? snapshot
+      : { ...snapshot, jobs: snapshot.jobs.filter((job) => job.item.repo === project) };
+  const { stopped, ready } = inbox(scoped);
   // Decided once, so the page doesn't jump to Queue when the last question gets answered.
   const [landing] = useState(stopped.length > 0 ? "inbox" : "queue");
   const [tab, setTab] = useQueryParam("tab", landing);
   const [view, setView] = useQueryParam("view", "results");
   const [adding, setAdding] = useQueryParam("add", "");
-  const [project, setProject] = useState<string | null>(null);
   const [projects, setProjects] = useState<string[]>([]);
   const [projectRefresh, setProjectRefresh] = useState(0);
   const [cloneOpen, setCloneOpen] = useState(false);
@@ -146,10 +151,10 @@ function Factory({
     (isMobile ? setOpenMobile : setOpen)(true);
   };
   const { on, status } = snapshot;
-  const goals = snapshot.jobs.filter(
+  const goals = scoped.jobs.filter(
     (job) => job.goal && job.state !== "removed" && job.state !== "done",
   ).length;
-  const lined = Object.values(queued(snapshot.jobs)).flat().length;
+  const lined = Object.values(queued(scoped.jobs)).flat().length;
 
   const run =
     on && status
@@ -234,18 +239,16 @@ function Factory({
                 <Tab value="results">Results</Tab>
               </TabsList>
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              className="ml-auto"
-              onClick={() => setAdding("job")}
-            >
+            <div className="ml-auto">
+              <ProjectsFilter projects={projects} project={project} onProjectChange={setProject} />
+            </div>
+            <Button variant="outline" size="sm" onClick={() => setAdding("job")}>
               <PlusIcon /> Add work
             </Button>
           </div>
           <TabsContent value="inbox">
             <InboxView
-              snapshot={snapshot}
+              snapshot={scoped}
               act={act}
               onAsk={ask}
               onOpenGoal={(id) => {
@@ -255,10 +258,10 @@ function Factory({
             />
           </TabsContent>
           <TabsContent value="queue">
-            <QueueView snapshot={snapshot} act={act} onAdd={setAdding} />
+            <QueueView snapshot={scoped} act={act} onAdd={setAdding} />
           </TabsContent>
           <TabsContent value="goals">
-            <GoalsView snapshot={snapshot} act={act} />
+            <GoalsView snapshot={scoped} act={act} />
           </TabsContent>
           <TabsContent value="results">
             <div className="pt-2">
@@ -268,17 +271,10 @@ function Factory({
                   <TabsTrigger value="activity">Activity</TabsTrigger>
                 </TabsList>
                 <TabsContent value="results">
-                  <ResultsView
-                    snapshot={snapshot}
-                    act={act}
-                    onAsk={ask}
-                    projects={projects}
-                    project={project}
-                    onProjectChange={setProject}
-                  />
+                  <ResultsView snapshot={snapshot} act={act} onAsk={ask} project={project} />
                 </TabsContent>
                 <TabsContent value="activity">
-                  <ActivityView snapshot={snapshot} act={act} />
+                  <ActivityView snapshot={scoped} act={act} />
                 </TabsContent>
               </Tabs>
             </div>

@@ -9,7 +9,6 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { NeutralCheckbox } from "@/components/variants/checkbox";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { RowGroup } from "@/components/variants/item";
-import { ProjectsFilter } from "@/ProjectsFilter";
 import { itemTitle } from "@/format";
 import { canBoard, MergeButton, mergeTrain } from "@/PullRequest";
 import { canDismiss, dismissLoses, Result, reviewerOf, usePeek } from "@/Result";
@@ -52,7 +51,6 @@ function useResults(project: string | null, limit: number, refresh: number) {
   const current = loaded?.project === project ? loaded : undefined;
   return {
     page: current?.page,
-    resultProjects: loaded?.page.repos ?? [],
     appending: current?.limit !== limit,
     error: failure?.project === project ? failure.text : undefined,
   };
@@ -108,16 +106,12 @@ export function ResultsView({
   snapshot: live,
   act: change,
   onAsk,
-  projects,
   project,
-  onProjectChange,
 }: {
   snapshot: Snapshot;
   act: Act;
   onAsk: (question: string) => void;
-  projects: readonly string[];
   project: string | null;
-  onProjectChange: (project: string | null) => void;
 }) {
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [dismissing, setDismissing] = useState(false);
@@ -132,7 +126,7 @@ export function ResultsView({
     setLimit(RESULTS_BATCH_SIZE);
     setSelected(new Set());
   }
-  const { page, resultProjects, appending, error } = useResults(project, limit, refresh);
+  const { page, appending, error } = useResults(project, limit, refresh);
   const more = useRef<HTMLButtonElement>(null);
   const hasMore = page !== undefined && page.finished.length < page.total;
   const act: Act = async (action) => {
@@ -168,19 +162,9 @@ export function ResultsView({
       Can't load results: {error}
     </p>
   );
-  const filter = (
-    <div className="px-3">
-      <ProjectsFilter
-        projects={[...projects, ...resultProjects]}
-        project={project}
-        onProjectChange={onProjectChange}
-      />
-    </div>
-  );
   if (!page)
     return (
       <div className="flex flex-col gap-6 pt-2">
-        {filter}
         <div className="flex gap-2 p-3" role="status">
           {problem || (
             <>
@@ -196,7 +180,6 @@ export function ResultsView({
   if (running.length === 0 && total === 0)
     return (
       <div className="flex flex-col gap-6 pt-2">
-        {filter}
         <Empty>
           <EmptyHeader>
             <EmptyTitle>
@@ -316,7 +299,6 @@ export function ResultsView({
 
   return (
     <div className="flex flex-col gap-6 pt-2">
-      {filter}
       {problem}
       {/* Keep both groups the same width so only resizing, not selection, can rewrap them. */}
       <div

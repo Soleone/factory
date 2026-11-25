@@ -207,7 +207,14 @@ export function serve(
   const projectPaths = (items: Item[]) =>
     [...new Set([...localRepos(), ...items.map((item) => item.repo)])].sort();
   const routes: Record<string, (body: never, id: string) => unknown> = {
-    "GET /api/projects": () => projectPaths(readCandidates(state)?.items ?? []),
+    // Repos with jobs too, so their history stays filterable after the repo or its candidates go.
+    "GET /api/projects": () =>
+      projectPaths([
+        ...(readCandidates(state)?.items ?? []),
+        ...readJobs(state).flatMap((job) =>
+          job.state !== "removed" && job.item.repo ? [job.item] : [],
+        ),
+      ]),
     "GET /api/candidates": () => {
       const cached = readCandidates(state);
       const items = cached?.items ?? [];

@@ -430,7 +430,6 @@ export type ResultsPage = JobContext &
     running: Job[];
     finished: Job[];
     total: number;
-    repos: string[];
     repo: string | null;
   };
 

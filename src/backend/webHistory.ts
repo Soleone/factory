@@ -57,7 +57,6 @@ const active = (job: Job) =>
 
 function resultsWindow(jobs: Job[], project: string | null, limit: number) {
   const results = jobs.filter((job) => job.state !== "removed" && job.attempts.length > 0);
-  const repos = [...new Set(results.map((job) => job.item.repo))];
   // A project can be selected before it has run its first job.
   const repo = project || null;
   const ordered = results
@@ -65,7 +64,7 @@ function resultsWindow(jobs: Job[], project: string | null, limit: number) {
     .sort((a, b) => b.attempts.at(-1)!.start.localeCompare(a.attempts.at(-1)!.start));
   const running = ordered.filter(active);
   const finished = ordered.filter((job) => !active(job));
-  return { running, finished: finished.slice(0, limit), total: finished.length, repos, repo };
+  return { running, finished: finished.slice(0, limit), total: finished.length, repo };
 }
 
 export function jobPrs(jobs: Job[], prs: (urls: string[]) => Snapshot["prs"]) {
