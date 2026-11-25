@@ -40,6 +40,9 @@ const FINDERS = [
   { value: "batch tests", label: "Batches of related test files" },
 ];
 
+/** What workwork accepts as a blueprint's name. */
+const NAME = /^[a-z0-9][a-z0-9-]*$/;
+
 const BLANK: Omit<Blueprint, "custom"> = {
   name: "",
   attention: "skim",
@@ -156,12 +159,11 @@ export function BlueprintsView({ act }: { act: Act }) {
         <BlueprintDialog
           blueprint={editing}
           onClose={() => setEditing(undefined)}
-          onSave={(blueprint) =>
-            change(async () => {
-              await api.saveBlueprint(blueprint);
-              setEditing(undefined);
-            })
-          }
+          onSave={async (blueprint) => {
+            await api.saveBlueprint(blueprint);
+            setEditing(undefined);
+            setSaves((count) => count + 1);
+          }}
         />
       )}
     </div>
@@ -176,18 +178,54 @@ function BlueprintDialog({
 }: {
   blueprint: Blueprint;
   onClose: () => void;
-  onSave: (blueprint: Omit<Blueprint, "custom">) => void;
+  /** Rejects with what went wrong, which the dialog shows while keeping the draft. */
+  onSave: (blueprint: Omit<Blueprint, "custom">) => Promise<void>;
 }) {
   const { custom, ...fields } = blueprint;
   const [draft, setDraft] = useState(fields);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string>();
   const set = (change: Partial<typeof draft>) => setDraft({ ...draft, ...change });
   const creating = blueprint.name === "";
+  const badName = draft.name !== "" && !NAME.test(draft.name);
+
+  const save = async () => {
+    // Save stays clickable so a blank field gets named instead of the button just not reacting.
+    const missing = [
+      !draft.name && "Name",
+      !draft.prompt.trim() && "Prompt",
+      !draft.done.trim() && "Done when",
+    ].filter(Boolean);
+    if (missing.length) return setError(`Fill in ${missing.join(", ")}.`);
+    if (badName) return setError("The name takes lowercase letters, digits and dashes only.");
+    setSaving(true);
+    setError(undefined);
+    try {
+      await onSave(draft);
+    } catch (failure) {
+      setError((failure as Error).message);
+      setSaving(false);
+    }
+  };
+  const close = async () => {
+    const unsaved = JSON.stringify(draft) !== JSON.stringify(fields);
+    if (
+      !unsaved ||
+      (await confirm({
+        title: creating ? "Discard this blueprint?" : `Discard your changes to ${blueprint.name}?`,
+        description: "What you wrote isn't saved yet.",
+        action: "Discard",
+        destructive: true,
+      }))
+    )
+      onClose();
+  };
   const finders = FINDERS.some(({ value }) => value === draft.finder)
     ? FINDERS
     : [...FINDERS, { value: draft.finder, label: draft.finder }];
 
   return (
-    <Dialog open onOpenChange={(open) => !open && onClose()}>
+    <Dialog open onOpenChange={(open) => !open && !saving && void close()}>
       <AnchoredDialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>{creating ? "New blueprint" : blueprint.name}</DialogTitle>
@@ -200,15 +238,19 @@ function BlueprintDialog({
         <fieldset disabled={!custom} className="contents">
           <FieldGroup>
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field>
+              <Field data-invalid={badName}>
                 <FieldLabel htmlFor="blueprint-name">Name</FieldLabel>
                 <Input
                   id="blueprint-name"
                   placeholder="naming"
                   disabled={!creating}
+                  aria-invalid={badName}
                   value={draft.name}
                   onChange={(event) => set({ name: event.target.value })}
                 />
+                {creating && (
+                  <FieldDescription>Lowercase letters, digits and dashes.</FieldDescription>
+                )}
               </Field>
               <Field>
                 <FieldLabel>Attention</FieldLabel>
@@ -291,12 +333,14 @@ function BlueprintDialog({
           </FieldGroup>
         </fieldset>
         {custom && (
-          <DialogFooter>
-            <Button
-              disabled={!draft.name || !draft.prompt.trim() || !draft.done.trim()}
-              onClick={() => onSave(draft)}
-            >
-              Save
+          <DialogFooter className="items-center">
+            {error && (
+              <p role="alert" className="mr-auto text-sm whitespace-pre-line text-destructive">
+                {error}
+              </p>
+            )}
+            <Button disabled={saving} onClick={() => void save()}>
+              {saving ? "Saving…" : "Save"}
             </Button>
           </DialogFooter>
         )}
