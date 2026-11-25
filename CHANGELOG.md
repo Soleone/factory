@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.8.1](https://github.com/Soleone/factory/compare/v0.8.0...v0.8.1) (2026-11-25)
+
+### Bug Fixes
+
+* **queue:** say when a handed-off agent already finished ([bf79390](https://github.com/Soleone/factory/commit/bf79390c7334cfbd79c9e58e18ca074d8c920f51))
+
 ## [0.8.0](https://github.com/Soleone/factory/compare/v0.7.2...v0.8.0) (2026-11-25)
 
 ### Features
