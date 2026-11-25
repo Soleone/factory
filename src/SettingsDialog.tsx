@@ -286,8 +286,6 @@ function WorkerFields({
         {value.map((preset, index) => (
           <li
             key={index}
-            draggable
-            onDragStart={() => setDragging(index)}
             onDragOver={(event) => dragging !== undefined && event.preventDefault()}
             onDrop={() => {
               if (dragging !== undefined && dragging !== index) move(dragging, index);
@@ -296,7 +294,16 @@ function WorkerFields({
             onDragEnd={() => setDragging(undefined)}
             className="grid grid-cols-[auto_5.5rem_minmax(0,1fr)_6.5rem_3.5rem_4.5rem_auto] items-center gap-2 *:w-full"
           >
-            <GripVerticalIcon className="size-4 cursor-grab text-muted-foreground" />
+            <span
+              draggable
+              onDragStart={(event) => {
+                event.dataTransfer.setDragImage(event.currentTarget.closest("li")!, 0, 0);
+                setDragging(index);
+              }}
+              className="flex cursor-grab touch-none justify-center text-muted-foreground"
+            >
+              <GripVerticalIcon className="size-4" />
+            </span>
             <Choice
               label="Worker agent"
               className="w-full"
@@ -468,8 +475,6 @@ function RoleFields({
               {list.map((id, index) => (
                 <li
                   key={id}
-                  draggable
-                  onDragStart={() => setDragging({ tier, index })}
                   onDragOver={(event) => dragging?.tier === tier && event.preventDefault()}
                   onDrop={() => {
                     if (dragging?.tier === tier) move(tier, dragging.index, index);
@@ -483,6 +488,13 @@ function RoleFields({
                     index={index}
                     count={list.length}
                     onMove={(target) => move(tier, index, target)}
+                    grip={{
+                      draggable: true,
+                      onDragStart: (event) => {
+                        event.dataTransfer.setDragImage(event.currentTarget.closest("li")!, 0, 0);
+                        setDragging({ tier, index });
+                      },
+                    }}
                   />
                   <span className="flex min-w-0 flex-1 items-center gap-1.5">
                     {index + 1}.

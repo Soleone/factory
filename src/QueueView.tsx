@@ -1,6 +1,6 @@
 import { XIcon } from "lucide-react";
-import { AnimatePresence, motion, Reorder } from "motion/react";
-import { useState, type ReactNode, type Ref } from "react";
+import { AnimatePresence, motion, Reorder, useDragControls } from "motion/react";
+import { useState, type PointerEvent, type ReactNode, type Ref } from "react";
 import { api, type Act } from "@/api";
 import {
   presetWorkers,
@@ -229,6 +229,37 @@ export function queued(jobs: Job[]) {
   };
 }
 
+/** A pick that drags only from its handle, so touching the rest of it scrolls the page. */
+function Pick({
+  ref,
+  job,
+  onDragEnd,
+  children,
+}: {
+  ref?: Ref<HTMLDivElement>;
+  job: Job;
+  onDragEnd: () => void;
+  children: (grip: { onPointerDown: (event: PointerEvent<HTMLSpanElement>) => void }) => ReactNode;
+}) {
+  const controls = useDragControls();
+  return (
+    <Reorder.Item
+      ref={ref}
+      as="div"
+      value={job.id}
+      dragListener={false}
+      dragControls={controls}
+      onDragEnd={onDragEnd}
+      transition={{ duration: 0.15, ease: "easeOut" }}
+      whileDrag={{ scale: 1.02, boxShadow: "0 10px 28px rgb(0 0 0 / 0.18)" }}
+      exit={{ opacity: 0, x: 64, transition: { duration: 0.2 } }}
+      className="relative rounded-md"
+    >
+      {children({ onPointerDown: (event) => controls.start(event) })}
+    </Reorder.Item>
+  );
+}
+
 /** Glides to its new place when the order changes, and slides out to the right when it leaves the queue. */
 function Glide({ ref, children }: { ref?: Ref<HTMLDivElement>; children: ReactNode }) {
   return (
@@ -353,34 +384,28 @@ export function QueueView({
               >
                 <AnimatePresence mode="popLayout" initial={false}>
                   {shown.map((job, index) => (
-                    <Reorder.Item
-                      key={job.id}
-                      as="div"
-                      value={job.id}
-                      onDragEnd={() => void drop(job)}
-                      transition={{ duration: 0.15, ease: "easeOut" }}
-                      whileDrag={{ scale: 1.02, boxShadow: "0 10px 28px rgb(0 0 0 / 0.18)" }}
-                      exit={{ opacity: 0, x: 64, transition: { duration: 0.2 } }}
-                      className="relative rounded-md"
-                    >
-                      <Row
-                        leading={
-                          <span className="flex items-center gap-1">
-                            <ReorderHandle
-                              label={itemTitle(job.item)}
-                              index={index}
-                              count={shown.length}
-                              onMove={(target) => void act(() => api.move(job.id, target))}
-                            />
-                            <StateIcon state={job.state} />
-                          </span>
-                        }
-                        title={details(job, true)}
-                        meta={<Meta job={job} byId={byId} settings={settings} act={act} />}
-                      >
-                        {remove(job)}
-                      </Row>
-                    </Reorder.Item>
+                    <Pick key={job.id} job={job} onDragEnd={() => void drop(job)}>
+                      {(grip) => (
+                        <Row
+                          leading={
+                            <span className="flex items-center gap-1">
+                              <ReorderHandle
+                                label={itemTitle(job.item)}
+                                index={index}
+                                count={shown.length}
+                                onMove={(target) => void act(() => api.move(job.id, target))}
+                                grip={grip}
+                              />
+                              <StateIcon state={job.state} />
+                            </span>
+                          }
+                          title={details(job, true)}
+                          meta={<Meta job={job} byId={byId} settings={settings} act={act} />}
+                        >
+                          {remove(job)}
+                        </Row>
+                      )}
+                    </Pick>
                   ))}
                 </AnimatePresence>
               </Reorder.Group>
