@@ -5,6 +5,7 @@ export type InboxItem =
   | { kind: "ask"; job: Job; note: Note }
   | { kind: "checkpoint"; job: Job }
   | { kind: "failed"; job: Job }
+  | { kind: "setup"; job: Job }
   | { kind: "review"; job: Job }
   | { kind: "assume"; job: Job; note: Note & { index: number } }
   | { kind: "unverified"; job: Job; need: string };
@@ -21,6 +22,7 @@ export function inbox({ jobs, prs }: Pick<Snapshot, "jobs" | "prs">) {
     const ask = job.notes.findLast((note) => note.kind === "ask");
     if (job.blocked === "asked" && ask) stopped.push({ kind: "ask", job, note: ask });
     if (job.blocked === "checkpoint") stopped.push({ kind: "checkpoint", job });
+    if (job.state === "blocked" && job.blocked === "setup") stopped.push({ kind: "setup", job });
     if (job.state === "failed") stopped.push({ kind: "failed", job });
     const url = prUrl(job);
     // A goal's nodes merge through factory; only the goal's own PR into main is the user's.

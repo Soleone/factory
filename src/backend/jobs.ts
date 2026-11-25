@@ -34,7 +34,7 @@ export type Event = { at: string } & (
   | { type: "attempt"; id: string; attempt: Attempt; startupRejected?: true }
   | { type: "note"; id: string; note: NoteBody }
   /** The open attempt waits: for the user's answer, its pool's limit to reset, or to run alone. */
-  | { type: "pause"; id: string; reason: "asked" | "limited" | "alone" }
+  | { type: "pause"; id: string; reason: "asked" | "limited" | "alone" | "fault" }
   | { type: "block"; id: string; reason: Blocked; why?: string }
   /** A replan's change to a job that hasn't started. */
   | { type: "update"; id: string; change: Change }
@@ -236,8 +236,12 @@ export function replay(events: Event[]): Job[] {
       const planning = (PLANNING as readonly string[]).includes(job.item.blueprint);
       if (outcome === "done" && lacking.length && !planning)
         job.unverified = [...new Set([...job.unverified, ...lacking])];
-      if (event.attempt.setupFailed) job.state = "failed";
-      else if (asked) {
+      if (event.attempt.setupFailed) {
+        // Not the job's failure: it waits, without a strike, until the setup is fixed.
+        job.state = "blocked";
+        job.blocked = "setup";
+        job.why = event.attempt.error;
+      } else if (asked) {
         // Old logs: the attempt ended with the question.
         job.state = "blocked";
         job.blocked = "asked";

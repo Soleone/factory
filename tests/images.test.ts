@@ -1,8 +1,8 @@
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vite-plus/test";
 import { addImageJob, readReply, useImage } from "../src/backend/images.ts";
-import { readJobs } from "../src/backend/jobs.ts";
+import { readJobs, record } from "../src/backend/jobs.ts";
 import type { Job } from "../src/backend/types.ts";
 import { MINUTE, options, scratch, script, setup, tiered, work } from "./harness.ts";
 
@@ -99,6 +99,35 @@ describe("image jobs", () => {
     });
     expect(use.prompt).toContain(join(folder, "1-2.png"));
     expect(use.prompt).toContain("the hero on the landing page");
+  });
+
+  test("an image job can run while a coding job in the same repo waits for Git identity", async () => {
+    const base = codexOnly();
+    const coding = base.pick("a");
+    record(base.state, { type: "block", id: coding.id, reason: "setup", why: "no Git identity" });
+    fakeCodex("IMAGE: /g/a.png | apple");
+    const added = addImageJob(base.state, {
+      prompt: "an apple",
+      repo: base.repo,
+      expand: false,
+      variants: 1,
+      references: [],
+    });
+    const previousConfig = process.env.GIT_CONFIG_GLOBAL;
+    const noIdentity = join(scratch, "image-no-identity.gitconfig");
+    writeFileSync(noIdentity, "[user]\n\tuseConfigOnly = true\n");
+    try {
+      process.env.GIT_CONFIG_GLOBAL = noIdentity;
+      const jobs = await work(options(base, {}), (jobs) =>
+        jobs.some(
+          (job) => job.id === added.id && ["done", "failed", "blocked"].includes(job.state),
+        ),
+      );
+      expect(jobs.find((job) => job.id === coding.id)).toMatchObject({ blocked: "setup" });
+      expect(jobs.find((job) => job.id === added.id)).toMatchObject({ state: "done" });
+    } finally {
+      process.env.GIT_CONFIG_GLOBAL = previousConfig;
+    }
   });
 
   test("a usage limit puts the image job back, and the worker sleeps until the reset", async () => {

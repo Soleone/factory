@@ -38,7 +38,7 @@ import {
   startJob,
 } from "./jobs.ts";
 import { findPr } from "./review.ts";
-import { alive, compactAt, livePath, output, readSettings } from "./state.ts";
+import { alive, compactAt, livePath, output, readSettings, resumePath } from "./state.ts";
 import { claudeStartupRejected, noFacts, readStream, type Facts } from "./stream.ts";
 import { fiveHour } from "./usage.ts";
 import { watch } from "./triggers.ts";
@@ -112,7 +112,7 @@ type Live = {
   offset: number;
   pid?: number;
   /** What the next turn picks up from. */
-  waiting?: "asked" | "limited" | "alone" | "interrupted";
+  waiting?: "asked" | "limited" | "alone" | "fault" | "interrupted";
   /** The turn this session started on, when not the first; later turns resume it. */
   sessionTurn?: number;
   /** Needs no worker here has, so the agent was told it can't check them. */
@@ -130,7 +130,7 @@ const writeLive = (state: string, id: string, live: Live) =>
 const URL = /https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/(?:pull|issues)\/\d+/g;
 
 /** A worker and the preset it runs. */
-type Slot = { worker: Worker; preset: Preset; quickFailures: number };
+type Slot = { worker: Worker; preset: Preset };
 
 /** Works the queue until every worker is out of limits, until passes, or it's stopped; returns the run id. */
 export async function run(options: RunOptions): Promise<string> {
@@ -144,7 +144,11 @@ export async function run(options: RunOptions): Promise<string> {
   if (slots.length === 0)
     throw new Error("no workers; give one a count above 0 under Settings, Workers");
   const pools = new Map<string, Pool>();
-  for (const { worker } of slots) pools.set(worker.pool, { name: worker.pool, limits: 0 });
+  for (const { worker } of slots) {
+    pools.set(worker.pool, { name: worker.pool, limits: 0 });
+    // A resume asked of an earlier run's worker isn't this one's.
+    rmSync(resumePath(state, worker.id), { force: true });
+  }
   const agents = new Set<number>();
   const wakers = new Set<() => void>();
   let stopping = false;
@@ -311,6 +315,7 @@ export async function run(options: RunOptions): Promise<string> {
       ({ worker }) =>
         worker.preset === preset &&
         worker.agent !== IMAGE_AGENT &&
+        worker.state !== "paused" &&
         !pools.get(worker.pool)!.stopped,
     );
 
@@ -328,11 +333,61 @@ export async function run(options: RunOptions): Promise<string> {
     return ids.find((preset) => free(preset, self));
   }
 
+  /** Repos whose setup blocks their jobs, with why, as last checked: their other jobs wait too. */
+  let unset = new Map<string, string>();
+  /** Repos whose jobs this run queued again after a check, and those seen broken since. */
+  const freed = new Set<string>();
+  const broken = new Set<string>();
+  let checking: Promise<void> | undefined;
+
+  /**
+   * Checks the setup of each repo that has jobs blocked on it, and queues them again once it's fixed,
+   * say once the user saved a commit identity. A repo whose check passes while its jobs still fail is
+   * freed once a run, then again only after it's seen broken, so its jobs never go round and round.
+   */
+  function checkSetup(): Promise<void> {
+    checking ??= recheck()
+      .catch((error: Error) => log(`can't check setup: ${error.message}`))
+      .finally(() => (checking = undefined));
+    return checking;
+  }
+
+  async function recheck(): Promise<void> {
+    const repos = new Map<string, Job[]>();
+    for (const job of readJobs(state))
+      if (job.state === "blocked" && job.blocked === "setup")
+        repos.set(job.item.repo, [...(repos.get(job.item.repo) ?? []), job]);
+    const still = new Map<string, string>();
+    for (const [repo, jobs] of repos) {
+      const env = worktreeEnv(readSettings(state), repo, repo);
+      const fixed = await requireIdentity(worktreeGit(repo, env)).then(
+        () => true,
+        () => false,
+      );
+      if (!fixed) broken.add(repo);
+      if (fixed && (!freed.has(repo) || broken.has(repo))) {
+        freed.add(repo);
+        broken.delete(repo);
+        for (const job of jobs) record(state, { type: "unblock", id: job.id });
+        log(`${repo} is set up now: queued ${jobs.map((job) => job.id).join(", ")} again`);
+      } else still.set(repo, jobs[0].why ?? "its setup needs fixing");
+    }
+    unset = still;
+  }
+
   /** The next job this worker takes, decided without awaiting anything, so two workers never take one. */
   function pick({ worker, preset }: Slot): Job | undefined {
     const jobs = readJobs(state);
     for (const job of jobs) {
       if (!ready(job, jobs)) continue;
+      // Image jobs don't use a worktree or need the repo's Git identity.
+      const why = job.image ? undefined : unset.get(job.item.repo);
+      if (why) {
+        // It would fail the same way: it waits with the others, and no worker spends time on it.
+        record(state, { type: "block", id: job.id, reason: "setup", why });
+        log(`${job.id} waits for ${job.item.repo}'s setup`);
+        continue;
+      }
       // Codex workers make images and nothing else, and only they do.
       if ((worker.agent === IMAGE_AGENT) !== Boolean(job.image)) continue;
       if (preset.pinnedOnly) {
@@ -376,7 +431,7 @@ export async function run(options: RunOptions): Promise<string> {
       topUp();
       lookOut();
       moveOnFromAsks();
-      if (!pool.stopped && !handed) await keepReserve(pool);
+      if (!pool.stopped && !handed) await Promise.all([keepReserve(pool), checkSetup()]);
       // Another worker can stop this pool while we await the usage read.
       if (pool.stopped) return set(worker, { state: "stopped", reason: pool.stopped });
       if (pool.until) {
@@ -445,6 +500,8 @@ export async function run(options: RunOptions): Promise<string> {
         log(
           `${worker.id} ${result.attempt.outcome} ${job.id} ${result.attempt.url ?? result.attempt.error?.split("\n")[0] ?? ""}`,
         );
+        if (result.attempt.setupFailed)
+          unset.set(job.item.repo, result.attempt.error ?? "its setup needs fixing");
         const fix = queueReviewFix(state, job.id);
         if (fix) log(`${job.id} found something: queued ${fix.id}, ${fix.item.title}`);
         // Still holding the worktree: a goal node merges from it.
@@ -459,20 +516,26 @@ export async function run(options: RunOptions): Promise<string> {
           );
         }
         rmSync(livePath(state, job.id), { force: true });
-        const seconds = (Date.parse(result.attempt.end) - Date.parse(result.attempt.start)) / 1000;
-        slot.quickFailures =
-          result.attempt.outcome === "failed" && !result.attempt.setupFailed && seconds < 60
-            ? slot.quickFailures + 1
-            : 0;
-        if (slot.quickFailures >= 3)
-          return set(worker, {
-            state: "stopped",
-            reason: `3 failures in a row under a minute; last: ${result.attempt.error?.split("\n")[0] ?? "see its log"}`,
-          });
       }
+      // The job keeps its session for a worker that can go on with it; this one waits to be resumed.
+      if (result.paused === "fault") await hold(worker, result.fault!);
       if (result.paused !== "limited") set(worker, { state: "idle" });
     }
     set(worker, { state: "stopped", reason: ended() });
+  }
+
+  /**
+   * A fault of the worker itself, like a failed login, would fail every job it takes: it waits, until
+   * the user resumes it (`factory resume`, or Resume on the page) or the run ends. Resumed, the same
+   * worker goes on, and pauses again if the fault is still there.
+   */
+  async function hold(worker: Worker, fault: string): Promise<void> {
+    set(worker, { state: "paused", reason: fault });
+    log(`${worker.id} pauses: ${fault}; resume it once that's fixed`);
+    const asked = resumePath(state, worker.id);
+    while (!ended() && !existsSync(asked)) await nap(options.pollMs ?? 3000);
+    rmSync(asked, { force: true });
+    if (!ended()) log(`${worker.id} resumes`);
   }
 
   function hitLimit(pool: Pool, text: string): void {
@@ -557,6 +620,10 @@ export async function run(options: RunOptions): Promise<string> {
       live.pid = undefined;
       if (killing) return { attempt: await end(job, live, "stopped", facts), text };
       if (timedOut) return { attempt: await end(job, live, "timeout", facts), text };
+      if (facts.fault) {
+        const fault = [facts.fault, facts.error].filter(Boolean).join(": ");
+        return pause(job, live, "fault", text, fault.split("\n")[0]);
+      }
       const outcome = classify(makeAgent(worker.agent, live.begun), code, text, facts.error);
       if (outcome === "limited") {
         if (
@@ -760,9 +827,9 @@ export async function run(options: RunOptions): Promise<string> {
     return restarted;
   }
 
-  function pause(job: Job, live: Live, reason: Paused, text: string): Turned {
+  function pause(job: Job, live: Live, reason: Paused, text: string, fault?: string): Turned {
     writeLive(state, job.id, { ...live, pid: undefined, waiting: reason });
-    return { paused: reason, text };
+    return { paused: reason, text, fault };
   }
 
   /**
@@ -925,8 +992,8 @@ export async function run(options: RunOptions): Promise<string> {
 type Handed = { job: Job; live: Live };
 type Turned =
   | { paused?: undefined; attempt: Attempt; text: string }
-  | { paused: Paused; text: string; rejected?: Attempt };
-type Paused = "asked" | "limited" | "alone";
+  | { paused: Paused; text: string; rejected?: Attempt; fault?: string };
+type Paused = "asked" | "limited" | "alone" | "fault";
 
 async function cleanWorktree(worktree: string): Promise<boolean> {
   try {
@@ -943,7 +1010,6 @@ export function makeSlots(settings: Settings, counts: Record<string, number> = {
   return presetWorkers(settings.presets, counts).map((worker) => ({
     worker,
     preset: byId.get(worker.preset)!,
-    quickFailures: 0,
   }));
 }
 
@@ -981,6 +1047,8 @@ function resumeText(live: Live, job: Job): string {
   }
   if (live.waiting === "limited")
     return "You were stopped by a usage limit, which has reset. Carry on where you left off.";
+  if (live.waiting === "fault")
+    return "Your last turn stopped on a fault of the agent itself, like a failed login, which has been fixed since. Check where you were and carry on.";
   if (live.waiting === "alone")
     return "No other job runs now, and none starts until you finish. Do what needed the machine, then carry on with the job.";
   return "Your run was interrupted before it finished. Check where you were and carry on.";

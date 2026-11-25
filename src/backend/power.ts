@@ -1,7 +1,8 @@
 import { spawn } from "node:child_process";
-import { openSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { alive, pidPath, runningPid } from "./state.ts";
+import { existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { alive, pidPath, resumePath, runningPid } from "./state.ts";
+import type { Status } from "./types.ts";
 
 export const logPath = (state: string) => join(state, "factory.log");
 
@@ -35,4 +36,18 @@ export async function turnOff(state: string, kill = false): Promise<number | und
   }
   rmSync(pidPath(state), { force: true });
   return pid;
+}
+
+/** Lets a worker paused on a fault of its own go on in the same run, which picks the request up. */
+export function resumeWorker(state: string, id: string): void {
+  const path = join(state, "status.json");
+  const status: Status | undefined =
+    runningPid(state) && existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : undefined;
+  if (!status) throw new Error("the factory is off");
+  const worker = status.workers.find((each) => each.id === id);
+  if (!worker) throw new Error(`run ${status.run} has no worker ${id}`);
+  if (worker.state !== "paused") throw new Error(`${id} isn't paused`);
+  const asked = resumePath(state, id);
+  mkdirSync(dirname(asked), { recursive: true });
+  writeFileSync(asked, `${status.run}\n`);
 }

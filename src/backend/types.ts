@@ -263,8 +263,10 @@ export type Goal = {
  * Why a job waits. asked: for the user's answer. held: a job it comes after failed or was removed.
  * checkpoint: for the user's approval. paused: by the user. red: a goal whose integration branch fails
  * its gates, until a fix merges. review: a done node's branch waits to merge (a review, its fixes, conflicts).
+ * setup: something the user configures, like Git's commit identity; `why` says what, and a run picks
+ * the job up again once it's fixed.
  */
-export type Blocked = "asked" | "held" | "checkpoint" | "paused" | "red" | "review";
+export type Blocked = "asked" | "held" | "checkpoint" | "paused" | "red" | "review" | "setup";
 
 /**
  * One unit of work: a workwork candidate, a goal or a node of one, or a job factory writes itself
@@ -333,7 +335,8 @@ export type Worker = Tuning & {
   agent: string;
   preset: string;
   pool: string;
-  state: "idle" | "working" | "sleeping" | "stopped";
+  /** paused: a fault of the worker itself, like a failed login; `reason` says which, and it waits to be resumed. */
+  state: "idle" | "working" | "sleeping" | "paused" | "stopped";
   since: string;
   job?: string;
   until?: string;
