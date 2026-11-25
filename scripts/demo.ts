@@ -325,7 +325,7 @@ function seed(): DemoState {
       auto: { on: true, attention: ["none"], blueprints: [], repos: [] },
       triggers: { ci: true, label: "factory", reviews: true },
     },
-    candidates: { at, refreshing: { all: false, repos: [] } },
+    candidates: { at, refreshing: [] },
     prs: Object.fromEntries(
       jobs.flatMap((job, index) => {
         const url = prUrl(job);
@@ -676,7 +676,7 @@ function dispatch(
     case "GET /api/candidates":
       return {
         at: snapshot.candidates.at,
-        repoAt: {},
+        scans: {},
         items,
         repos: [...new Set(items.map((item) => item.repo))].sort(),
         root: "/home/me/src",
@@ -689,6 +689,8 @@ function dispatch(
     case "POST /api/images":
     case "POST /api/images/use":
       throw new Error("The demo doesn't generate or add images.");
+    case "POST /api/candidates/decide":
+      throw new Error("The demo doesn't record decisions.");
     case "POST /api/candidates/refresh":
       snapshot.candidates.at = new Date().toISOString();
       return null;
@@ -697,14 +699,15 @@ function dispatch(
         ["tests", "Adds a behavior test for something no test covers yet.", false],
         ["docs", "Fixes docs that disagree with what the code does.", false],
         ["cleanup", "Cuts dead paths and needless layers from a batch of files.", true],
-      ].map(([name, description, custom]) => ({
+        ["accessibility", "Fixes keyboard, focus and label problems.", false, true],
+      ].map(([name, description, custom, onRequest = false]) => ({
         name,
         description,
         custom,
         attention: "skim",
         finder: "scan",
         done: "checks pass",
-        onRequest: false,
+        onRequest,
         prompt: `Demo blueprint: ${description}`,
       }));
     case "POST /api/candidates/prompt": {

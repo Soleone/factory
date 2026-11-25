@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { readCandidates } from "./candidates.ts";
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
@@ -38,15 +39,7 @@ import { run, type RunOptions } from "./loop.ts";
 import { createRepo } from "./repos.ts";
 import { exportGoal } from "./goalExport.ts";
 import { logPath, turnOff, turnOn } from "./power.ts";
-import {
-  output,
-  pidPath,
-  readCandidates,
-  readSettings,
-  runningPid,
-  STATE,
-  writeSettings,
-} from "./state.ts";
+import { output, pidPath, readSettings, runningPid, STATE, writeSettings } from "./state.ts";
 import {
   openAssumptions,
   prUrl,

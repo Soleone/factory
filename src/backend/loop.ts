@@ -1,3 +1,4 @@
+import { readCandidates, refreshCandidates } from "./candidates.ts";
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
@@ -37,15 +38,7 @@ import {
   startJob,
 } from "./jobs.ts";
 import { findPr } from "./review.ts";
-import {
-  alive,
-  compactAt,
-  livePath,
-  output,
-  readCandidates,
-  readSettings,
-  refreshCandidates,
-} from "./state.ts";
+import { alive, compactAt, livePath, output, readSettings } from "./state.ts";
 import { claudeStartupRejected, noFacts, readStream, type Facts } from "./stream.ts";
 import { fiveHour } from "./usage.ts";
 import { watch } from "./triggers.ts";

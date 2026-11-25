@@ -22,6 +22,10 @@ describe("the factory", () => {
     const base = setup(["a", "b", "c"]);
     agents({ claude: OK });
     base.pick("b");
+    writeFileSync(
+      join(base.state, "candidates.json"),
+      JSON.stringify({ at: new Date().toISOString(), items: base.items }),
+    );
     writeSettings(base.state, {
       ...readSettings(base.state),
       auto: { on: true, attention: ["skim"], blueprints: [], repos: [] },

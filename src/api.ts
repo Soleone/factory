@@ -41,13 +41,20 @@ export const api = {
   candidates: () =>
     call<{
       at: string | null;
-      repoAt: Candidates["repoAt"];
+      scans: Candidates["scans"];
       items: Candidates["items"];
       repos: string[];
       root: string;
     }>("GET", "/api/candidates"),
-  /** Every repo's candidates, or with `repo` just that one's, which is much quicker. */
-  refreshCandidates: (repo?: string) => call("POST", "/api/candidates/refresh", { repo }),
+  /** Every repo's candidates, or with `repo` just that one's, which is much quicker; `blueprint` for one only. */
+  refreshCandidates: (scan: { repo?: string; blueprint?: string }) =>
+    call("POST", "/api/candidates/refresh", scan),
+  /** Hides candidates in workwork: reject for good, defer until their code changes. */
+  decideCandidates: (items: { repo: string; id: string }[], verdict: "reject" | "defer") =>
+    call("POST", "/api/candidates/decide", {
+      items: items.map(({ repo, id }) => ({ repo, id })),
+      verdict,
+    }),
   blueprints: () => call<Blueprint[]>("GET", "/api/blueprints"),
   /** Saves one of the user's own, replacing theirs of the same name. */
   saveBlueprint: (blueprint: Omit<Blueprint, "custom">) =>

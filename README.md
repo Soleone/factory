@@ -156,7 +156,7 @@ In `$DATA/apps/factory/` when `DATA` is set, otherwise `~/.local/share/factory/`
 - `settings.json`
 - `jobs.jsonl`: append-only events, so the CLI, the factory and the page never overwrite each other; the queue, goals and results are what replaying it gives
 - `triggers.json`: the events triggers already queued a job for
-- `candidates.json`: the cached `workwork --all --json`, refreshed from the page, or by auto mode when older than 6 hours
+- `candidates.json`: what workwork found in each of your repos under $SRC, refreshed from the page (every repo, one project or one blueprint), or by auto mode when older than 6 hours
 - `runs/<run>/<job>-<attempt>/`: `prompt.md`, `turn-N.md` for each later turn, and `agent.log` with the runner's event stream
 - `running/<job>.json`: an attempt in progress or paused: its session, worktree and turn
 - `sessions/`: pi's session files for job attempts (Claude Code keeps its own)

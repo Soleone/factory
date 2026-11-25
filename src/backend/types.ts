@@ -140,14 +140,30 @@ export function upgradeItem(item: LegacyItem): Item {
 export const itemKey = (item: Pick<Item, "repo" | "id">) => `${item.repo} ${item.id}`;
 
 /**
- * `workwork --all --json` takes minutes, so its answer is kept here for browsing and auto mode.
- * `at` is the last time every repo was asked; `repoAt` when single repos were asked since.
+ * Asking workwork about every repo takes minutes, so its answers are kept here for browsing and
+ * auto mode. `at`: when every repo was last asked. `scans`: when one repo, or one blueprint in one,
+ * was asked since, by `scanKey`.
  */
-export type Candidates = { at: string; items: Item[]; repoAt: Record<string, string> };
+export type Candidates = { at: string; items: Item[]; scans: Record<string, string> };
 
-/** When the repo's candidates were last asked for, alone or with every repo. */
-export const scannedAt = (candidates: Pick<Candidates, "at" | "repoAt">, repo: string) =>
-  [candidates.at, candidates.repoAt[repo]].filter(Boolean).sort().at(-1);
+export const scanKey = (repo: string, blueprint?: string) =>
+  blueprint ? `${repo} ${blueprint}` : repo;
+
+/** When workwork last looked in the repo, or for the blueprint there. */
+export const scannedAt = (
+  candidates: Pick<Candidates, "at" | "scans">,
+  repo: string,
+  blueprint?: string,
+) =>
+  [candidates.at, candidates.scans[repo], blueprint && candidates.scans[scanKey(repo, blueprint)]]
+    .filter((at): at is string => !!at)
+    .reduce((latest, at) => (at > latest ? at : latest), "");
+
+/**
+ * A scan under way: without `repo` a sweep of every repo, counting them in `done` of `total`;
+ * without `blueprint` every blueprint that isn't on request.
+ */
+export type Scan = { repo?: string; blueprint?: string; done?: number; total?: number };
 
 /** A blueprint as `workwork blueprints --json` prints it. `custom` ones are the user's own. */
 export type Blueprint = {
@@ -395,7 +411,7 @@ export type Snapshot = JobContext & {
   /** `at`: when any of them last changed. */
   candidates: {
     at: string | null;
-    refreshing: { all: boolean; repos: string[] };
+    refreshing: Scan[];
   };
   /** What GitHub last said about each job's PR, by URL; a PR not fetched yet is missing. */
   prs: Record<string, Pr>;

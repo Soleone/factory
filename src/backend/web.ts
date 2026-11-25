@@ -1,3 +1,9 @@
+import {
+  readCandidates,
+  refreshCandidates,
+  refreshingCandidates,
+  decideCandidates,
+} from "./candidates.ts";
 import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
@@ -46,16 +52,7 @@ import { jobContext, jobPrs, liveJobs, resultsPage, webJob } from "./webHistory.
 import { mirrorTasks } from "./tasksStore.ts";
 import { mergeTrain } from "./train.ts";
 import { piProvider, usageCache } from "./usage.ts";
-import {
-  checkSettings,
-  output,
-  readCandidates,
-  readSettings,
-  refreshCandidates,
-  refreshingCandidates,
-  runningPid,
-  writeSettings,
-} from "./state.ts";
+import { checkSettings, output, readSettings, runningPid, writeSettings } from "./state.ts";
 import {
   canMerge,
   canRebase,
@@ -129,8 +126,8 @@ export function serve(
       );
     return models.get(name)!;
   }
-  function refresh(repo?: string) {
-    void refreshCandidates(state, "workwork", repo).catch((error: Error) =>
+  function refresh(scan: { repo?: string; blueprint?: string } = {}) {
+    void refreshCandidates(state, "workwork", scan).catch((error: Error) =>
       console.error(`factory: workwork failed: ${error.message}`),
     );
   }
@@ -192,21 +189,30 @@ export function serve(
       const items = cached?.items ?? [];
       return {
         at: cached?.at || null,
-        repoAt: cached?.repoAt ?? {},
+        scans: cached?.scans ?? {},
         items,
         repos: projectPaths(items),
         root: sourceRoot(),
       };
     },
-    /** Every repo, or with `repo` just that one, which is much quicker. */
-    "POST /api/candidates/refresh": (body: { repo?: string }) => {
+    /** Every repo, or with `repo` just that one, which is much quicker; `blueprint` for one only. */
+    "POST /api/candidates/refresh": (body: { repo?: string; blueprint?: string }) => {
       if (body.repo && !projectPaths(readCandidates(state)?.items ?? []).includes(body.repo))
         throw new Error(`${body.repo} isn't a project under ${sourceRoot()}`);
-      refresh(body.repo);
+      refresh({ repo: body.repo, blueprint: body.blueprint });
+    },
+    /** Hides candidates in workwork: reject for good, defer until their code changes. */
+    "POST /api/candidates/decide": (body: {
+      items: { repo: string; id: string }[];
+      verdict: "reject" | "defer";
+    }) => {
+      if (body.verdict !== "reject" && body.verdict !== "defer")
+        throw new Error(`a verdict is reject or defer, not ${String(body.verdict)}`);
+      return decideCandidates(state, "workwork", candidates(body.items), body.verdict);
     },
     "GET /api/repos": () => clonableRepos(),
     "POST /api/repos/clone": async (body: { name: string }) => {
-      refresh(await cloneRepo(body.name));
+      refresh({ repo: await cloneRepo(body.name) });
     },
     /** A goal from a brief, in a repo under $SRC or, with `project`, a new one. */
     "POST /api/goals": async (body: {
@@ -439,7 +445,7 @@ function snapshot(
     candidates: {
       // When any repo's changed, so the page knows to load them again.
       at:
-        [candidates?.at ?? "", ...Object.values(candidates?.repoAt ?? {})].reduce((latest, each) =>
+        [candidates?.at ?? "", ...Object.values(candidates?.scans ?? {})].reduce((latest, each) =>
           each > latest ? each : latest,
         ) || null,
       refreshing: refreshingCandidates(state),

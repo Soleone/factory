@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { output } from "./state.ts";
 
@@ -8,17 +9,23 @@ export const sourceRoot = () => resolve(process.env.SRC ?? process.cwd());
 /** Local repos are available as filters even when workwork finds no candidates in them. */
 export function localRepos(): string[] {
   const root = sourceRoot();
-  return existsSync(root) ? findRepos(root, 4) : [];
+  return existsSync(root) ? findRepos(root, 4, skipped()) : [];
+}
+
+/** Folder names workwork --all doesn't search: node_modules and those in its config's skip file. */
+function skipped(): Set<string> {
+  const config = process.env.DATA
+    ? join(process.env.DATA, "apps", "workwork")
+    : join(process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config"), "workwork");
+  const file = join(config, "skip");
+  const names = existsSync(file) ? readFileSync(file, "utf8").split("\n") : [];
+  return new Set(["node_modules", ...names.map((name) => name.trim()).filter(Boolean)]);
 }
 
 export type GithubRepo = { name: string; description: string; createdAt: string };
 
-/**
- * The GitHub user's own repos (not forked or archived) that aren't cloned anywhere under $SRC
- * yet, newest first.
- */
-export async function clonableRepos(): Promise<{ root: string; repos: GithubRepo[] }> {
-  const root = sourceRoot();
+/** The GitHub user's own repos, not forked or archived. */
+async function githubRepos(): Promise<GithubRepo[]> {
   const listed: { nameWithOwner: string; description: string; createdAt: string }[] = JSON.parse(
     await output(
       "gh",
@@ -32,19 +39,34 @@ export async function clonableRepos(): Promise<{ root: string; repos: GithubRepo
         "--json",
         "nameWithOwner,description,createdAt",
       ],
-      root,
+      sourceRoot(),
     ),
   );
+  return listed.map((repo) => ({
+    name: repo.nameWithOwner,
+    description: repo.description,
+    createdAt: repo.createdAt,
+  }));
+}
+
+/** The repos under $SRC whose origin is one of the user's own: the ones workwork --all works in. */
+export async function ownedRepos(): Promise<string[]> {
+  const owned = new Set((await githubRepos()).map((repo) => repo.name.toLowerCase()));
+  const local = localRepos();
+  const origins = await Promise.all(local.map(originName));
+  return local.filter((_, index) => owned.has(origins[index]));
+}
+
+/**
+ * The GitHub user's own repos (not forked or archived) that aren't cloned anywhere under $SRC
+ * yet, newest first.
+ */
+export async function clonableRepos(): Promise<{ root: string; repos: GithubRepo[] }> {
   const cloned = new Set(await Promise.all(localRepos().map(originName)));
-  const repos = listed
-    .filter((repo) => !cloned.has(repo.nameWithOwner.toLowerCase()))
-    .map((repo) => ({
-      name: repo.nameWithOwner,
-      description: repo.description,
-      createdAt: repo.createdAt,
-    }))
+  const repos = (await githubRepos())
+    .filter((repo) => !cloned.has(repo.name.toLowerCase()))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  return { root, repos };
+  return { root: sourceRoot(), repos };
 }
 
 /** Clones `name` (owner/repo) to $SRC/<repo> and returns that path. */
@@ -75,15 +97,12 @@ export async function createRepo(name: string): Promise<string> {
 }
 
 /** Repos under `dir`, searched the way workwork --all does. */
-function findRepos(dir: string, depth: number): string[] {
+function findRepos(dir: string, depth: number, skip: Set<string>): string[] {
   if (existsSync(join(dir, ".git"))) return [dir];
   if (depth === 0) return [];
   return readdirSync(dir, { withFileTypes: true })
-    .filter(
-      (entry) =>
-        entry.isDirectory() && !entry.name.startsWith(".") && entry.name !== "node_modules",
-    )
-    .flatMap((entry) => findRepos(join(dir, entry.name), depth - 1));
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith(".") && !skip.has(entry.name))
+    .flatMap((entry) => findRepos(join(dir, entry.name), depth - 1, skip));
 }
 
 /** owner/repo of the GitHub origin, lowercased; empty when there is none. */

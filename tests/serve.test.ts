@@ -113,7 +113,7 @@ describe("the factory", () => {
     try {
       expect(await candidates()).toEqual({
         at: null,
-        repoAt: {},
+        scans: {},
         items: [],
         repos: [],
         root: source,
@@ -132,7 +132,7 @@ describe("the factory", () => {
       expect(results).toMatchObject({ repo: repos[0], running: [], finished: [], total: 0 });
       await expect.poll(candidates).toEqual({
         at: null,
-        repoAt: { [repos[0]]: expect.any(String) },
+        scans: { [repos[0]]: expect.any(String) },
         items: [],
         repos,
         root: source,
@@ -197,46 +197,121 @@ describe("the factory", () => {
     }
   });
 
-  test("serve asks workwork about one project alone and keeps every other project's candidates", async () => {
+  test("serve asks workwork about one project or one blueprint alone, and hides what the user dismisses", async () => {
     const state = mkdtempSync(join(scratch, "state-"));
     const [mine, other] = [
       mkdtempSync(join(scratch, "mine-")),
       mkdtempSync(join(scratch, "other-")),
     ];
-    const item = (repo: string, id: string) => ({
+    const item = (repo: string, id: string, blueprint = "bug-sweep") => ({
       repo,
       label: repo,
-      id,
-      blueprint: "bug-sweep",
+      id: `${blueprint}/${id}`,
+      blueprint,
       attention: "skim",
       title: id,
     });
     const at = "2026-01-01T00:00:00.000Z";
     writeFileSync(
       join(state, "candidates.json"),
-      JSON.stringify({ at, items: [item(mine, "old"), item(other, "kept")] }),
+      JSON.stringify({
+        at,
+        items: [item(mine, "old"), item(mine, "old", "accessibility"), item(other, "kept")],
+      }),
     );
     const bin = mkdtempSync(join(scratch, "bin-"));
-    script(bin, "workwork", `[ "$1" = --json ] && echo '${JSON.stringify([item(mine, "new")])}'`);
+    const calls = join(bin, "calls");
+    script(
+      bin,
+      "workwork",
+      `echo "$PWD $*" >> ${calls}
+case "$1" in
+  blueprints) echo '[{"name":"accessibility","onRequest":true}]' ;;
+  --blueprint) echo '${JSON.stringify([item(mine, "new", "accessibility")])}' ;;
+  --json) echo '${JSON.stringify([item(mine, "new")])}' ;;
+esac`,
+    );
     process.env.PATH = `${bin}:${process.env.PATH}`;
     const server = serve(state, 0, "127.0.0.1", () => ({}));
     await once(server, "listening");
     const { port } = server.address() as AddressInfo;
     const url = `http://127.0.0.1:${port}/api`;
-    const refresh = (repo: string) =>
-      fetch(`${url}/candidates/refresh`, { method: "POST", body: JSON.stringify({ repo }) });
+    const post = (path: string, body: unknown) =>
+      fetch(`${url}/candidates/${path}`, { method: "POST", body: JSON.stringify(body) });
+    const candidates = async () =>
+      (await (await fetch(`${url}/candidates`)).json()) as { items: unknown[] };
     try {
-      expect((await refresh(join(scratch, "elsewhere"))).status).toBe(400);
-      expect((await refresh(mine)).status).toBe(200);
-      await expect
-        .poll(async () => (await fetch(`${url}/candidates`)).json())
-        .toMatchObject({
-          at,
-          repoAt: { [mine]: expect.any(String) },
-          items: [item(other, "kept"), item(mine, "new")],
-        });
+      expect((await post("refresh", { repo: join(scratch, "elsewhere") })).status).toBe(400);
+      // A plain scan keeps what only an on-request blueprint finds.
+      await post("refresh", { repo: mine });
+      await expect.poll(candidates).toMatchObject({
+        at,
+        scans: { [mine]: expect.any(String) },
+        items: [item(mine, "old", "accessibility"), item(other, "kept"), item(mine, "new")],
+      });
+      await post("refresh", { repo: mine, blueprint: "accessibility" });
+      await expect.poll(candidates).toMatchObject({
+        scans: { [`${mine} accessibility`]: expect.any(String) },
+        items: [item(other, "kept"), item(mine, "new"), item(mine, "new", "accessibility")],
+      });
+
+      const dismissed = [{ repo: mine, id: "bug-sweep/new" }];
+      expect((await post("decide", { items: dismissed, verdict: "keep" })).status).toBe(400);
+      expect((await post("decide", { items: dismissed, verdict: "reject" })).status).toBe(200);
+      expect(readFileSync(calls, "utf8")).toContain(`${mine} decide bug-sweep/new reject`);
+      expect((await candidates()).items).toEqual([
+        item(other, "kept"),
+        item(mine, "new", "accessibility"),
+      ]);
     } finally {
       server.close();
+    }
+  });
+
+  test("serve sweeps every repo of the user's under $SRC, and only those", async () => {
+    const source = mkdtempSync(join(scratch, "src-"));
+    const state = mkdtempSync(join(scratch, "state-"));
+    const repo = (name: string, origin: string) => {
+      const path = join(source, name);
+      mkdirSync(path);
+      sh(path, "git", "init", "-q");
+      sh(path, "git", "remote", "add", "origin", origin);
+      return path;
+    };
+    const mine = repo("app", "git@github.com:me/app.git");
+    repo("fork", "https://github.com/someone/fork");
+    writeFileSync(
+      join(state, "candidates.json"),
+      JSON.stringify({ at: "", items: [{ repo: join(source, "gone"), id: "x/y" }] }),
+    );
+    const bin = mkdtempSync(join(scratch, "bin-"));
+    script(bin, "gh", `echo '[{"nameWithOwner":"Me/app","description":"","createdAt":""}]'`);
+    script(
+      bin,
+      "workwork",
+      `case "$1" in
+  blueprints) echo '[]' ;;
+  *) echo '[{"repo":"'"$PWD"'","label":"app","id":"todo/a","blueprint":"todo","attention":"decide","title":"a"}]' ;;
+esac`,
+    );
+    process.env.PATH = `${bin}:${process.env.PATH}`;
+    const previousSource = process.env.SRC;
+    process.env.SRC = source;
+    const server = serve(state, 0, "127.0.0.1", () => ({}));
+    await once(server, "listening");
+    const { port } = server.address() as AddressInfo;
+    const url = `http://127.0.0.1:${port}/api`;
+    try {
+      await fetch(`${url}/candidates/refresh`, { method: "POST", body: "{}" });
+      await expect
+        .poll(async () => (await fetch(`${url}/candidates`)).json())
+        .toMatchObject({ at: expect.any(String), items: [{ repo: mine, id: "todo/a" }] });
+      const { candidates } = (await (await fetch(`${url}/state`)).json()) as Snapshot;
+      expect(candidates.refreshing).toEqual([]);
+    } finally {
+      server.close();
+      if (previousSource === undefined) delete process.env.SRC;
+      else process.env.SRC = previousSource;
     }
   });
 

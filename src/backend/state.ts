@@ -1,14 +1,5 @@
 import { execFile } from "node:child_process";
-import { createHash } from "node:crypto";
-import {
-  existsSync,
-  openSync,
-  closeSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -17,13 +8,10 @@ import {
   presetId,
   TIERS,
   USAGE_POOLS,
-  type Candidates,
   type CommitIdentity,
-  type Item,
   type Preset,
   type Settings,
   type Tuning,
-  upgradeItem,
 } from "./types.ts";
 
 export const STATE = process.env.DATA
@@ -184,72 +172,6 @@ function upgradeAuto(auto: LegacyAuto = {}): Partial<Settings["auto"]> {
     ...(levels && { attention: levels.map((level) => (level === "auto" ? "none" : level)) }),
     ...(plays && { blueprints: plays }),
   };
-}
-
-const candidatesPath = (state: string) => join(state, "candidates.json");
-/** One lock per target, so one repo can be refreshed while another, or all of them, is. */
-const refreshLock = (state: string, repo?: string) =>
-  join(
-    state,
-    repo
-      ? `candidates-${createHash("sha1").update(repo).digest("hex").slice(0, 12)}.lock`
-      : "candidates.lock",
-  );
-
-export function readCandidates(state: string): Candidates | undefined {
-  if (!existsSync(candidatesPath(state))) return undefined;
-  const { at, items, repoAt } = JSON.parse(readFileSync(candidatesPath(state), "utf8"));
-  return { at, items: items.map(upgradeItem), repoAt: repoAt ?? {} };
-}
-
-/** What's being asked for right now: every repo, and repos one at a time. */
-export function refreshingCandidates(state: string): { all: boolean; repos: string[] } {
-  const holders = readdirSync(state)
-    .filter((name) => /^candidates(-\w+)?\.lock$/.test(name))
-    .flatMap((name) => {
-      const [pid, repo = ""] = readFileSync(join(state, name), "utf8").split("\n");
-      return alive(Number(pid)) ? [repo] : [];
-    });
-  return { all: holders.includes(""), repos: holders.filter(Boolean) };
-}
-
-/**
- * Asks workwork again, for one repo or, without `repo`, every repo under $SRC, unless some process
- * (the factory or serve) already is. One repo takes under a minute; every repo takes many.
- */
-export async function refreshCandidates(
-  state: string,
-  workwork: string,
-  repo?: string,
-): Promise<void> {
-  const lock = refreshLock(state, repo);
-  if (existsSync(lock) && alive(Number(readFileSync(lock, "utf8").split("\n")[0]))) return;
-  rmSync(lock, { force: true });
-  try {
-    closeSync(openSync(lock, "wx"));
-  } catch (error) {
-    // Another process took the lock between the check and here.
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") return;
-    throw error;
-  }
-  writeFileSync(lock, `${process.pid}\n${repo ?? ""}`);
-  try {
-    const args = repo ? ["--json"] : ["--all", "--json"];
-    const found: Item[] = JSON.parse(await output(workwork, args, repo ?? process.cwd()));
-    const at = new Date().toISOString();
-    // Read again after the wait: another refresh may have written in the meantime.
-    const cached = readCandidates(state);
-    const candidates: Candidates = repo
-      ? {
-          at: cached?.at ?? "",
-          items: [...(cached?.items ?? []).filter((item) => item.repo !== repo), ...found],
-          repoAt: { ...cached?.repoAt, [repo]: at },
-        }
-      : { at, items: found, repoAt: {} };
-    writeFileSync(candidatesPath(state), JSON.stringify(candidates));
-  } finally {
-    rmSync(lock, { force: true });
-  }
 }
 
 export async function output(
