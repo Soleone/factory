@@ -300,7 +300,7 @@ function WorkerFields({
                 event.dataTransfer.setDragImage(event.currentTarget.closest("li")!, 0, 0);
                 setDragging(index);
               }}
-              className="flex cursor-grab touch-none justify-center text-muted-foreground"
+              className="relative flex cursor-grab touch-none justify-center text-muted-foreground pointer-coarse:after:absolute pointer-coarse:after:-inset-3"
             >
               <GripVerticalIcon className="size-4" />
             </span>

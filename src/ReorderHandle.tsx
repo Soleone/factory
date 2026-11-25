@@ -32,7 +32,7 @@ export function ReorderHandle({
             tabIndex={0}
             aria-label={`Reorder ${label} with the Up and Down arrow keys`}
             aria-keyshortcuts="ArrowUp ArrowDown"
-            className="shrink-0 cursor-grab touch-none rounded-sm text-muted-foreground focus-visible:outline-2 focus-visible:outline-ring"
+            className="relative shrink-0 cursor-grab touch-none rounded-sm pointer-coarse:after:absolute pointer-coarse:after:-inset-3 text-muted-foreground focus-visible:outline-2 focus-visible:outline-ring"
             onKeyDown={(event) => {
               if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
               event.preventDefault();
