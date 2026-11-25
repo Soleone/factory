@@ -321,6 +321,8 @@ export type Job = Tuning & {
   front?: boolean;
   /** Times it failed twice and moved up a tier. */
   escalations: number;
+  /** The last merge, rebase or close of its PR from the page or CLI that failed, until the next try. */
+  prError?: PrError;
   /** An attempt is under way, maybe paused for an answer or a limit; its agent's session continues. */
   open: boolean;
   /** Set for the page: its handed-off agent has exited, and the next run records what it did. */
@@ -477,6 +479,13 @@ export const canMerge = (pr: Pr) =>
   (pr.checks === "passing" || pr.checks === "none");
 
 export const canRebase = (pr: Pr) => pr.state === "OPEN" && pr.conflicts === true && !pr.fork;
+
+export type PrError = {
+  action: "merge" | "rebase" | "close";
+  text: string;
+  /** The user opened it, so the row stops calling it new. */
+  seen?: true;
+};
 
 /** The job queued or running to resolve the job's PR conflicts, if there is one. */
 export const conflictsJob = (job: Job, jobs: Job[]) =>

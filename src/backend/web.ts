@@ -32,6 +32,8 @@ import {
   record,
   removeJob,
   retryJob,
+  seePrError,
+  setPrError,
 } from "./jobs.ts";
 import { turnOff, turnOn } from "./power.ts";
 import { closePr, Conflicts, mergePr, prCache, readPrDetails, rebasePr } from "./review.ts";
@@ -62,6 +64,8 @@ import {
   type Blueprint,
   type Item,
   type Pin,
+  type Pr,
+  type PrError,
   type Preset,
   poolOf,
   workersOf,
@@ -162,6 +166,26 @@ export function serve(
     const pr = await prs.fresh(url);
     if (pr.state !== "OPEN") throw new Error(`${url} is already ${pr.state.toLowerCase()}`);
     return { url, pr };
+  }
+  /**
+   * Runs a merge, rebase or close of the job's PR. A failure stays on the job until the next try, so
+   * the row says so even after the page that asked has moved on; it still fails the request for the CLI.
+   */
+  async function prAction<T>(
+    id: string,
+    action: PrError["action"],
+    run: (url: string, pr: Pr) => Promise<T>,
+  ): Promise<T> {
+    setPrError(state, id);
+    try {
+      const { url, pr } = await openPr(id);
+      const result = await run(url, pr);
+      await prs.fresh(url);
+      return result;
+    } catch (error) {
+      setPrError(state, id, { action, text: (error as Error).message });
+      throw error;
+    }
   }
   /** The goal's export as a zip download. */
   async function sendExport(response: ServerResponse, id: string) {
@@ -288,26 +312,25 @@ export function serve(
     "POST /api/jobs/move": (body: { index: number }, id) => moveJob(state, id, body.index),
     "GET /api/jobs/pr": (_, id) => readPrDetails(jobPr(id)),
     "GET /api/jobs/prompt": (_, id) => jobPrompt(id),
-    "POST /api/jobs/merge": async (_, id) => {
-      const { url, pr } = await openPr(id);
-      if (!canMerge(pr)) throw new Error(`${url} isn't ready to merge: see it on GitHub`);
-      await mergePr(url);
-      await prs.fresh(url);
-    },
-    "POST /api/jobs/rebase": async (_, id) => {
-      const { url, pr } = await openPr(id);
-      if (!canRebase(pr)) throw new Error(`${url} isn't ready to rebase: see it on GitHub`);
-      let conflicts: string[] | undefined;
-      try {
-        await rebasePr(url, readSettings(state).commitIdentity);
-      } catch (error) {
-        if (!(error instanceof Conflicts)) throw error;
-        conflicts = error.files;
-        queueConflicts(state, id, url, conflicts);
-      }
-      await prs.fresh(url);
-      return { conflicts };
-    },
+    "POST /api/jobs/merge": (_, id) =>
+      prAction(id, "merge", async (url, pr) => {
+        if (!canMerge(pr)) throw new Error(`${url} isn't ready to merge: see it on GitHub`);
+        await mergePr(url);
+      }),
+    "POST /api/jobs/rebase": (_, id) =>
+      prAction(id, "rebase", async (url, pr) => {
+        if (!canRebase(pr)) throw new Error(`${url} isn't ready to rebase: see it on GitHub`);
+        try {
+          await rebasePr(url, readSettings(state).commitIdentity);
+        } catch (error) {
+          if (!(error instanceof Conflicts)) throw error;
+          queueConflicts(state, id, url, error.files);
+          return { conflicts: error.files };
+        }
+      }),
+    "POST /api/jobs/close": (_, id) => prAction(id, "close", (url) => closePr(url)),
+    "POST /api/jobs/seen": (_, id) => seePrError(state, id),
+    "POST /api/jobs/clear": (_, id) => setPrError(state, id),
     "POST /api/train": (body: { ids: string[] }) =>
       train.start(body.ids.map((id) => ({ id, url: jobPr(id) }))),
     "POST /api/chat": (body: { message: string; images?: Omit<PiImage, "type">[] }) =>
@@ -316,11 +339,6 @@ export function serve(
     "POST /api/chat/answer": (body: { id: string }) => planner.answer(body),
     "POST /api/chat/new": () => planner.fresh(),
     "POST /api/chat/open": (body: { id: string }) => planner.open(body.id),
-    "POST /api/jobs/close": async (_, id) => {
-      const { url } = await openPr(id);
-      await closePr(url);
-      await prs.fresh(url);
-    },
     "GET /api/models": async () =>
       Object.fromEntries(
         await Promise.all(AGENT_NAMES.map(async (name) => [name, await modelsOf(name)])),

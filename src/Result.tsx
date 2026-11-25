@@ -29,6 +29,7 @@ import {
   type Snapshot,
   type TrainCar,
 } from "@/backend/types.ts";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DialogClose } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -141,7 +142,8 @@ export function Result({
   async function changePr(action: NonNullable<typeof pending>) {
     setPending(action);
     try {
-      await act(() => api[action](job.id));
+      // A failure stays on the job and shows on this row, so it needs no banner.
+      await act(() => api[action](job.id).catch(() => undefined));
     } finally {
       setPending(undefined);
     }
@@ -226,7 +228,7 @@ export function Result({
 
   return (
     <Row
-      marked={unread}
+      marked={unread || (job.prError && !job.prError.seen)}
       leading={
         <span className="flex items-center gap-2.5">
           {leading === false ? <span className="size-4" /> : leading}
@@ -298,7 +300,15 @@ export function Result({
               }
             />
           )}
-          <Outcome job={job} last={last} pr={pr} url={url} car={car} resolving={resolving} />
+          <Outcome
+            job={job}
+            last={last}
+            pr={pr}
+            url={url}
+            car={car}
+            resolving={resolving}
+            act={act}
+          />
           {holding ? (
             <span className="shrink-0 text-warning">
               holds {holding} {holding === 1 ? "job" : "jobs"}
@@ -419,6 +429,7 @@ function Outcome({
   url,
   car,
   resolving,
+  act,
 }: {
   job: Job;
   last?: Attempt;
@@ -427,6 +438,7 @@ function Outcome({
   car?: TrainCar;
   /** The job resolving its PR's conflicts. */
   resolving?: Job;
+  act: Act;
 }) {
   const result = job.notes.findLast((note) => note.kind === "result");
   const ask =
@@ -461,6 +473,7 @@ function Outcome({
           )),
         pr?.draft && "draft",
         car && <TrainLine key="train" car={car} />,
+        job.prError && <PrErrorFact key="error" job={job} url={url} act={act} />,
         <a key="pr" href={url} target="_blank" rel="noreferrer" className="hover:underline">
           #{url.split("/").at(-1)}
         </a>,
@@ -490,6 +503,52 @@ function Outcome({
         ))}
       </span>
     </>
+  );
+}
+
+/**
+ * A failed merge, rebase or close, among the row's facts: loud until opened, since it may have failed
+ * after the user moved on, then plain red. Either opens the full message.
+ */
+function PrErrorFact({ job, url, act }: { job: Job; url: string; act: Act }) {
+  const error = job.prError!;
+  const label = `${error.action} failed`;
+  return (
+    <Popover onOpenChange={(open) => open && !error.seen && void act(() => api.seePrError(job.id))}>
+      <PopoverTrigger
+        render={
+          error.seen ? (
+            <button
+              type="button"
+              className="cursor-pointer text-destructive underline decoration-dotted underline-offset-3"
+            />
+          ) : (
+            <Badge variant="destructive" render={<button type="button" />} />
+          )
+        }
+      >
+        {label}
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-[min(28rem,calc(100vw-2rem))]">
+        <div className="flex flex-col gap-3 text-sm">
+          <p className="font-medium text-destructive first-letter:uppercase">{label}</p>
+          <p className="wrap-anywhere whitespace-pre-line">{error.text}</p>
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" size="sm" onClick={() => act(() => api.clearPrError(job.id))}>
+              Dismiss error
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              nativeButton={false}
+              render={<a href={url} target="_blank" rel="noreferrer" />}
+            >
+              Open on GitHub
+            </Button>
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
 

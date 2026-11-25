@@ -16,6 +16,7 @@ import {
   type Job,
   type Note,
   type Pin,
+  type PrError,
   type Settings,
   type Tier,
   reviewTier,
@@ -42,6 +43,8 @@ export type Event = { at: string } & (
   | { type: "pin"; id: string; pin: Pin }
   /** The user checked a need it couldn't verify; no need: all of them. */
   | { type: "verify"; id: string; need?: string }
+  /** No error: the last one is cleared. */
+  | { type: "prError"; id: string; error?: PrError }
 );
 
 /** What a new job may say; the rest starts empty. Old logs have `after` as one id. */
@@ -202,6 +205,7 @@ export function replay(events: Event[]): Job[] {
         event.change,
         event.change.item && { item: upgradeItem(event.change.item) },
       );
+    if (event.type === "prError") job.prError = event.error;
     if (event.type === "verify")
       job.unverified = event.need ? job.unverified.filter((need) => need !== event.need) : [];
     if (event.type === "note") {
@@ -565,6 +569,19 @@ export function queueFollowup(state: string, id: string, task: string): Job | un
 This came up while an agent worked on "${job.item.title}"${url ? ` (${url})` : ""}. Make it its own change on a new branch, and open a pull request for it.
 `;
   return addJobs(state, [item], "pick", { prompt })[0];
+}
+
+const ANY: Job["state"][] = [...ACTIVE, "done", "failed"];
+
+/** Records the PR action's failure on the job; without one, clears the last. */
+export function setPrError(state: string, id: string, error?: PrError): void {
+  if (!error && !find(state, id, ...ANY).prError) return;
+  append(state, { at: new Date().toISOString(), type: "prError", id, error });
+}
+
+export function seePrError(state: string, id: string): void {
+  const { prError } = find(state, id, ...ANY);
+  if (prError && !prError.seen) setPrError(state, id, { ...prError, seen: true });
 }
 
 function find(state: string, id: string, ...states: Job["state"][]): Job {

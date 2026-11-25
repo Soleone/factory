@@ -540,13 +540,22 @@ esac`,
         diff: "+simpler a\n",
       });
       const merge = () => fetch(url(`/api/jobs/${job.id}/merge`), { method: "POST" });
-      expect(await (await merge()).json()).toEqual({
-        error: `${pr} isn't ready to merge: see it on GitHub`,
-      });
+      const prError = () => readJobs(base.state).find((other) => other.id === job.id)!.prError;
+      const refused = `${pr} isn't ready to merge: see it on GitHub`;
+      expect(await (await merge()).json()).toEqual({ error: refused });
+      // The failure stays on the job for its row, until the user opens it and then dismisses it.
+      expect(prError()).toEqual({ action: "merge", text: refused });
+      await fetch(url(`/api/jobs/${job.id}/seen`), { method: "POST" });
+      expect(prError()).toEqual({ action: "merge", text: refused, seen: true });
+      await fetch(url(`/api/jobs/${job.id}/clear`), { method: "POST" });
+      expect(prError()).toBeUndefined();
       github.answer({ mergeable: "UNKNOWN" });
       expect((await merge()).status).toBe(400);
+      expect(prError()?.action).toBe("merge");
       github.answer({});
+      // Trying again clears the last failure.
       expect((await merge()).status).toBe(200);
+      expect(prError()).toBeUndefined();
       expect(github.calls()).toContain(`pr merge ${pr} --squash --delete-branch`);
       const after = (await (await fetch(url("/api/state"))).json()) as Snapshot;
       expect(after.prs[pr].state).toBe("MERGED");
